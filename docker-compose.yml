@@ -1,0 +1,44 @@
+services:
+  # 使用支援 AI Vector 的版本
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: chat_db
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: chat_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # 確保資料存在硬碟，重開機不會不見
+
+  # 資料庫管理介面 (網頁版 GUI)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: chat_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: root
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+
+  # FastAPI 後端服務
+  api:
+    build: ./backend
+    container_name: chat_api
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app # 讓你在電腦改程式碼，Container 裡面會即時更新 (Hot Reload)
+    ports:
+      - "8000:8000"
+    environment:
+      # 重要：在 Docker 裡面連 資料庫，主機名稱要寫 Service Name ('db')，不能寫 localhost
+      DATABASE_URL: postgresql://user:password@db:5432/chat_db
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:

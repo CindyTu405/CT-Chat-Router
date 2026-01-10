@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+sqlmodel          # 結合了 SQLAlchemy 和 Pydantic 的神器
+psycopg2-binary   # Python 連接 Postgres 的驅動
+asyncpg           # 非同步連線驅動 (給 FastAPI 用的)
