@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>AI Stream Test</title>
+</head>
+<body>
+    <h2>串流測試 (Streaming Test)</h2>
+    <button onclick="startChat()">發送訊息</button>
+    <div id="output" style="white-space: pre-wrap; margin-top: 20px; border: 1px solid #ccc; padding: 10px; min-height: 100px;"></div>
+
+    <script>
+        async function startChat() {
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerHTML = "正在連線...";
+
+            // 1. 發送請求
+            const response = await fetch('http://localhost:8000/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: "你好", model: "mock" })
+            });
+
+            // 2. 準備讀取串流 (這是關鍵！)
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            outputDiv.innerHTML = ""; // 清空提示
+
+            while (true) {
+                // 3. 一塊一塊讀取 (Chunk)
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                // 4. 解碼並顯示
+                const chunk = decoder.decode(value);
+                outputDiv.innerHTML += chunk; // 把新收到的字加到畫面上
+            }
+        }
+    </script>
+</body>
+</html>
