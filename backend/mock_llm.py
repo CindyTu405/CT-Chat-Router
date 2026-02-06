@@ -31,9 +31,10 @@ async def mock_chat_stream(message: str, history: list):
         "我正在查閱你的對話紀錄...",
         f"我們已經對話了 {len(history)} 次囉。",
     ]
+    response_text = intro + random.choice(responses)
 
-    # 2. 隨機選一句話來回覆
-    response_text = random.choice(MOCK_RESPONSES)
+    # (舊)隨機選一句話來回覆
+    # response_text = random.choice(MOCK_RESPONSES)
 
     # 如果使用者問特定問題，給固定回答 (方便測試)
     if "你好" in message:
