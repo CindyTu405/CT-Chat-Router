@@ -5,6 +5,8 @@ services:
     container_name: chat_db
     restart: always
     environment:
+      TZ: Asia/Taipei
+      POSTGRES_INITDB_ARGS: "--timezone=Asia/Taipei"
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: chat_db
