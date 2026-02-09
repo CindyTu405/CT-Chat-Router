@@ -29,6 +29,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Message-Id"],
 )
 
 
@@ -127,5 +128,8 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
         print("串流結束，準備呼叫存檔函式...")
         save_ai_message_sync(full_response, user_msg.id, request.model)
 
-    return StreamingResponse(stream_generator(), media_type="text/plain")
+    return StreamingResponse(stream_generator(),
+                             media_type="text/plain",
+                             headers={"X-Message-Id": str(user_msg.id)}
+                             )
 

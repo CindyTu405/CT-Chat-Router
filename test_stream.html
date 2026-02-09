@@ -3,37 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <title>AI Stream Test</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .info-box { background: #f0f0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+        code { background: #333; color: #fff; padding: 2px 5px; border-radius: 3px; }
+        #output { white-space: pre-wrap; margin-top: 20px; border: 1px solid #ccc; padding: 10px; min-height: 100px; }
+    </style>
 </head>
 <body>
-    <h2>串流測試 (Streaming Test)</h2>
+    <h2>串流與 ID 測試</h2>
+
+    <div class="info-box">
+        <strong>上一則訊息 ID (請複製):</strong>
+        <span id="msg-id-display" style="color: red; font-weight: bold;">(尚未發送)</span>
+    </div>
+
+    <div>
+        <label>Parent ID (選填): </label>
+        <input type="text" id="parentIdInput" placeholder="貼上上面的 ID 來測試分岔" style="width: 300px;">
+    </div>
+    <br>
+
     <button onclick="startChat()">發送訊息</button>
-    <div id="output" style="white-space: pre-wrap; margin-top: 20px; border: 1px solid #ccc; padding: 10px; min-height: 100px;"></div>
+    <div id="output"></div>
 
     <script>
         async function startChat() {
             const outputDiv = document.getElementById('output');
-            outputDiv.innerHTML = "正在連線...";
+            const idDisplay = document.getElementById('msg-id-display');
+            const parentIdInput = document.getElementById('parentIdInput').value; // 讀取輸入框
 
-            // 1. 發送請求
+            outputDiv.innerHTML = "正在連線...";
+            idDisplay.innerText = "(等待回應...)";
+
+            // 準備發送的資料，如果有填 parent_id 就帶進去
+            const payload = {
+                message: "測試訊息 " + new Date().toLocaleTimeString(),
+                model: "mock",
+                parent_id: parentIdInput ? parentIdInput : null
+            };
+
             const response = await fetch('http://localhost:8000/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: "你好", model: "mock" })
+                body: JSON.stringify(payload)
             });
 
-            // 2. 準備讀取串流 (這是關鍵！)
+            // ★★★ 關鍵：從 Headers 讀取 ID ★★★
+            const msgId = response.headers.get("X-Message-Id");
+            if (msgId) {
+                idDisplay.innerText = msgId; // 顯示在畫面上
+                console.log("抓到 ID 了:", msgId);
+            } else {
+                idDisplay.innerText = "沒抓到 ID (請檢查 CORS 設定)";
+            }
+
+            // 開始讀取串流
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
-            outputDiv.innerHTML = ""; // 清空提示
+            outputDiv.innerHTML = "";
 
             while (true) {
-                // 3. 一塊一塊讀取 (Chunk)
                 const { done, value } = await reader.read();
                 if (done) break;
-
-                // 4. 解碼並顯示
                 const chunk = decoder.decode(value);
-                outputDiv.innerHTML += chunk; // 把新收到的字加到畫面上
+                outputDiv.innerHTML += chunk;
             }
         }
     </script>
