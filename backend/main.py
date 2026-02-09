@@ -8,7 +8,8 @@ import uuid  # 記得匯入這個，因為 parent_id 可能是 UUID
 # 自訂模組
 from database import create_db_and_tables, get_session
 from models import Message, ChatRequest
-from mock_llm import mock_chat_stream
+# from mock_llm import mock_chat_stream
+from gemini_llm import gemini_chat_stream
 
 
 # 1. Lifespan (生命週期管理器)
@@ -120,7 +121,8 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
         full_response = ""
 
         # 開始模擬 AI 吐字; 呼叫 Mock AI 時傳入 history
-        async for chunk in mock_chat_stream(request.message, history):
+        # async for chunk in mock_chat_stream(request.message, history):
+        async for chunk in gemini_chat_stream(request.message, history):
             full_response += chunk
             yield chunk
 
