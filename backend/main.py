@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from sqlmodel import Session, select
+from sqlmodel import Session, select, text
 from fastapi.middleware.cors import CORSMiddleware
 import uuid  # 記得匯入這個，因為 parent_id 可能是 UUID
 
@@ -10,6 +10,7 @@ from database import create_db_and_tables, get_session
 from models import Message, ChatRequest
 # from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
+
 
 
 # 1. Lifespan (生命週期管理器)
@@ -145,3 +146,27 @@ def get_chat_roots(session: Session = Depends(get_session)):
     # 2. 排序：最新的在最上面 (created_at desc)
     statement = select(Message).where(Message.parent_id == None).order_by(Message.created_at.desc())
     return session.exec(statement).all()
+
+@app.get("/chats/{root_id}/history", response_model=list[Message])
+def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)):
+    """
+    遞迴查詢：給定一個開頭 (Root ID)，找出所有相關的後續對話
+    """
+    # 使用 PostgreSQL 的 CTE (Common Table Expression) 進行遞迴
+    # 這段 SQL 的意思是：
+    # 1. 先抓出頭 (root)
+    # 2. 再找出 parent_id 等於上一層 ID 的人 (children)
+    # 3. 一直找下去，直到沒人為止
+    query = text("""
+    WITH RECURSIVE chat_tree AS (
+        SELECT * FROM message WHERE id = :root_id
+        UNION ALL
+        SELECT m.* FROM message m
+        JOIN chat_tree ct ON m.parent_id = ct.id
+    )
+    SELECT * FROM chat_tree ORDER BY created_at ASC;
+    """)
+
+    # 執行原始 SQL
+    results = session.exec(query, params={"root_id": root_id}).all()
+    return results

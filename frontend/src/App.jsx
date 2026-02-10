@@ -1,103 +1,160 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Settings, Menu, Sparkles } from 'lucide-react';
+import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare } from 'lucide-react';
 
 function App() {
-  // --- 狀態管理 (State) ---
+  // --- 狀態管理 ---
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
-  const [model, setModel] = useState("gemini-2.5-flash-lite"); // 預設模型
+  const [historyList, setHistoryList] = useState([]); // 側邊欄列表
+  const [model, setModel] = useState("gemini-2.5-flash-lite");
   const [isLoading, setIsLoading] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true); // 控制側邊欄開關
-  const [historyList, setHistoryList] = useState([]); // 側邊欄列表資料
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // 用來自動捲動到底部
   const messagesEndRef = useRef(null);
 
-  // 當訊息更新時，自動捲動到底部
+  // 自動捲動到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = async () => {
-  try {
-    const res = await fetch('http://localhost:8000/chats/roots');
-    const data = await res.json();
-    setHistoryList(data);
-  } catch (error) {
-    console.error("無法載入歷史紀錄:", error);
-  }
+    try {
+      const res = await fetch('http://localhost:8000/chats/roots');
+      const data = await res.json();
+      setHistoryList(data);
+    } catch (error) {
+      console.error("無法載入歷史紀錄:", error);
+    }
   };
-  // 畫面一載入就執行
+
   useEffect(() => {
     fetchHistory();
   }, []);
 
-  // --- 發送訊息邏輯 (包含串流處理) ---
+  // 2. 載入特定對話 (點擊側邊欄觸發)
+  const loadChat = async (rootId) => {
+    try {
+      setIsLoading(true);
+      const res = await fetch(`http://localhost:8000/chats/${rootId}/history`);
+      const data = await res.json();
+      setMessages(data); // 把舊對話填入畫面
+      
+      // 在手機版點擊後自動收起側邊欄 (優化體驗)
+      if (window.innerWidth < 768) setSidebarOpen(false);
+    } catch (error) {
+      console.error("載入對話失敗:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 3. 開啟新對話
+  const startNewChat = () => {
+    setMessages([]); // 清空畫面
+    setInput("");
+    // 在手機版自動收起側邊欄
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  };
+
+  // 4. 發送訊息 (核心邏輯)
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
-    // 1. 先把使用者的訊息顯示在畫面上
-    const userMessage = { role: 'user', content: input };
-    setMessages(prev => [...prev, userMessage]);
-    setInput(""); // 清空輸入框
+    const userMessageContent = input;
+    setInput(""); // 馬上清空輸入框，提升體驗
     setIsLoading(true);
 
+    // ★★★ 關鍵邏輯：計算 parent_id ★★★
+    // 如果畫面上有訊息，最後一則就是爸爸
+    // 如果畫面是空的，爸爸就是 null (代表這是新對話的開頭)
+    let parentId = null;
+    if (messages.length > 0) {
+      parentId = messages[messages.length - 1].id;
+    }
+
+    // 先顯示 User 訊息 (用 Date.now() 暫時當 key，等後端回傳真正的 ID 後會更新，但這裡先求簡單)
+    setMessages(prev => [...prev, { role: 'user', content: userMessageContent }]);
+
     try {
-      // 2. 發送請求給後端
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: userMessage.content,
+          message: userMessageContent,
           model: model,
-          // 這裡暫時設為 null，之後做歷史紀錄側邊欄時再補上
-          parent_id: null 
+          parent_id: parentId // <--- 把算好的爸爸 ID 傳出去
         })
       });
-      if (messages.length === 0) {
-       // 稍微等一下讓 DB 寫入完成
-       setTimeout(fetchHistory, 1000);
-      }
 
       if (!response.ok) throw new Error("API Error");
+      
+      // 成功發送後，如果是第一則訊息，重新整理側邊欄
+      if (messages.length === 0) {
+        setTimeout(fetchHistory, 1000);
+      }
 
-      // 3. 準備接收串流 (Streaming)
-      // 先放一個空的 AI 訊息佔位
+      // 準備接收串流
       setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let aiResponseText = "";
+      
+      // 讀取 Header 中的 ID (如果有的話，這可以讓我們更精確更新狀態，這邊先略過，用 index 更新)
+      // const msgId = response.headers.get("X-Message-Id");
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
-        // 解碼收到的片段
+        
         const chunk = decoder.decode(value, { stream: true });
         aiResponseText += chunk;
 
-        // 4. 即時更新最後一則訊息 (AI 的回答)
+        // 即時更新最後一則 (AI)
         setMessages(prev => {
           const newMessages = [...prev];
           const lastMsg = newMessages[newMessages.length - 1];
-          // 確保我們更新的是 assistant 的訊息
           if (lastMsg.role === 'assistant') {
             lastMsg.content = aiResponseText;
+            // 這裡其實應該也要更新 lastMsg.id，但因為我們下次發送是看 UI 上的最後一則，
+            // 只要後端有存對，這裡沒 ID 暫時沒關係。
+            // 為了嚴謹，若要連續對話不重新整理，後端回傳 ID 還是最好的。
+            // 但目前的 MVP 邏輯：我們是「盲接」，只要有內容就好。
+            // 真正要拿到 ID，需要像上次教的，從 Header 抓 X-Message-Id 並寫入這裡。
+            // 為了不讓程式碼太複雜，我們先假設「使用者不會在 0.1 秒內連續發話」。
+            // (進階做法：把後端回傳的 ID 補進這個 Object)
           }
+          return newMessages;
+        });
+      }
+      
+      // 串流結束後，為了確保 parent_id 正確 (因為剛剛只有 content 沒有 id)
+      // 我們可以偷偷重新載入一次這串對話 (Optional，但最保險)
+      // 不過為了流暢度，我們先不做 reload，
+      // 等使用者發下一則時，我們還是缺 ID... 啊！這就是問題所在！
+      
+      // ★★★ 補強：我們必須拿到 AI 回傳的 ID，不然下一句會斷掉！ ★★★
+      // 我們上次在 backend 有加 `expose_headers=["X-Message-Id"]` 記得嗎？
+      // 現在派上用場了！
+      const newMsgId = response.headers.get("X-Message-Id");
+      if (newMsgId) {
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastMsg = newMessages[newMessages.length - 1];
+          lastMsg.id = newMsgId; // <--- 把 ID 補上去！
           return newMessages;
         });
       }
 
     } catch (error) {
       console.error("Error:", error);
-      setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 發生錯誤，請稍後再試。" }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 連線錯誤，請檢查後端是否啟動。" }]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 支援按下 Enter 發送
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -106,92 +163,119 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-900 text-gray-100 font-sans overflow-hidden">
+    <div className="flex h-screen bg-gray-950 text-gray-100 font-sans overflow-hidden">
       
-      {/* --- 左側側邊欄 (Sidebar) --- */}
-      {/* 透過 sidebarOpen 控制顯示/隱藏，在手機版也可以用 */}
-      <div className={`${sidebarOpen ? 'w-64' : 'w-0'} bg-gray-950 border-r border-gray-800 transition-all duration-300 flex flex-col overflow-hidden`}>
-        <div className="p-4 border-b border-gray-800 flex items-center justify-between">
-          <h2 className="font-bold text-lg flex items-center gap-2">
-            <Bot className="w-6 h-6 text-blue-500" />
-            AI Chat
-          </h2>
-          {/* 未來這裡可以放「新增對話」按鈕 */}
+      {/* --- 左側側邊欄 --- */}
+      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} bg-gray-900 border-r border-gray-800 transition-all duration-300 flex flex-col flex-shrink-0 relative`}>
+        
+        {/* New Chat 按鈕 */}
+        <div className="p-4">
+          <button 
+            onClick={startNewChat}
+            className="w-full flex items-center gap-3 px-4 py-3 bg-gray-800 hover:bg-gray-700 rounded-xl transition border border-gray-700 hover:border-gray-600 text-sm font-medium cursor-pointer"
+          >
+            <Plus className="w-5 h-5 text-blue-400" />
+            New Chat
+          </button>
+        </div>
+
+        {/* 歷史紀錄標題 */}
+        <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          Recent
         </div>
         
-        {/* 歷史紀錄列表 (暫位符) */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+        {/* 列表區域 */}
+        <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-800">
           {historyList.map((chat) => (
-            <div 
+            <button 
               key={chat.id}
-              className="p-3 rounded-lg bg-gray-900/50 hover:bg-gray-800 cursor-pointer text-sm text-gray-400 border border-gray-800/50 transition truncate"
-              onClick={() => alert(`之後要做：載入對話 ID: ${chat.id}`)}
+              onClick={() => loadChat(chat.id)}
+              className="w-full text-left p-3 rounded-lg hover:bg-gray-800 group cursor-pointer transition flex items-center gap-3"
             >
-              {/* 顯示前 20 個字當作標題，如果沒有內容就顯示日期 */}
-              {chat.content.substring(0, 20) || new Date(chat.created_at).toLocaleString()}
-              {chat.content.length > 20 && "..."}
-            </div>
+              <MessageSquare className="w-4 h-4 text-gray-500 group-hover:text-blue-400 transition" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-gray-300 group-hover:text-white truncate transition">
+                  {chat.content}
+                </div>
+                <div className="text-xs text-gray-600 truncate mt-0.5">
+                  {new Date(chat.created_at).toLocaleString()}
+                </div>
+              </div>
+            </button>
           ))}
-
+          
           {historyList.length === 0 && (
-            <div className="text-center text-gray-600 text-xs mt-4">
-              沒有歷史紀錄
+            <div className="text-center text-gray-600 text-sm mt-10 px-4">
+              還沒有對話紀錄<br/>試著發送第一則訊息吧！
             </div>
           )}
-          
-          <div className="p-3 rounded-lg hover:bg-gray-800 cursor-pointer text-sm text-gray-400 transition">
-            🐍 Python 學習筆記
-          </div>
         </div>
 
         {/* 底部設定區 */}
-        <div className="p-4 border-t border-gray-800">
-          <button className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition cursor-pointer">
-            <Settings className="w-4 h-4" />
-            設定
-          </button>
+        <div className="p-4 border-t border-gray-800 bg-gray-900/50">
+          <div className="flex items-center gap-3 px-2">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center font-bold text-xs">
+              ME
+            </div>
+            <div className="text-sm font-medium">User</div>
+            <Settings className="w-4 h-4 ml-auto text-gray-500 cursor-pointer hover:text-white" />
+          </div>
         </div>
       </div>
 
-      {/* --- 右側主畫面 (Main Chat) --- */}
-      <div className="flex-1 flex flex-col h-full relative">
+      {/* --- 右側主畫面 --- */}
+      <div className="flex-1 flex flex-col h-full relative min-w-0 bg-gray-950">
         
-        {/* 頂部導航列 (Top Bar) */}
-        <div className="h-16 border-b border-gray-800 flex items-center justify-between px-4 bg-gray-900/95 backdrop-blur z-10">
+        {/* 頂部導航列 */}
+        <div className="h-14 border-b border-gray-800 flex items-center justify-between px-4 bg-gray-950/80 backdrop-blur z-10 sticky top-0">
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 hover:bg-gray-800 rounded-lg transition cursor-pointer"
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition cursor-pointer"
             >
               <Menu className="w-5 h-5" />
             </button>
-            <span className="font-medium text-gray-300">New Chat</span>
+            <span className="font-medium text-gray-200">
+               Gemini Chat
+            </span>
           </div>
 
-          {/* 模型選擇下拉選單 */}
           <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Sparkles className="h-4 w-4 text-yellow-500" />
+             {/* 模型選擇 (同上) */}
+            <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
+              <Sparkles className="h-3.5 w-3.5 text-yellow-500" />
             </div>
             <select 
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full pl-10 p-2.5 appearance-none cursor-pointer hover:bg-gray-750 transition"
+              className="bg-gray-800 border border-gray-700 text-gray-200 text-xs md:text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-36 md:w-48 pl-8 p-2 appearance-none cursor-pointer hover:bg-gray-750 transition"
             >
-              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Fast)</option>
+              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
               <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-              <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Mock)</option>
+              <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
             </select>
           </div>
         </div>
 
-        {/* 中間對話視窗 (Scrollable Area) */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth">
+        {/* 對話視窗 */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth">
           {messages.length === 0 ? (
-            // 空狀態歡迎畫面
-            <div className="h-full flex flex-col items-center justify-center text-gray-500 opacity-60">
-              <Bot className="w-16 h-16 mb-4" />
-              <p className="text-xl font-medium">今天想聊些什麼？</p>
+            <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
+              <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center mb-2">
+                <Bot className="w-8 h-8 text-blue-400" />
+              </div>
+              <p className="text-xl font-medium text-gray-300">今天想聊些什麼？</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg px-4">
+                {['解釋一下 Docker 是什麼', '寫一個 Python 爬蟲範例', '給我一個健身計畫', '講個笑話'].map(suggestion => (
+                  <button 
+                    key={suggestion}
+                    onClick={() => setInput(suggestion)}
+                    className="p-3 bg-gray-900 border border-gray-800 hover:bg-gray-800 rounded-xl text-sm text-left transition cursor-pointer"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             messages.map((msg, index) => (
@@ -199,21 +283,18 @@ function App() {
                 key={index} 
                 className={`flex gap-4 max-w-3xl mx-auto ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
               >
-                {/* 頭像 Avatar */}
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === 'user' ? 'bg-blue-600' : 'bg-green-600'}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === 'user' ? 'bg-blue-600' : 'bg-emerald-600'}`}>
                   {msg.role === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
                 </div>
 
-                {/* 訊息框 Bubble */}
                 <div className={`
-                  px-4 py-3 rounded-2xl max-w-[80%] leading-relaxed shadow-md
+                  px-5 py-3.5 rounded-2xl max-w-[85%] md:max-w-[75%] leading-relaxed shadow-sm
                   ${msg.role === 'user' 
                     ? 'bg-blue-600 text-white rounded-tr-none' 
                     : 'bg-gray-800 text-gray-100 rounded-tl-none border border-gray-700'}
                 `}>
-                  {/* 使用 whitespace-pre-wrap 讓換行符號正常顯示 */}
-                  <div className="whitespace-pre-wrap break-words text-sm md:text-base">
-                    {msg.content || <span className="animate-pulse">Thinking...</span>}
+                  <div className="whitespace-pre-wrap break-words text-[15px]">
+                    {msg.content || <span className="animate-pulse text-gray-400">Thinking...</span>}
                   </div>
                 </div>
               </div>
@@ -222,28 +303,28 @@ function App() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* 底部輸入框區域 (Input Area) */}
-        <div className="p-4 border-t border-gray-800 bg-gray-900">
-          <div className="max-w-3xl mx-auto relative">
+        {/* 輸入框 */}
+        <div className="p-4 border-t border-gray-800 bg-gray-950">
+          <div className="max-w-3xl mx-auto relative group">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="輸入訊息..."
               rows="1"
-              className="w-full bg-gray-800 text-white rounded-xl pl-4 pr-12 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 border border-gray-700 resize-none overflow-hidden"
-              style={{ minHeight: '52px' }}
+              className="w-full bg-gray-900 text-gray-100 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-1 focus:ring-blue-500/50 border border-gray-800 group-hover:border-gray-700 transition resize-none shadow-lg"
+              style={{ minHeight: '56px' }}
             />
             <button 
               onClick={handleSend}
               disabled={isLoading || !input.trim()}
-              className="absolute right-2 bottom-2 p-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="absolute right-2 bottom-2 p-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-md"
             >
               <Send className="w-5 h-5 text-white" />
             </button>
           </div>
-          <div className="text-center mt-2 text-xs text-gray-500">
-            AI 可能會產生不準確的資訊，請核實重要內容。
+          <div className="text-center mt-3 text-xs text-gray-600">
+            Powered by Gemini 2.5 & FastAPI
           </div>
         </div>
 
