@@ -135,4 +135,13 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
                              headers={"X-Message-Id": str(user_msg.id)}
                              )
 
-
+@app.get("/chats/roots", response_model=list[Message])
+def get_chat_roots(session: Session = Depends(get_session)):
+    """
+    取得所有「對話開頭」 (Root Messages)
+    用來顯示在側邊欄列表
+    """
+    # 1. 條件：parent_id 必須是 None
+    # 2. 排序：最新的在最上面 (created_at desc)
+    statement = select(Message).where(Message.parent_id == None).order_by(Message.created_at.desc())
+    return session.exec(statement).all()

@@ -8,6 +8,7 @@ function App() {
   const [model, setModel] = useState("gemini-2.5-flash-lite"); // 預設模型
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true); // 控制側邊欄開關
+  const [historyList, setHistoryList] = useState([]); // 側邊欄列表資料
 
   // 用來自動捲動到底部
   const messagesEndRef = useRef(null);
@@ -16,6 +17,20 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const fetchHistory = async () => {
+  try {
+    const res = await fetch('http://localhost:8000/chats/roots');
+    const data = await res.json();
+    setHistoryList(data);
+  } catch (error) {
+    console.error("無法載入歷史紀錄:", error);
+  }
+  };
+  // 畫面一載入就執行
+  useEffect(() => {
+    fetchHistory();
+  }, []);
 
   // --- 發送訊息邏輯 (包含串流處理) ---
   const handleSend = async () => {
@@ -39,6 +54,10 @@ function App() {
           parent_id: null 
         })
       });
+      if (messages.length === 0) {
+       // 稍微等一下讓 DB 寫入完成
+       setTimeout(fetchHistory, 1000);
+      }
 
       if (!response.ok) throw new Error("API Error");
 
@@ -102,9 +121,24 @@ function App() {
         
         {/* 歷史紀錄列表 (暫位符) */}
         <div className="flex-1 overflow-y-auto p-2 space-y-2">
-          <div className="p-3 rounded-lg bg-gray-900/50 hover:bg-gray-800 cursor-pointer text-sm text-gray-400 border border-gray-800/50 transition">
-            📅 昨天的對話紀錄 (Demo)
-          </div>
+          {historyList.map((chat) => (
+            <div 
+              key={chat.id}
+              className="p-3 rounded-lg bg-gray-900/50 hover:bg-gray-800 cursor-pointer text-sm text-gray-400 border border-gray-800/50 transition truncate"
+              onClick={() => alert(`之後要做：載入對話 ID: ${chat.id}`)}
+            >
+              {/* 顯示前 20 個字當作標題，如果沒有內容就顯示日期 */}
+              {chat.content.substring(0, 20) || new Date(chat.created_at).toLocaleString()}
+              {chat.content.length > 20 && "..."}
+            </div>
+          ))}
+
+          {historyList.length === 0 && (
+            <div className="text-center text-gray-600 text-xs mt-4">
+              沒有歷史紀錄
+            </div>
+          )}
+          
           <div className="p-3 rounded-lg hover:bg-gray-800 cursor-pointer text-sm text-gray-400 transition">
             🐍 Python 學習筆記
           </div>
