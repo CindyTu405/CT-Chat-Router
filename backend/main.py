@@ -135,3 +135,4 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
                              headers={"X-Message-Id": str(user_msg.id)}
                              )
 
+
