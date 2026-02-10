@@ -122,7 +122,7 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
 
         # 開始模擬 AI 吐字; 呼叫 Mock AI 時傳入 history
         # async for chunk in mock_chat_stream(request.message, history):
-        async for chunk in gemini_chat_stream(request.message, history):
+        async for chunk in gemini_chat_stream(request.message, history, request.model):
             full_response += chunk
             yield chunk
 
