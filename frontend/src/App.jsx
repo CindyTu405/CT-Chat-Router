@@ -248,11 +248,16 @@ function App() {
             <select 
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="bg-gray-800 border border-gray-700 text-gray-200 text-xs md:text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-36 md:w-48 pl-8 p-2 appearance-none cursor-pointer hover:bg-gray-750 transition"
+              className="bg-gray-800 border border-gray-700 text-gray-200 text-xs md:text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-36 md:w-56 pl-8 p-2 appearance-none cursor-pointer hover:bg-gray-750 transition"
             >
-              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
-              <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-              <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+              <optgroup label="Google (原生 API)">
+                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+              </optgroup>
+              <optgroup label="OpenRouter (需儲值/免費)">
+                <option value="openai/gpt-oss-120b:free">openai/gpt-oss-120b:free</option>
+                <option value="deepseek/deepseek-r1-0528:free">deepseek/deepseek-r1-0528:free</option>
+                <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 (免費測試)</option>
+              </optgroup>
             </select>
           </div>
         </div>

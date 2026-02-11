@@ -3,13 +3,14 @@ from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, text
 from fastapi.middleware.cors import CORSMiddleware
-import uuid  # 記得匯入這個，因為 parent_id 可能是 UUID
+import uuid
 
 # 自訂模組
 from database import create_db_and_tables, get_session
 from models import Message, ChatRequest
 # from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
+from openrouter_llm import openrouter_chat_stream
 
 
 
@@ -121,9 +122,13 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
     async def stream_generator():
         full_response = ""
 
-        # 開始模擬 AI 吐字; 呼叫 Mock AI 時傳入 history
-        # async for chunk in mock_chat_stream(request.message, history):
-        async for chunk in gemini_chat_stream(request.message, history, request.model):
+        # 如果模型名稱開頭是 "gemini"，就走 Google 原生 API
+        if request.model.startswith("gemini"):
+            stream = gemini_chat_stream(request.message, history, request.model)
+        # 否則，全部交給 OpenRouter 處理
+        else:
+            stream = openrouter_chat_stream(request.message, history, request.model)
+        async for chunk in stream:
             full_response += chunk
             yield chunk
 
