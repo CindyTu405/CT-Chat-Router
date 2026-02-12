@@ -97,49 +97,60 @@ def get_conversation_history(session: Session, parent_id: uuid.UUID | None) -> l
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_session)):
-    """
-    核心對話 API
-    """
-    # 1. 先撈出歷史紀錄
+    # ★★★ 修正補上：先取得歷史對話紀錄 ★★★
+    # 這行是為了讓後面的 gemini_chat_stream / openrouter_chat_stream 有 history 可以用
     history = get_conversation_history(session, request.parent_id)
-    # Debug 用：印出歷史紀錄長度
-    print(f"📚 讀取到 {len(history)} 則歷史訊息")
 
-    # 2. 存入 User 訊息
-    print("收到使用者訊息，正在存入 DB...")
-    user_msg = Message(
-        content=request.message,
-        role="user",
-        parent_id=request.parent_id,
-        model_used=request.model
-    )
+    # 1. 先存使用者的訊息 (User Message)
+    user_msg = Message(role="user", content=request.message, parent_id=request.parent_id)
     session.add(user_msg)
     session.commit()
     session.refresh(user_msg)
-    print(f"User 訊息已存入，ID: {user_msg.id}")
 
-    # 3. 定義串流產生器
+    # 2. 立刻建立 AI 訊息 (佔位)
+    # 先存一個空字串，目的是為了馬上拿到 ID，確保連結不斷裂
+    ai_msg = Message(
+        role="assistant", 
+        content="",  # 先留空，等串流完再補
+        parent_id=user_msg.id, 
+        model_used=request.model
+    )
+    session.add(ai_msg)
+    session.commit()
+    session.refresh(ai_msg) # 拿到真正的 UUID 了！
+
+    # 定義串流產生器
     async def stream_generator():
         full_response = ""
-
-        # 如果模型名稱開頭是 "gemini"，就走 Google 原生 API
+        
+        # 交通警察邏輯
+        # 注意：這裡使用的 history 變數，就是最上面撈出來的那個
         if request.model.startswith("gemini"):
             stream = gemini_chat_stream(request.message, history, request.model)
-        # 否則，全部交給 OpenRouter 處理
         else:
             stream = openrouter_chat_stream(request.message, history, request.model)
+
+        # 開始串流
         async for chunk in stream:
             full_response += chunk
             yield chunk
 
-        # 4. 串流結束，開始存檔
-        print("串流結束，準備呼叫存檔函式...")
-        save_ai_message_sync(full_response, user_msg.id, request.model)
+        # 3. 串流結束後，更新內容 (Update)
+        # 這裡直接用原本的 session 進行更新
+        try:
+            ai_msg.content = full_response
+            session.add(ai_msg)
+            session.commit()
+            # print(f"✅ AI 訊息已更新內容，ID: {ai_msg.id}")
+        except Exception as e:
+            print(f"❌ 存檔失敗: {e}")
 
-    return StreamingResponse(stream_generator(),
-                             media_type="text/plain",
-                             headers={"X-Message-Id": str(user_msg.id)}
-                             )
+    # 4. 回傳 Response，這時候 headers 裡已經有真正的 ID 了！
+    return StreamingResponse(
+        stream_generator(), 
+        media_type="text/plain",
+        headers={"X-Message-Id": str(ai_msg.id)} 
+    )
 
 @app.get("/chats/roots", response_model=list[Message])
 def get_chat_roots(session: Session = Depends(get_session)):
@@ -155,23 +166,45 @@ def get_chat_roots(session: Session = Depends(get_session)):
 @app.get("/chats/{root_id}/history", response_model=list[Message])
 def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)):
     """
-    遞迴查詢：給定一個開頭 (Root ID)，找出所有相關的後續對話
+    修改版 v3：加入 mappings() 確保欄位對應正確
     """
-    # 使用 PostgreSQL 的 CTE (Common Table Expression) 進行遞迴
-    # 這段 SQL 的意思是：
-    # 1. 先抓出頭 (root)
-    # 2. 再找出 parent_id 等於上一層 ID 的人 (children)
-    # 3. 一直找下去，直到沒人為止
-    query = text("""
-    WITH RECURSIVE chat_tree AS (
-        SELECT * FROM message WHERE id = :root_id
+    
+    # 1. 找出最新的一則訊息 ID (Leaf Node)
+    latest_msg_query = text("""
+    WITH RECURSIVE chat_descendants AS (
+        SELECT id, created_at FROM message WHERE id = :root_id
         UNION ALL
-        SELECT m.* FROM message m
-        JOIN chat_tree ct ON m.parent_id = ct.id
+        SELECT m.id, m.created_at FROM message m
+        JOIN chat_descendants cd ON m.parent_id = cd.id
     )
-    SELECT * FROM chat_tree ORDER BY created_at ASC;
+    SELECT id FROM chat_descendants ORDER BY created_at DESC LIMIT 1;
     """)
+    
+    # 執行並取得第一筆結果 (Row)
+    row = session.exec(latest_msg_query, params={"root_id": root_id}).first()
+    
+    if not row:
+        return []
+    
+    # 從 Tuple 取出 ID
+    latest_id = row[0]
 
-    # 執行原始 SQL
-    results = session.exec(query, params={"root_id": root_id}).all()
+    # 2. 從最新訊息往上找祖先 (Recursive Upwards)
+    # ★★★ 重點：這裡要選出所有欄位，確保回傳完整 ★★★
+    path_query = text("""
+    WITH RECURSIVE chat_path AS (
+        SELECT id, role, content, model_used, created_at, parent_id 
+        FROM message WHERE id = :latest_id
+        UNION ALL
+        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id 
+        FROM message m
+        JOIN chat_path cp ON cp.parent_id = m.id
+    )
+    SELECT * FROM chat_path ORDER BY created_at ASC;
+    """)
+    
+    # ★★★ 關鍵修正：加上 .mappings() ★★★
+    # 這會將 SQL 結果轉為字典列表，FastAPI 才能正確轉換成 JSON
+    results = session.exec(path_query, params={"latest_id": latest_id}).mappings().all()
+    
     return results
