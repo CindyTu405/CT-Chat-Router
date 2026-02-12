@@ -351,10 +351,12 @@ function App() {
                     <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
                   </optgroup>
                   <optgroup label="OpenRouter (需儲值/免費)">
-                    <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-                    <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-                    <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 (免費)</option>
+                    <option value="arcee-ai/trinity-large-preview:free">arcee-ai/trinity-large-preview:free</option>
+                    <option value="nvidia/nemotron-3-nano-30b-a3b:free">nvidia/nemotron-3-nano-30b-a3b:free</option>
+                    <option value="stepfun/step-3.5-flash:free">stepfun/step-3.5-flash:free</option>
                     <option value="deepseek/deepseek-r1-0528:free">deepseek/deepseek-r1-0528:free</option>
+                    <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="anthropic/claude-opus-4.6">claude-opus-4.6</option>
                   </optgroup>
                   <optgroup label="進階功能">
                     {/* 這個選項是切換到輸入框的鑰匙 */}
