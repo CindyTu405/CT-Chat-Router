@@ -37,9 +37,16 @@ async def gemini_chat_stream(message: str, history: list, model_name: str = "gem
         
         # 4. 逐段回傳
         async for chunk in response:
-            if chunk.text:
-                yield chunk.text
-                # 這裡不需要 sleep，因為是真的網路請求，本身就有延遲
+            try:
+                # 檢查是否有候選內容且不為空
+                if chunk.candidates and chunk.candidates[0].content.parts:
+                    yield chunk.text
+            except ValueError:
+                # 如果遇到 "Invalid operation" (代表這個 chunk 沒文字)，就直接略過
+                continue
+            except Exception as e:
+                print(f"Gemini Chunk Error: {e}")
+                continue
 
     except Exception as e:
         yield f"⚠️ 模型錯誤: {str(e)}"
