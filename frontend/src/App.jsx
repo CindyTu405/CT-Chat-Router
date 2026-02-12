@@ -95,7 +95,7 @@ function App() {
       }
 
       // 準備接收串流
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model}]);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -302,6 +302,12 @@ function App() {
                     {msg.content || <span className="animate-pulse text-gray-400">Thinking...</span>}
                   </div>
                 </div>
+                {msg.role === 'assistant' && msg.model_used && (
+                    <div className="mt-1.5 ml-1 text-[11px] text-gray-500 flex items-center gap-1 font-mono">
+                      <Sparkles className="w-3 h-3 text-gray-600" />
+                      {msg.model_used}
+                    </div>
+                  )}
               </div>
             ))
           )}
