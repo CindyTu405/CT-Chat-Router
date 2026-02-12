@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare } from 'lucide-react';
+import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil, X} from 'lucide-react';
 
 function App() {
   // --- 狀態管理 ---
@@ -10,6 +10,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isCustomModel, setIsCustomModel] = useState(false); //即時輸入模型
+  const [editingIndex, setEditingIndex] = useState(null); // 哪一則訊息正在被編輯 (index)
+  const [editInput, setEditInput] = useState(""); // 編輯框裡的文字
 
   const messagesEndRef = useRef(null);
 
@@ -156,6 +158,78 @@ function App() {
     }
   };
 
+  // ★★★ 核心功能：從中途分支 (Branching) ★★★
+  const handleBranch = async (index) => {
+    if (!editInput.trim() || isLoading) return;
+
+    // 1. 準備新的歷史紀錄 (Time Travel)
+    // 我們只保留 index 之前的訊息 (0 ~ index-1)
+    // 例如在 index=2 (Q2) 分支，我們保留 index 0, 1 (Q1, A1)
+    const prevMessages = messages.slice(0, index);
+    
+    // 2. 算出新的 parent_id
+    // 如果 prevMessages 是空的，代表我們改的是第一則訊息，所以 parent_id = null
+    // 否則，parent_id 就是上一則訊息 (A1) 的 ID
+    let parentId = null;
+    if (prevMessages.length > 0) {
+      parentId = prevMessages[prevMessages.length - 1].id;
+    }
+
+    // 3. 更新畫面：切斷舊未來，插入新現在
+    const newUserMsg = { role: 'user', content: editInput };
+    setMessages([...prevMessages, newUserMsg]);
+    
+    // 退出編輯模式
+    setEditingIndex(null);
+    setEditInput("");
+    setIsLoading(true);
+
+    try {
+      // 4. 發送請求 (跟 handleSend 邏輯幾乎一樣)
+      const response = await fetch('http://localhost:8000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: newUserMsg.content,
+          model: model,
+          parent_id: parentId // <--- 關鍵！接上正確的父親
+        })
+      });
+
+      if (!response.ok) throw new Error("API Error");
+
+      // 準備接收串流
+      setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model }]);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let aiResponseText = "";
+      const newMsgId = response.headers.get("X-Message-Id"); // 抓取新 ID
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        aiResponseText += chunk;
+
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastMsg = newMessages[newMessages.length - 1];
+          lastMsg.content = aiResponseText;
+          if (newMsgId) lastMsg.id = newMsgId; // 補上 ID
+          return newMessages;
+        });
+      }
+
+    } catch (error) {
+      console.error("Error:", error);
+      setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 分支建立失敗" }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -199,7 +273,16 @@ function App() {
                   {chat.content}
                 </div>
                 <div className="text-xs text-gray-600 truncate mt-0.5">
-                  {new Date(chat.created_at).toLocaleString()}
+                  {new Date(chat.created_at + (chat.created_at.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
+                    timeZone: 'Asia/Taipei',
+                    hour12: false, // 24小時制
+                    year: 'numeric',
+                    month: 'numeric',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  })}
                 </div>
               </div>
             </button>
@@ -307,6 +390,7 @@ function App() {
         {/* 對話視窗 */}
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth">
           {messages.length === 0 ? (
+            // --- 空狀態 (Empty State) ---
             <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
               <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center mb-2">
                 <Bot className="w-8 h-8 text-blue-400" />
@@ -325,36 +409,93 @@ function App() {
               </div>
             </div>
           ) : (
-            messages.map((msg, index) => (
-              <div 
-                key={index} 
-                className={`flex gap-4 max-w-3xl mx-auto ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
-              >
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === 'user' ? 'bg-blue-600' : 'bg-emerald-600'}`}>
-                  {msg.role === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
-                </div>
+            // --- 對話列表 (Chat List) ---
+            // 修正重點 1: 使用 Fragment (<>...</>) 包裹多個元素
+            <>
+              {messages.map((msg, index) => (
+                <div 
+                  key={index} 
+                  className={`flex gap-4 max-w-3xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                >
+                  {/* 頭像 */}
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === 'user' ? 'bg-blue-600' : 'bg-emerald-600'}`}>
+                    {msg.role === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
+                  </div>
 
-                <div className={`
-                  px-5 py-3.5 rounded-2xl max-w-[85%] md:max-w-[75%] leading-relaxed shadow-sm
-                  ${msg.role === 'user' 
-                    ? 'bg-blue-600 text-white rounded-tr-none' 
-                    : 'bg-gray-800 text-gray-100 rounded-tl-none border border-gray-700'}
-                `}>
-                  <div className="whitespace-pre-wrap break-words text-[15px]">
-                    {msg.content || <span className="animate-pulse text-gray-400">Thinking...</span>}
+                  {/* 訊息內容區塊 */}
+                  <div className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} max-w-[85%] md:max-w-[75%]`}>
+                    
+                    {/* 編輯模式判斷 */}
+                    {editingIndex === index ? (
+                      <div className="w-full bg-gray-800 p-3 rounded-2xl border border-blue-500/50 shadow-lg animate-in fade-in zoom-in-95 duration-200">
+                        <textarea
+                          value={editInput}
+                          onChange={(e) => setEditInput(e.target.value)}
+                          className="w-full bg-gray-900 text-white p-3 rounded-xl border border-gray-700 focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm"
+                          rows="3"
+                          autoFocus
+                        />
+                        <div className="flex justify-end gap-2 mt-3">
+                          <button 
+                            onClick={() => setEditingIndex(null)}
+                            className="px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition"
+                          >
+                            取消
+                          </button>
+                          <button 
+                            onClick={() => handleBranch(index)}
+                            className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition flex items-center gap-1"
+                          >
+                            <Send className="w-3 h-3" />
+                            分支並發送
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="relative group/bubble">
+                        <div className={`
+                          px-5 py-3.5 rounded-2xl leading-relaxed shadow-sm
+                          ${msg.role === 'user' 
+                            ? 'bg-blue-600 text-white rounded-tr-none' 
+                            : 'bg-gray-800 text-gray-100 rounded-tl-none border border-gray-700'}
+                        `}>
+                          <div className="whitespace-pre-wrap break-words text-[15px]">
+                            {msg.content || <span className="animate-pulse text-gray-400">Thinking...</span>}
+                          </div>
+                        </div>
+
+                        {/* 鉛筆按鈕 */}
+                        {msg.role === 'user' && !isLoading && (
+                          <button
+                            onClick={() => {
+                              setEditingIndex(index);
+                              setEditInput(msg.content);
+                            }}
+                            className="absolute -left-8 top-2 p-1.5 text-gray-500 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-full opacity-0 group-hover/bubble:opacity-100 transition-all shadow-sm border border-gray-700 cursor-pointer"
+                            title="編輯並開啟新分支"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 模型標籤 */}
+                    {msg.role === 'assistant' && msg.model_used && (
+                      <div className="mt-1.5 ml-1 text-[11px] text-gray-500 flex items-center gap-1 font-mono">
+                        <Sparkles className="w-3 h-3 text-gray-600" />
+                        {msg.model_used}
+                      </div>
+                    )}
                   </div>
                 </div>
-                {msg.role === 'assistant' && msg.model_used && (
-                    <div className="mt-1.5 ml-1 text-[11px] text-gray-500 flex items-center gap-1 font-mono">
-                      <Sparkles className="w-3 h-3 text-gray-600" />
-                      {msg.model_used}
-                    </div>
-                  )}
-              </div>
-            ))
+              ))}
+              
+              {/* 自動捲動定位點 */}
+              <div ref={messagesEndRef} />
+            </>
           )}
-          <div ref={messagesEndRef} />
-        </div>
+        </div> {/* 修正重點 2: 這裡才是 overflow-y-auto 的結束標籤 */}
 
         {/* 輸入框 */}
         <div className="p-4 border-t border-gray-800 bg-gray-950">
