@@ -9,6 +9,7 @@ function App() {
   const [model, setModel] = useState("gemini-2.5-flash-lite");
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isCustomModel, setIsCustomModel] = useState(false); //即時輸入模型
 
   const messagesEndRef = useRef(null);
 
@@ -236,29 +237,70 @@ function App() {
               <Menu className="w-5 h-5" />
             </button>
             <span className="font-medium text-gray-200">
-               Gemini Chat
+               AI Chat
             </span>
           </div>
 
           <div className="relative">
-             {/* 模型選擇 (同上) */}
-            <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
-              <Sparkles className="h-3.5 w-3.5 text-yellow-500" />
+              {/* --- 模型選擇區 (支援下拉與手動輸入) --- */}
+            <div className="relative flex items-center gap-2">
+              
+              {/* 裝飾用的小星星 Icon */}
+              <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none z-10">
+                <Sparkles className="h-3.5 w-3.5 text-yellow-500" />
+              </div>
+
+              {!isCustomModel ? (
+                // 模式 A：下拉選單
+                <select 
+                  value={model}
+                  onChange={(e) => {
+                    if (e.target.value === "custom") {
+                      setIsCustomModel(true);
+                      setModel(""); // 清空，讓使用者準備輸入
+                    } else {
+                      setModel(e.target.value);
+                    }
+                  }}
+                  className="bg-gray-800 border border-gray-700 text-gray-200 text-xs md:text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-40 md:w-56 pl-8 p-2 appearance-none cursor-pointer hover:bg-gray-750 transition"
+                >
+                  <optgroup label="Google (原生 API)">
+                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                  </optgroup>
+                  <optgroup label="OpenRouter (需儲值/免費)">
+                    <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                    <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 (免費)</option>
+                    <option value="deepseek/deepseek-r1-0528:free">deepseek/deepseek-r1-0528:free</option>
+                  </optgroup>
+                  <optgroup label="進階功能">
+                    {/* 這個選項是切換到輸入框的鑰匙 */}
+                    <option value="custom">✨ 自訂輸入 (貼上模型 ID)...</option>
+                  </optgroup>
+                </select>
+              ) : (
+                // 模式 B：手動輸入框
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="例如: qwen/qwen-2.5-72b..."
+                    className="bg-gray-900 border border-blue-500/50 text-gray-100 text-xs md:text-sm rounded-lg focus:ring-2 focus:ring-blue-500 block w-40 md:w-56 pl-8 p-2 transition outline-none shadow-inner"
+                    autoFocus // 切換過來時自動聚焦
+                  />
+                  <button
+                    onClick={() => {
+                      setIsCustomModel(false);
+                      setModel("gemini-2.5-flash-lite"); // 取消時切回預設模型
+                    }}
+                    className="text-gray-400 hover:text-white text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded transition cursor-pointer"
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
             </div>
-            <select 
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="bg-gray-800 border border-gray-700 text-gray-200 text-xs md:text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-36 md:w-56 pl-8 p-2 appearance-none cursor-pointer hover:bg-gray-750 transition"
-            >
-              <optgroup label="Google (原生 API)">
-                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
-              </optgroup>
-              <optgroup label="OpenRouter (需儲值/免費)">
-                <option value="openai/gpt-oss-120b:free">openai/gpt-oss-120b:free</option>
-                <option value="deepseek/deepseek-r1-0528:free">deepseek/deepseek-r1-0528:free</option>
-                <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 (免費測試)</option>
-              </optgroup>
-            </select>
           </div>
         </div>
 
