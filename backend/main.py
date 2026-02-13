@@ -226,40 +226,44 @@ def update_chat_title(root_id: uuid.UUID, request: UpdateTitleRequest, session: 
 @app.delete("/chats/{root_id}")
 def delete_chat(root_id: uuid.UUID, session: Session = Depends(get_session)):
     """
-    刪除整串對話。
-    因為我們的 parent_id 有設 foreign_key，但 SQLModel 預設可能沒有設 CASCADE。
-    最保險的做法是：先找出所有子孫，然後全部刪除。
+    刪除整串對話 (終極修正版：Depth-First Deletion)
+    策略：計算每一則訊息的「層級 (Level)」，從最深層的葉子節點開始刪除。
+    這能完美解決 Foreign Key Constraint 問題，不管有沒有分支或改名。
     """
-    # 1. 找出這個家族的所有 ID
+    
+    # 1. 使用遞迴查詢找出所有子孫，並計算「層級 (level)」
+    # Root 的 level = 0, 子 = 1, 孫 = 2 ...
     query = text("""
     WITH RECURSIVE chat_descendants AS (
-        SELECT id FROM message WHERE id = :root_id
+        SELECT id, 0 as level FROM message WHERE id = :root_id
         UNION ALL
-        SELECT m.id FROM message m
+        SELECT m.id, cd.level + 1 FROM message m
         JOIN chat_descendants cd ON m.parent_id = cd.id
     )
-    SELECT id FROM chat_descendants;
+    SELECT id FROM chat_descendants ORDER BY level DESC;
     """)
+    
+    # 執行查詢
     results = session.exec(query, params={"root_id": root_id}).all()
-    
-    # 2. 逐一刪除 (這比直接下 DELETE SQL 安全，因為 ORM 會處理關聯)
-    # 不過為了效能，我們這裡直接用 SQL 刪除
-    # 注意：刪除順序要反過來（先刪子，再刪父），或者如果有 CASCADE 設定就不用管。
-    # 這裡我們簡單做：直接刪除 root，如果 DB 有設 CASCADE 會自動刪；
-    # 如果沒設，我們手動清空。
-    
-    # 簡單暴力法：直接用 delete statement 刪除所有相關 ID
-    all_ids = [r[0] for r in results] # 轉成 list
+    all_ids = [r[0] for r in results]
     
     if not all_ids:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    # 使用 SQLModel 的 delete
-    statement = select(Message).where(Message.id.in_(all_ids))
-    msgs_to_delete = session.exec(statement).all()
+    # 2. 依照算出來的順序 (由深到淺) 逐一刪除
+    # 這裡我們直接對每個 ID 執行刪除指令，確保順序絕對正確
+    for msg_id in all_ids:
+        msg = session.get(Message, msg_id)
+        if msg:
+            session.delete(msg)
+            # 這裡可以選擇是否每刪一個就 flush，但通常全部標記完再一次 commit 即可
+            # SQLAlchemy 會盡量安排順序，但我們手動餵給它的順序已經是安全的了
     
-    for msg in msgs_to_delete:
-        session.delete(msg)
+    try:
+        session.commit()
+    except Exception as e:
+        # 如果還是失敗，可能是資料庫鎖定或其他問題
+        print(f"刪除失敗細節: {e}")
+        raise HTTPException(status_code=500, detail=f"刪除失敗: {str(e)}")
         
-    session.commit()
     return {"status": "ok", "deleted_count": len(all_ids)}

@@ -242,29 +242,28 @@ function App() {
 
   // 刪除對話
 const handleDeleteChat = async (e, chatId) => {
-  e.stopPropagation(); // 防止觸發 "載入對話"
-  if (!confirm("確定要刪除這個對話串嗎？此動作無法復原。")) return;
+    e.stopPropagation(); // 防止觸發 "載入對話"
+    
+    // 加上簡單的防呆，避免手滑
+    if (!confirm("確定要刪除這個對話串嗎？此動作無法復原。")) return;
 
-  try {
-    await fetch(`http://localhost:8000/chats/${chatId}`, { method: 'DELETE' });
-
-    // 如果刪除的是當前正在看的對話，清空畫面
-    if (messages.length > 0 && messages[0].id === chatId) { // 這裡邏輯簡化，實際上要比對 root id
-       startNewChat();
-    } else if (messages.length > 0) {
-        // 比較嚴謹的判斷：檢查當前 messages 的第一則是否就是被刪除的 ID
-         const currentRootId = messages[0].id; // 假設第一則是 root
-         // 這裡其實有點複雜，因為我們 messages 可能是分支後的 slice。
-         // 簡單做法：不管有沒有刪到當前的，都重整列表就好，
-         // 如果使用者發現當前畫面沒變但列表沒了，他自己會按 New Chat。
+    try {
+      await fetch(`http://localhost:8000/chats/${chatId}`, { method: 'DELETE' });
+      
+      // ★★★ 清理後的邏輯 ★★★
+      // 如果現在畫面上顯示的對話 (messages[0]) 就是我們剛刪除的那個 (chatId)
+      // 那就清空畫面，回到 "New Chat" 狀態
+      if (messages.length > 0 && messages[0].id === chatId) {
+         startNewChat();
+      }
+      
+      // 重新抓取側邊欄列表
+      fetchHistory();
+    } catch (error) {
+      console.error("刪除失敗", error);
+      alert("刪除失敗，請檢查後端連線");
     }
-
-    // 重新整理列表
-    fetchHistory();
-  } catch (error) {
-    console.error("刪除失敗", error);
-  }
-};
+  };
 
 // 開始重新命名
 const startRenaming = (e, chat) => {
