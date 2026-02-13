@@ -1,6 +1,6 @@
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -17,7 +17,7 @@ class Message(SQLModel, table=True):
     model_used: Optional[str] = None
 
     # 建立時間
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # --- 樹狀結構核心 ---
     # 指向父節點的 ID (上一則訊息)
@@ -29,9 +29,16 @@ class Message(SQLModel, table=True):
     # 關聯：找到所有子訊息 (這則訊息衍生出的不同回答)
     # children: List["Message"] = Relationship(back_populates="parent")
 
+    # 對話標題
+    # 只有 "對話開頭 (Root)" 的訊息會有這個值，其他訊息通常為 None
+    title: str | None = Field(default=None)
+
 
 # Pydantic 模型 (用於 API 請求驗證，不存入資料庫)
 class ChatRequest(SQLModel):
     message: str
     parent_id: Optional[uuid.UUID] = None
     model: str = "gpt-3.5-turbo"
+
+class UpdateTitleRequest(SQLModel):
+    title: str

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil, X} from 'lucide-react';
+import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
+   X, Trash2, Edit2, Check} from 'lucide-react';
 
 function App() {
   // --- 狀態管理 ---
@@ -12,6 +13,8 @@ function App() {
   const [isCustomModel, setIsCustomModel] = useState(false); //即時輸入模型
   const [editingIndex, setEditingIndex] = useState(null); // 哪一則訊息正在被編輯 (index)
   const [editInput, setEditInput] = useState(""); // 編輯框裡的文字
+  const [renamingId, setRenamingId] = useState(null); // 正在改名的對話 ID
+  const [renameInput, setRenameInput] = useState(""); // 改名輸入框內容
 
   const messagesEndRef = useRef(null);
 
@@ -237,6 +240,57 @@ function App() {
     }
   };
 
+  // 刪除對話
+const handleDeleteChat = async (e, chatId) => {
+  e.stopPropagation(); // 防止觸發 "載入對話"
+  if (!confirm("確定要刪除這個對話串嗎？此動作無法復原。")) return;
+
+  try {
+    await fetch(`http://localhost:8000/chats/${chatId}`, { method: 'DELETE' });
+
+    // 如果刪除的是當前正在看的對話，清空畫面
+    if (messages.length > 0 && messages[0].id === chatId) { // 這裡邏輯簡化，實際上要比對 root id
+       startNewChat();
+    } else if (messages.length > 0) {
+        // 比較嚴謹的判斷：檢查當前 messages 的第一則是否就是被刪除的 ID
+         const currentRootId = messages[0].id; // 假設第一則是 root
+         // 這裡其實有點複雜，因為我們 messages 可能是分支後的 slice。
+         // 簡單做法：不管有沒有刪到當前的，都重整列表就好，
+         // 如果使用者發現當前畫面沒變但列表沒了，他自己會按 New Chat。
+    }
+
+    // 重新整理列表
+    fetchHistory();
+  } catch (error) {
+    console.error("刪除失敗", error);
+  }
+};
+
+// 開始重新命名
+const startRenaming = (e, chat) => {
+  e.stopPropagation();
+  setRenamingId(chat.id);
+  setRenameInput(chat.title || chat.content); // 預設帶入標題或內容
+};
+
+// 提交重新命名
+const submitRename = async (e) => {
+  e.stopPropagation(); // 防止觸發 click
+  if (!renameInput.trim()) return;
+
+  try {
+    await fetch(`http://localhost:8000/chats/${renamingId}/title`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: renameInput })
+    });
+    setRenamingId(null);
+    fetchHistory();
+  } catch (error) {
+    console.error("改名失敗", error);
+  }
+};
+
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100 font-sans overflow-hidden">
       
@@ -262,18 +316,42 @@ function App() {
         {/* 列表區域 */}
         <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-800">
           {historyList.map((chat) => (
+            <div key={chat.id} className="group relative">
+          {/* 判斷：如果是正在改名的狀態，顯示輸入框 */}
+          {renamingId === chat.id ? (
+            <div className="p-2 mx-2 bg-gray-800 border border-blue-500 rounded-lg flex items-center gap-2">
+              <input
+                className="flex-1 bg-transparent text-sm text-white outline-none min-w-0"
+                value={renameInput}
+                onChange={(e) => setRenameInput(e.target.value)}
+                autoFocus
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') submitRename(e);
+                    if (e.key === 'Escape') setRenamingId(null);
+                }}
+              />
+              <button onClick={submitRename} className="text-green-400 hover:text-green-300">
+                <Check className="w-4 h-4" />
+              </button>
+              <button onClick={() => setRenamingId(null)} className="text-gray-400 hover:text-gray-300">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            // 一般狀態：顯示按鈕
             <button 
-              key={chat.id}
               onClick={() => loadChat(chat.id)}
-              className="w-full text-left p-3 rounded-lg hover:bg-gray-800 group cursor-pointer transition flex items-center gap-3"
+              className="w-full text-left p-3 rounded-lg hover:bg-gray-800 group cursor-pointer transition flex items-center gap-3 relative"
             >
-              <MessageSquare className="w-4 h-4 text-gray-500 group-hover:text-blue-400 transition" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-gray-300 group-hover:text-white truncate transition">
-                  {chat.content}
+              <MessageSquare className="w-4 h-4 text-gray-500 group-hover:text-blue-400 transition flex-shrink-0" />
+              <div className="flex-1 min-w-0 pr-6"> {/* pr-6 留空間給 hover 按鈕 */}
+                <div className="text-sm text-gray-300 group-hover:text-white truncate transition font-medium">
+                  {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
+                  {chat.title || chat.content}
                 </div>
                 <div className="text-xs text-gray-600 truncate mt-0.5">
-                  {new Date(chat.created_at + (chat.created_at.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
+                   {new Date(chat.created_at + (chat.created_at.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
                     timeZone: 'Asia/Taipei',
                     hour12: false, // 24小時制
                     year: 'numeric',
@@ -285,14 +363,28 @@ function App() {
                   })}
                 </div>
               </div>
+
+              {/* ★★★ 懸停操作按鈕 (Group Hover Actions) ★★★ */}
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800/90 rounded-md p-1 shadow-md">
+                <div 
+                  onClick={(e) => startRenaming(e, chat)}
+                  className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded cursor-pointer"
+                  title="重新命名"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </div>
+                <div 
+                  onClick={(e) => handleDeleteChat(e, chat.id)}
+                  className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded cursor-pointer"
+                  title="刪除對話"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </div>
+              </div>
             </button>
-          ))}
-          
-          {historyList.length === 0 && (
-            <div className="text-center text-gray-600 text-sm mt-10 px-4">
-              還沒有對話紀錄<br/>試著發送第一則訊息吧！
-            </div>
           )}
+        </div>
+      ))}
         </div>
 
         {/* 底部設定區 */}

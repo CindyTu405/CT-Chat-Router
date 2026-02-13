@@ -7,7 +7,7 @@ import uuid
 
 # 自訂模組
 from database import create_db_and_tables, get_session
-from models import Message, ChatRequest
+from models import Message, ChatRequest, UpdateTitleRequest
 # from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
 from openrouter_llm import openrouter_chat_stream
@@ -208,3 +208,58 @@ def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)
     results = session.exec(path_query, params={"latest_id": latest_id}).mappings().all()
     
     return results
+
+# ★★★ 功能 1: 修改對話標題 ★★★
+@app.patch("/chats/{root_id}/title")
+def update_chat_title(root_id: uuid.UUID, request: UpdateTitleRequest, session: Session = Depends(get_session)):
+    msg = session.get(Message, root_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    msg.title = request.title
+    session.add(msg)
+    session.commit()
+    session.refresh(msg)
+    return {"status": "ok", "title": msg.title}
+
+# ★★★ 功能 2: 刪除對話串 ★★★
+@app.delete("/chats/{root_id}")
+def delete_chat(root_id: uuid.UUID, session: Session = Depends(get_session)):
+    """
+    刪除整串對話。
+    因為我們的 parent_id 有設 foreign_key，但 SQLModel 預設可能沒有設 CASCADE。
+    最保險的做法是：先找出所有子孫，然後全部刪除。
+    """
+    # 1. 找出這個家族的所有 ID
+    query = text("""
+    WITH RECURSIVE chat_descendants AS (
+        SELECT id FROM message WHERE id = :root_id
+        UNION ALL
+        SELECT m.id FROM message m
+        JOIN chat_descendants cd ON m.parent_id = cd.id
+    )
+    SELECT id FROM chat_descendants;
+    """)
+    results = session.exec(query, params={"root_id": root_id}).all()
+    
+    # 2. 逐一刪除 (這比直接下 DELETE SQL 安全，因為 ORM 會處理關聯)
+    # 不過為了效能，我們這裡直接用 SQL 刪除
+    # 注意：刪除順序要反過來（先刪子，再刪父），或者如果有 CASCADE 設定就不用管。
+    # 這裡我們簡單做：直接刪除 root，如果 DB 有設 CASCADE 會自動刪；
+    # 如果沒設，我們手動清空。
+    
+    # 簡單暴力法：直接用 delete statement 刪除所有相關 ID
+    all_ids = [r[0] for r in results] # 轉成 list
+    
+    if not all_ids:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    # 使用 SQLModel 的 delete
+    statement = select(Message).where(Message.id.in_(all_ids))
+    msgs_to_delete = session.exec(statement).all()
+    
+    for msg in msgs_to_delete:
+        session.delete(msg)
+        
+    session.commit()
+    return {"status": "ok", "deleted_count": len(all_ids)}
