@@ -5,6 +5,10 @@ import os
 # 如果讀不到，就預設用 localhost (方便你在 docker 外面測試 script)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/chat_db")
 
+# 針對 Render/Heroku 的修正：有些平台給的網址是 postgres:// 開頭，但 SQLAlchemy 需要 postgresql://
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 # 建立引擎
 # echo=True 會在終端機印出所有 SQL 語法，方便 Debug
 engine = create_engine(DATABASE_URL, echo=True)
