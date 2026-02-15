@@ -193,10 +193,10 @@ def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)
     # ★★★ 重點：這裡要選出所有欄位，確保回傳完整 ★★★
     path_query = text("""
     WITH RECURSIVE chat_path AS (
-        SELECT id, role, content, model_used, created_at, parent_id 
+        SELECT id, role, content, model_used, created_at, parent_id, title
         FROM message WHERE id = :latest_id
         UNION ALL
-        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id 
+        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title 
         FROM message m
         JOIN chat_path cp ON cp.parent_id = m.id
     )

@@ -278,17 +278,27 @@ const submitRename = async (e) => {
   if (!renameInput.trim()) return;
 
   try {
-    await fetch(`http://localhost:8000/chats/${renamingId}/title`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: renameInput })
-    });
-    setRenamingId(null);
-    fetchHistory();
-  } catch (error) {
-    console.error("改名失敗", error);
-  }
-};
+        await fetch(`http://localhost:8000/chats/${renamingId}/title`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: renameInput })
+        });
+        
+        // ★★★ 新增這段：如果改名的剛好是當前正在看的對話，同步更新畫面上方的標題 ★★★
+        if (messages.length > 0 && messages[0].id === renamingId) {
+            setMessages(prev => {
+                const newMsgs = [...prev];
+                newMsgs[0] = { ...newMsgs[0], title: renameInput };
+                return newMsgs;
+            });
+        }
+        
+        setRenamingId(null);
+        fetchHistory();
+      } catch (error) {
+        console.error("改名失敗", error);
+      }
+    };
 
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100 font-sans overflow-hidden">
@@ -410,8 +420,15 @@ const submitRename = async (e) => {
             >
               <Menu className="w-5 h-5" />
             </button>
-            <span className="font-medium text-gray-200">
-               AI Chat
+            {/* 標題顯示區域 */}
+            <span className="font-medium text-gray-200 truncate max-w-[150px] md:max-w-md">
+              {messages.length > 0 ? (
+                // 有對話時：優先顯示 title，沒有則顯示內容摘要
+                messages[0].title || messages[0].content.slice(0, 20) + (messages[0].content.length > 20 ? "..." : "")
+              ) : (
+                // 沒對話時 (New Chat)
+                "AI Chat"
+              )}
             </span>
           </div>
 
