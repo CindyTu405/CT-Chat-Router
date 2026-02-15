@@ -29,7 +29,7 @@ function App() {
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = async () => {
     try {
-      const res = await fetch('${API_URL}/chats/roots');
+      const res = await fetch(`${API_URL}/chats/roots`);
       const data = await res.json();
       setHistoryList(data);
     } catch (error) {
@@ -86,7 +86,7 @@ function App() {
     setMessages(prev => [...prev, { role: 'user', content: userMessageContent }]);
 
     try {
-      const response = await fetch('${API_URL}/chat', {
+      const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -192,7 +192,7 @@ function App() {
 
     try {
       // 4. 發送請求 (跟 handleSend 邏輯幾乎一樣)
-      const response = await fetch('${API_URL}/chat', {
+      const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
