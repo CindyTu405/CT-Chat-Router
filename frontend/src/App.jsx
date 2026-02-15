@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
    X, Trash2, Edit2, Check} from 'lucide-react';
 
+// const API_URL = "http://localhost:8000"; // 本機開發用
+const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
+
 function App() {
   // --- 狀態管理 ---
   const [input, setInput] = useState("");
@@ -26,7 +29,7 @@ function App() {
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = async () => {
     try {
-      const res = await fetch('http://localhost:8000/chats/roots');
+      const res = await fetch('${API_URL}/chats/roots');
       const data = await res.json();
       setHistoryList(data);
     } catch (error) {
@@ -42,7 +45,7 @@ function App() {
   const loadChat = async (rootId) => {
     try {
       setIsLoading(true);
-      const res = await fetch(`http://localhost:8000/chats/${rootId}/history`);
+      const res = await fetch(`${API_URL}/chats/${rootId}/history`);
       const data = await res.json();
       setMessages(data); // 把舊對話填入畫面
       
@@ -83,7 +86,7 @@ function App() {
     setMessages(prev => [...prev, { role: 'user', content: userMessageContent }]);
 
     try {
-      const response = await fetch('http://localhost:8000/chat', {
+      const response = await fetch('${API_URL}/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -189,7 +192,7 @@ function App() {
 
     try {
       // 4. 發送請求 (跟 handleSend 邏輯幾乎一樣)
-      const response = await fetch('http://localhost:8000/chat', {
+      const response = await fetch('${API_URL}/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -248,7 +251,7 @@ const handleDeleteChat = async (e, chatId) => {
     if (!confirm("確定要刪除這個對話串嗎？此動作無法復原。")) return;
 
     try {
-      await fetch(`http://localhost:8000/chats/${chatId}`, { method: 'DELETE' });
+      await fetch(`${API_URL}/chats/${chatId}`, { method: 'DELETE' });
       
       // ★★★ 清理後的邏輯 ★★★
       // 如果現在畫面上顯示的對話 (messages[0]) 就是我們剛刪除的那個 (chatId)
@@ -278,7 +281,7 @@ const submitRename = async (e) => {
   if (!renameInput.trim()) return;
 
   try {
-        await fetch(`http://localhost:8000/chats/${renamingId}/title`, {
+        await fetch(`${API_URL}/chats/${renamingId}/title`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: renameInput })
