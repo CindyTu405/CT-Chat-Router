@@ -1,7 +1,7 @@
-# OmniChat: Multi-Model AI Chat Platform
+# CT-Chat-Router: Multi-Model AI Chat Platform
 
 ## 🚀 Overview
-OmniChat is a full-stack, responsive AI chat application designed to aggregate multiple Large Language Models (LLMs) into a single, unified interface. It goes beyond simple sequential chatting by introducing **Tree-based Conversation Branching**, allowing users to edit previous prompts and explore alternative conversation paths without losing their original history.
+CT-Chat-Router is a full-stack, responsive AI chat application designed to aggregate multiple Large Language Models (LLMs) into a single, unified interface. It goes beyond simple sequential chatting by introducing **Tree-based Conversation Branching**, allowing users to edit previous prompts and explore alternative conversation paths without losing their original history.
 
 ## ✨ Key Features
 * **Multi-Model Routing:** Seamlessly switch between Google Gemini natively and virtually any other LLM (GPT-4o, Claude 3.5, Llama, DeepSeek) via OpenRouter API integration.
