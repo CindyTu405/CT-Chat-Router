@@ -1,79 +1,60 @@
-# CT-Chat-Router: Multi-Model AI Chat Platform
+[English](README_en.md) | **繁體中文**
 
-## 🚀 Overview
-CT-Chat-Router is a full-stack, responsive AI chat application designed to aggregate multiple Large Language Models (LLMs) into a single, unified interface. It goes beyond simple sequential chatting by introducing **Tree-based Conversation Branching**, allowing users to edit previous prompts and explore alternative conversation paths without losing their original history.
+# CT-Chat-Router: 多模型 AI 聚合聊天平台
 
-## ✨ Key Features
-* **Multi-Model Routing:** Seamlessly switch between Google Gemini natively and virtually any other LLM (GPT-4o, Claude 3.5, Llama, DeepSeek) via OpenRouter API integration.
-* **Tree-Based Branching (Time Travel):** Every message stores a `parent_id`. Users can edit past messages to create new branches. The system dynamically retrieves the active linear path while preserving all alternate realities in the database.
-* **Real-Time Streaming:** Implements Server-Sent Events (SSE) for typewriter-like text generation, ensuring a smooth and responsive UX.
-* **Chat History Management (CRUD):** Fully functional sidebar to create, read, rename (title), and delete chat sessions.
-* **Custom Model Injection:** A flexible UI that allows users to manually input any valid OpenRouter Model ID on the fly.
+## 專案簡介
+CT-Chat-Router 是一個全端、響應式(RWD)的 AI 聊天應用程式。本專案的核心目標是打造一個能統一呼叫多種大型語言模型 (LLM) 的聚合介面，並在底層資料庫實作了**樹狀對話結構 (Tree-based Conversation)**。使用者可以在單一介面中無縫切換不同的 AI 模型來進行對話與測試。
 
-## 🛠 Tech Stack
-* **Frontend:** React, Vite, Tailwind CSS, Lucide React (Icons).
-* **Backend:** Python, FastAPI, SQLModel (SQLAlchemy), PostgreSQL/SQLite.
-* **Infrastructure:** Docker & Docker Compose (Containerization), Render (Deployment).
+## 核心功能
+* **多模型動態路由 (Multi-Model Routing):** 後端實作了動態路由機制，原生支援 Google Gemini API，並透過 OpenRouter 整合多款開源/免費模型（如 Arcee AI, DeepSeek 等）。
+* **自訂模型注入:** 提供使用者手動輸入任何 OpenRouter 支援的 Model ID 進行即時測試。
+* **樹狀對話分支底層 (Tree-Based Branching - MVP 階段):** 資料庫每一則訊息皆帶有 `parent_id` 形成關聯樹。
+  * *目前實作進度：* 支援從歷史對話中途編輯並開展新的對話分支。目前的 UI 邏輯會優先載入並顯示「最新的時間線」（會暫時隱藏舊的平行分支）。
+  * *未來優化方向：* 開發前端的分支切換器 (Branch Switcher)，讓使用者能自由穿梭在不同的平行對話中。
+* **即時串流輸出 (Real-Time Streaming):** 實作 Server-Sent Events (SSE)，提供如打字機般平滑的文字生成體驗，解決 HTTP 長時間等待的 Timeout 問題。
+* **對話紀錄管理 (CRUD):** 側邊欄功能支援創建新對話、讀取歷史紀錄、自訂對話標題 (Rename) 以及刪除功能。
 
-## 📁 Project Structure
+## 技術棧 (Tech Stack)
+* **前端 (Frontend):** React, Vite, Tailwind CSS, Lucide React
+* **後端 (Backend):** Python, FastAPI, SQLModel (SQLAlchemy), PostgreSQL
+* **架構與部署 (Infrastructure):** Docker & Docker Compose, Render 雲端部署
+
+## 專案結構
 ```text
 .
 ├── backend/
-│   ├── main.py              # FastAPI application & API endpoints
-│   ├── models.py            # SQLModel database schemas (Message, ChatRequest)
-│   ├── database.py          # Database connection & engine setup
-│   ├── gemini_llm.py        # Google Gemini SDK integration
-│   ├── openrouter_llm.py    # OpenRouter API (OpenAI SDK) integration
-│   ├── migrate.py           # Database migration scripts
-│   ├── Dockerfile           # Backend container setup
-│   └── requirements.txt     # Python dependencies
+│   ├── main.py              # FastAPI 核心應用與 API 路由
+│   ├── models.py            # SQLModel 資料庫綱要 (Message, ChatRequest)
+│   ├── database.py          # 資料庫連線與引擎設定
+│   ├── gemini_llm.py        # Google Gemini SDK 串接邏輯
+│   ├── openrouter_llm.py    # OpenRouter API 串接邏輯
+│   ├── migrate.py           # 資料庫遷移腳本
+│   └── Dockerfile           # 後端容器化設定
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx          # Main React component & UI logic
-│   │   ├── index.css        # Tailwind directives
-│   │   └── main.jsx         # React DOM entry
-│   ├── package.json         # Node dependencies
-│   ├── tailwind.config.js   # Tailwind configuration
-│   └── vite.config.js       # Vite configuration
-└── docker-compose.yml       # Multi-container orchestration
-🧠 Core Architecture & Logic Notes for Developers
-1. The Branching Logic (Recursive CTE)
-The database does not store chats as simple arrays. It stores them as a Linked List / Tree using a parent_id foreign key.
+│   │   ├── App.jsx          # React 主元件與畫面邏輯
+│   │   └── index.css        # Tailwind 樣式設定
+│   └── package.json         # Node 套件依賴
+└── docker-compose.yml       # 多容器編排設定檔
+```
+## 給開發者的架構筆記 (Architecture Notes)
+1. 遞迴 CTE 與對話樹 (Recursive CTE & Chat Tree)
+為了支援未來的多重分支功能，資料庫不使用單純的 JSON Array 儲存對話，而是採用帶有 parent_id 的 Linked List/Tree 結構。
 
-Writing: When a user replies or branches, the frontend explicitly sends the parent_id of the message they are responding to. To prevent synchronization issues, the backend creates an empty "placeholder" AI message in the DB before starting the stream, returning the X-Message-Id in the headers so the frontend knows the ID immediately.
+讀取邏輯 (/chats/{root_id}/history): 後端使用 PostgreSQL 的 Recursive CTE (遞迴通用資料表運算式)。系統會先找出該對話樹中「最新」的葉節點 (Leaf Node)，接著向上遞迴尋找祖先直到根節點 (Root)，最後回傳一條乾淨的線性對話陣列給前端渲染。
 
-Reading (/chats/{root_id}/history): The backend uses a Recursive CTE (Common Table Expression) to fetch the history. It first finds the latest leaf node of the given root, then traverses upwards to the root, returning a clean, linear array to the frontend.
+刪除邏輯: 實作了深度優先 (Depth-First) 的刪除機制，依照節點層級 (Level DESC) 由深至淺刪除，完美避開 Foreign Key Constraint (外鍵約束) 的衝突問題。
 
-Deleting: Deletion relies on Depth-First Deletion (ordering by level DESC) to avoid Foreign Key Constraint violations.
+2. 模型路由器 (Model Router)
+後端 main.py 扮演交通警察的角色。當接收到前端請求時，會檢查 request.model 的字首：
 
-2. The Model Router
-The backend acts as a traffic cop (main.py -> chat_endpoint).
+若為 gemini 開頭，則路由至原生的 Google GenAI SDK。
 
-If request.model starts with "gemini", it routes the stream to gemini_llm.py.
+其餘字串則統一轉發至 openrouter_llm.py 處理，達成單一 API 接口支援無限模型的擴充能力。
 
-For all other strings, it forwards the request and conversation history to openrouter_llm.py.
+## 部署資訊
+本專案已成功容器化 (Dockerized)。
 
-⚙️ Setup & Local Development
-Clone the repository:
+Backend: 部署於 Render Web Service，連接受控管的 PostgreSQL 資料庫。
 
-Bash
-git clone <your-repo-url>
-cd <your-repo-name>
-Environment Variables:
-Create a .env file in the root directory:
-
-Ini, TOML
-GOOGLE_API_KEY=your_gemini_api_key
-OPENROUTER_API_KEY=your_openrouter_api_key
-Run with Docker Compose:
-
-Bash
-docker-compose up -d --build
-Frontend will be available at http://localhost:5173
-
-Backend API will be available at http://localhost:8000
-
-🚀 Deployment (Render)
-Backend: Deployed as a Web Service. Ensure DATABASE_URL is set in the Render environment variables (must start with postgresql://). Set PYTHONUNBUFFERED=1 to view real-time logs.
-
-Frontend: Deployed as a Static Site using npm run build. Ensure API_URL in App.jsx points to the deployed backend URL.
+Frontend: 部署於 Render Static Site。
