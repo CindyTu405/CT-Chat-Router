@@ -5,6 +5,10 @@
 ## 專案簡介
 CT-Chat-Router 是一個全端、響應式(RWD)的 AI 聊天應用程式。本專案的核心目標是打造一個能統一呼叫多種大型語言模型 (LLM) 的聚合介面，並在底層資料庫實作了**樹狀對話結構 (Tree-based Conversation)**。使用者可以在單一介面中無縫切換不同的 AI 模型來進行對話與測試。
 
+## 展示影片 Demo
+
+https://github.com/user-attachments/assets/2412ef11-22ea-40a2-9480-ef57a8c4aed5
+
 ## 核心功能
 * **多模型動態路由 (Multi-Model Routing):** 後端實作了動態路由機制，原生支援 Google Gemini API，並透過 OpenRouter 整合多款開源/免費模型（如 Arcee AI, DeepSeek 等）。
 * **自訂模型注入:** 提供使用者手動輸入任何 OpenRouter 支援的 Model ID 進行即時測試。
