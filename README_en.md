@@ -5,6 +5,10 @@
 ## Overview
 CT-Chat-Router is a full-stack, responsive AI chat application designed to aggregate multiple Large Language Models (LLMs) into a single, unified interface. It goes beyond simple sequential chatting by introducing **Tree-based Conversation Branching**, allowing users to edit previous prompts and explore alternative conversation paths without losing their original history.
 
+## Demo
+
+https://github.com/user-attachments/assets/2412ef11-22ea-40a2-9480-ef57a8c4aed5
+
 ## Key Features
 * **Multi-Model Routing:** Seamlessly switch between Google Gemini natively and virtually any other LLM via OpenRouter API integration.
 * **Tree-Based Branching (Time Travel):** Every message stores a `parent_id`. Users can edit past messages to create new branches. The system dynamically retrieves the active linear path while preserving all alternate realities in the database.
