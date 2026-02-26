@@ -7,7 +7,7 @@ CT-Chat-Router is a full-stack, responsive AI chat application designed to aggre
 
 ## Demo
 
-https://github.com/user-attachments/assets/2412ef11-22ea-40a2-9480-ef57a8c4aed5
+https://github.com/user-attachments/assets/78270ed4-3bd7-4a4c-9262-499483097318
 
 ## Key Features
 * **Multi-Model Routing:** Seamlessly switch between Google Gemini natively and virtually any other LLM via OpenRouter API integration.
