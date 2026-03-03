@@ -57,8 +57,10 @@ https://github.com/user-attachments/assets/78270ed4-3bd7-4a4c-9262-499483097318
 其餘字串則統一轉發至 openrouter_llm.py 處理，達成單一 API 接口支援無限模型的擴充能力。
 
 ## 部署資訊
-本專案已成功容器化 (Dockerized)。
+本專案已成功容器化 (Dockerized)。部署於 Render Web Service 提供測試Demo：
+因為使用的是免費方案，必須先點開後端網址喚醒，等待載入完成後再點開前端網址即可使用。
+對話紀錄會綁定瀏覽器顯示，但全部記錄會存在資料庫，**請勿輸入任何敏感資訊**。
 
-Backend: 部署於 Render Web Service，連接受控管的 PostgreSQL 資料庫。
+後端:[https://ai-chat-backend-ugmu.onrender.com/](https://ai-chat-backend-ugmu.onrender.com/)
+前端:[https://ai-chat-frontend-smk3.onrender.com/](https://ai-chat-frontend-smk3.onrender.com/)
 
-Frontend: 部署於 Render Static Site。

@@ -82,6 +82,10 @@ Frontend will be available at http://localhost:5173
 Backend API will be available at http://localhost:8000
 
 ## Deployment (Render)
-Backend: Deployed as a Web Service. Ensure DATABASE_URL is set in the Render environment variables (must start with postgresql://). Set PYTHONUNBUFFERED=1 to view real-time logs.
+This project has been successfully Dockerized. You can test the live demo on Render via the links below:
 
-Frontend: Deployed as a Static Site using npm run build. Ensure API_URL in App.jsx points to the deployed backend URL.
+Backend: [https://ai-chat-backend-ugmu.onrender.com/](https://ai-chat-backend-ugmu.onrender.com/)
+Frontend: [https://ai-chat-frontend-smk3.onrender.com/](https://ai-chat-frontend-smk3.onrender.com/)
+
+**Important**: Because I'm using a free hosting tier, please open the Backend link first to wake up the server. Once it's active, open the Frontend link.
+Reminder: While chat history is browser-bound, all logs are saved in the database. **Please avoid sharing sensitive data**.
