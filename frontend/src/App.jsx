@@ -1,12 +1,22 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
-   X, Trash2, Edit2, Check} from 'lucide-react';
+import {
+  Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
+  X, Trash2, Edit2, Check
+} from 'lucide-react';
 
 // const API_URL = "http://localhost:8000"; // 本機開發用
 const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
 
 function App() {
   // --- 狀態管理 ---
+  const [sessionId] = useState(() => {
+    let sid = localStorage.getItem("chat_session_id");
+    if (!sid) {
+      sid = "sess_" + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem("chat_session_id", sid);
+    }
+    return sid;
+  });
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [historyList, setHistoryList] = useState([]); // 側邊欄列表
@@ -29,7 +39,7 @@ function App() {
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = async () => {
     try {
-      const res = await fetch(`${API_URL}/chats/roots`);
+      const res = await fetch(`${API_URL}/chats/roots?session_id=${sessionId}`);
       const data = await res.json();
       setHistoryList(data);
     } catch (error) {
@@ -48,7 +58,7 @@ function App() {
       const res = await fetch(`${API_URL}/chats/${rootId}/history`);
       const data = await res.json();
       setMessages(data); // 把舊對話填入畫面
-      
+
       // 在手機版點擊後自動收起側邊欄 (優化體驗)
       if (window.innerWidth < 768) setSidebarOpen(false);
     } catch (error) {
@@ -92,31 +102,32 @@ function App() {
         body: JSON.stringify({
           message: userMessageContent,
           model: model,
-          parent_id: parentId // <--- 把算好的爸爸 ID 傳出去
+          parent_id: parentId, // <--- 把算好的爸爸 ID 傳出去
+          session_id: sessionId
         })
       });
 
       if (!response.ok) throw new Error("API Error");
-      
+
       // 成功發送後，如果是第一則訊息，重新整理側邊欄
       if (messages.length === 0) {
         setTimeout(fetchHistory, 1000);
       }
 
       // 準備接收串流
-      setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model}]);
+      setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model }]);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let aiResponseText = "";
-      
+
       // 讀取 Header 中的 ID (如果有的話，這可以讓我們更精確更新狀態，這邊先略過，用 index 更新)
       // const msgId = response.headers.get("X-Message-Id");
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
+
         const chunk = decoder.decode(value, { stream: true });
         aiResponseText += chunk;
 
@@ -137,12 +148,12 @@ function App() {
           return newMessages;
         });
       }
-      
+
       // 串流結束後，為了確保 parent_id 正確 (因為剛剛只有 content 沒有 id)
       // 我們可以偷偷重新載入一次這串對話 (Optional，但最保險)
       // 不過為了流暢度，我們先不做 reload，
       // 等使用者發下一則時，我們還是缺 ID... 啊！這就是問題所在！
-      
+
       // ★★★ 補強：我們必須拿到 AI 回傳的 ID，不然下一句會斷掉！ ★★★
       // 我們上次在 backend 有加 `expose_headers=["X-Message-Id"]` 記得嗎？
       // 現在派上用場了！
@@ -172,7 +183,7 @@ function App() {
     // 我們只保留 index 之前的訊息 (0 ~ index-1)
     // 例如在 index=2 (Q2) 分支，我們保留 index 0, 1 (Q1, A1)
     const prevMessages = messages.slice(0, index);
-    
+
     // 2. 算出新的 parent_id
     // 如果 prevMessages 是空的，代表我們改的是第一則訊息，所以 parent_id = null
     // 否則，parent_id 就是上一則訊息 (A1) 的 ID
@@ -184,7 +195,7 @@ function App() {
     // 3. 更新畫面：切斷舊未來，插入新現在
     const newUserMsg = { role: 'user', content: editInput };
     setMessages([...prevMessages, newUserMsg]);
-    
+
     // 退出編輯模式
     setEditingIndex(null);
     setEditInput("");
@@ -198,7 +209,8 @@ function App() {
         body: JSON.stringify({
           message: newUserMsg.content,
           model: model,
-          parent_id: parentId // <--- 關鍵！接上正確的父親
+          parent_id: parentId, // <--- 關鍵！接上正確的父親
+          session_id: sessionId
         })
       });
 
@@ -215,7 +227,7 @@ function App() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
+
         const chunk = decoder.decode(value, { stream: true });
         aiResponseText += chunk;
 
@@ -244,22 +256,22 @@ function App() {
   };
 
   // 刪除對話
-const handleDeleteChat = async (e, chatId) => {
+  const handleDeleteChat = async (e, chatId) => {
     e.stopPropagation(); // 防止觸發 "載入對話"
-    
+
     // 加上簡單的防呆，避免手滑
     if (!confirm("確定要刪除這個對話串嗎？此動作無法復原。")) return;
 
     try {
       await fetch(`${API_URL}/chats/${chatId}`, { method: 'DELETE' });
-      
+
       // ★★★ 清理後的邏輯 ★★★
       // 如果現在畫面上顯示的對話 (messages[0]) 就是我們剛刪除的那個 (chatId)
       // 那就清空畫面，回到 "New Chat" 狀態
       if (messages.length > 0 && messages[0].id === chatId) {
-         startNewChat();
+        startNewChat();
       }
-      
+
       // 重新抓取側邊欄列表
       fetchHistory();
     } catch (error) {
@@ -268,50 +280,50 @@ const handleDeleteChat = async (e, chatId) => {
     }
   };
 
-// 開始重新命名
-const startRenaming = (e, chat) => {
-  e.stopPropagation();
-  setRenamingId(chat.id);
-  setRenameInput(chat.title || chat.content); // 預設帶入標題或內容
-};
+  // 開始重新命名
+  const startRenaming = (e, chat) => {
+    e.stopPropagation();
+    setRenamingId(chat.id);
+    setRenameInput(chat.title || chat.content); // 預設帶入標題或內容
+  };
 
-// 提交重新命名
-const submitRename = async (e) => {
-  e.stopPropagation(); // 防止觸發 click
-  if (!renameInput.trim()) return;
+  // 提交重新命名
+  const submitRename = async (e) => {
+    e.stopPropagation(); // 防止觸發 click
+    if (!renameInput.trim()) return;
 
-  try {
-        await fetch(`${API_URL}/chats/${renamingId}/title`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: renameInput })
+    try {
+      await fetch(`${API_URL}/chats/${renamingId}/title`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: renameInput })
+      });
+
+      // ★★★ 新增這段：如果改名的剛好是當前正在看的對話，同步更新畫面上方的標題 ★★★
+      if (messages.length > 0 && messages[0].id === renamingId) {
+        setMessages(prev => {
+          const newMsgs = [...prev];
+          newMsgs[0] = { ...newMsgs[0], title: renameInput };
+          return newMsgs;
         });
-        
-        // ★★★ 新增這段：如果改名的剛好是當前正在看的對話，同步更新畫面上方的標題 ★★★
-        if (messages.length > 0 && messages[0].id === renamingId) {
-            setMessages(prev => {
-                const newMsgs = [...prev];
-                newMsgs[0] = { ...newMsgs[0], title: renameInput };
-                return newMsgs;
-            });
-        }
-        
-        setRenamingId(null);
-        fetchHistory();
-      } catch (error) {
-        console.error("改名失敗", error);
       }
-    };
+
+      setRenamingId(null);
+      fetchHistory();
+    } catch (error) {
+      console.error("改名失敗", error);
+    }
+  };
 
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100 font-sans overflow-hidden">
-      
+
       {/* --- 左側側邊欄 --- */}
       <div className={`${sidebarOpen ? 'w-80' : 'w-0'} bg-gray-900 border-r border-gray-800 transition-all duration-300 flex flex-col flex-shrink-0 relative`}>
-        
+
         {/* New Chat 按鈕 */}
         <div className="p-4">
-          <button 
+          <button
             onClick={startNewChat}
             className="w-full flex items-center gap-3 px-4 py-3 bg-gray-800 hover:bg-gray-700 rounded-xl transition border border-gray-700 hover:border-gray-600 text-sm font-medium cursor-pointer"
           >
@@ -324,79 +336,79 @@ const submitRename = async (e) => {
         <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
           Recent
         </div>
-        
+
         {/* 列表區域 */}
         <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-800">
           {historyList.map((chat) => (
             <div key={chat.id} className="group relative">
-          {/* 判斷：如果是正在改名的狀態，顯示輸入框 */}
-          {renamingId === chat.id ? (
-            <div className="p-2 mx-2 bg-gray-800 border border-blue-500 rounded-lg flex items-center gap-2">
-              <input
-                className="flex-1 bg-transparent text-sm text-white outline-none min-w-0"
-                value={renameInput}
-                onChange={(e) => setRenameInput(e.target.value)}
-                autoFocus
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter') submitRename(e);
-                    if (e.key === 'Escape') setRenamingId(null);
-                }}
-              />
-              <button onClick={submitRename} className="text-green-400 hover:text-green-300">
-                <Check className="w-4 h-4" />
-              </button>
-              <button onClick={() => setRenamingId(null)} className="text-gray-400 hover:text-gray-300">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          ) : (
-            // 一般狀態：顯示按鈕
-            <button 
-              onClick={() => loadChat(chat.id)}
-              className="w-full text-left p-3 rounded-lg hover:bg-gray-800 group cursor-pointer transition flex items-center gap-3 relative"
-            >
-              <MessageSquare className="w-4 h-4 text-gray-500 group-hover:text-blue-400 transition flex-shrink-0" />
-              <div className="flex-1 min-w-0 pr-6"> {/* pr-6 留空間給 hover 按鈕 */}
-                <div className="text-sm text-gray-300 group-hover:text-white truncate transition font-medium">
-                  {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
-                  {chat.title || chat.content}
+              {/* 判斷：如果是正在改名的狀態，顯示輸入框 */}
+              {renamingId === chat.id ? (
+                <div className="p-2 mx-2 bg-gray-800 border border-blue-500 rounded-lg flex items-center gap-2">
+                  <input
+                    className="flex-1 bg-transparent text-sm text-white outline-none min-w-0"
+                    value={renameInput}
+                    onChange={(e) => setRenameInput(e.target.value)}
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') submitRename(e);
+                      if (e.key === 'Escape') setRenamingId(null);
+                    }}
+                  />
+                  <button onClick={submitRename} className="text-green-400 hover:text-green-300">
+                    <Check className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setRenamingId(null)} className="text-gray-400 hover:text-gray-300">
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-                <div className="text-xs text-gray-600 truncate mt-0.5">
-                   {new Date(chat.created_at + (chat.created_at.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
-                    timeZone: 'Asia/Taipei',
-                    hour12: false, // 24小時制
-                    year: 'numeric',
-                    month: 'numeric',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                  })}
-                </div>
-              </div>
+              ) : (
+                // 一般狀態：顯示按鈕
+                <button
+                  onClick={() => loadChat(chat.id)}
+                  className="w-full text-left p-3 rounded-lg hover:bg-gray-800 group cursor-pointer transition flex items-center gap-3 relative"
+                >
+                  <MessageSquare className="w-4 h-4 text-gray-500 group-hover:text-blue-400 transition flex-shrink-0" />
+                  <div className="flex-1 min-w-0 pr-6"> {/* pr-6 留空間給 hover 按鈕 */}
+                    <div className="text-sm text-gray-300 group-hover:text-white truncate transition font-medium">
+                      {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
+                      {chat.title || chat.content}
+                    </div>
+                    <div className="text-xs text-gray-600 truncate mt-0.5">
+                      {new Date(chat.created_at + (chat.created_at.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
+                        timeZone: 'Asia/Taipei',
+                        hour12: false, // 24小時制
+                        year: 'numeric',
+                        month: 'numeric',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                      })}
+                    </div>
+                  </div>
 
-              {/* ★★★ 懸停操作按鈕 (Group Hover Actions) ★★★ */}
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800/90 rounded-md p-1 shadow-md">
-                <div 
-                  onClick={(e) => startRenaming(e, chat)}
-                  className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded cursor-pointer"
-                  title="重新命名"
-                >
-                  <Edit2 className="w-3.5 h-3.5" />
-                </div>
-                <div 
-                  onClick={(e) => handleDeleteChat(e, chat.id)}
-                  className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded cursor-pointer"
-                  title="刪除對話"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </div>
-              </div>
-            </button>
-          )}
-        </div>
-      ))}
+                  {/* ★★★ 懸停操作按鈕 (Group Hover Actions) ★★★ */}
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800/90 rounded-md p-1 shadow-md">
+                    <div
+                      onClick={(e) => startRenaming(e, chat)}
+                      className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded cursor-pointer"
+                      title="重新命名"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </div>
+                    <div
+                      onClick={(e) => handleDeleteChat(e, chat.id)}
+                      className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded cursor-pointer"
+                      title="刪除對話"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </div>
+                  </div>
+                </button>
+              )}
+            </div>
+          ))}
         </div>
 
         {/* 底部設定區 */}
@@ -413,11 +425,11 @@ const submitRename = async (e) => {
 
       {/* --- 右側主畫面 --- */}
       <div className="flex-1 flex flex-col h-full relative min-w-0 bg-gray-950">
-        
+
         {/* 頂部導航列 */}
         <div className="h-14 border-b border-gray-800 flex items-center justify-between px-4 bg-gray-950/80 backdrop-blur z-10 sticky top-0">
           <div className="flex items-center gap-3">
-            <button 
+            <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition cursor-pointer"
             >
@@ -436,9 +448,9 @@ const submitRename = async (e) => {
           </div>
 
           <div className="relative">
-              {/* --- 模型選擇區 (支援下拉與手動輸入) --- */}
+            {/* --- 模型選擇區 (支援下拉與手動輸入) --- */}
             <div className="relative flex items-center gap-2">
-              
+
               {/* 裝飾用的小星星 Icon */}
               <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none z-10">
                 <Sparkles className="h-3.5 w-3.5 text-yellow-500" />
@@ -446,7 +458,7 @@ const submitRename = async (e) => {
 
               {!isCustomModel ? (
                 // 模式 A：下拉選單
-                <select 
+                <select
                   value={model}
                   onChange={(e) => {
                     if (e.target.value === "custom") {
@@ -511,7 +523,7 @@ const submitRename = async (e) => {
               <p className="text-xl font-medium text-gray-300">今天想聊些什麼？</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg px-4">
                 {['解釋一下 Docker 是什麼', '寫一個 Python 爬蟲範例', '給我一個健身計畫', '講個笑話'].map(suggestion => (
-                  <button 
+                  <button
                     key={suggestion}
                     onClick={() => setInput(suggestion)}
                     className="p-3 bg-gray-900 border border-gray-800 hover:bg-gray-800 rounded-xl text-sm text-left transition cursor-pointer"
@@ -526,8 +538,8 @@ const submitRename = async (e) => {
             // 修正重點 1: 使用 Fragment (<>...</>) 包裹多個元素
             <>
               {messages.map((msg, index) => (
-                <div 
-                  key={index} 
+                <div
+                  key={index}
                   className={`flex gap-4 max-w-3xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                 >
                   {/* 頭像 */}
@@ -537,7 +549,7 @@ const submitRename = async (e) => {
 
                   {/* 訊息內容區塊 */}
                   <div className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} max-w-[85%] md:max-w-[75%]`}>
-                    
+
                     {/* 編輯模式判斷 */}
                     {editingIndex === index ? (
                       <div className="w-full bg-gray-800 p-3 rounded-2xl border border-blue-500/50 shadow-lg animate-in fade-in zoom-in-95 duration-200">
@@ -549,13 +561,13 @@ const submitRename = async (e) => {
                           autoFocus
                         />
                         <div className="flex justify-end gap-2 mt-3">
-                          <button 
+                          <button
                             onClick={() => setEditingIndex(null)}
                             className="px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition"
                           >
                             取消
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleBranch(index)}
                             className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition flex items-center gap-1"
                           >
@@ -568,8 +580,8 @@ const submitRename = async (e) => {
                       <div className="relative group/bubble">
                         <div className={`
                           px-5 py-3.5 rounded-2xl leading-relaxed shadow-sm
-                          ${msg.role === 'user' 
-                            ? 'bg-blue-600 text-white rounded-tr-none' 
+                          ${msg.role === 'user'
+                            ? 'bg-blue-600 text-white rounded-tr-none'
                             : 'bg-gray-800 text-gray-100 rounded-tl-none border border-gray-700'}
                         `}>
                           <div className="whitespace-pre-wrap break-words text-[15px]">
@@ -603,7 +615,7 @@ const submitRename = async (e) => {
                   </div>
                 </div>
               ))}
-              
+
               {/* 自動捲動定位點 */}
               <div ref={messagesEndRef} />
             </>
@@ -622,7 +634,7 @@ const submitRename = async (e) => {
               className="w-full bg-gray-900 text-gray-100 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-1 focus:ring-blue-500/50 border border-gray-800 group-hover:border-gray-700 transition resize-none shadow-lg"
               style={{ minHeight: '56px' }}
             />
-            <button 
+            <button
               onClick={handleSend}
               disabled={isLoading || !input.trim()}
               className="absolute right-2 bottom-2 p-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-md"

@@ -19,6 +19,9 @@ class Message(SQLModel, table=True):
     # 建立時間
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    # 用戶 Session (用來隔離不同訪客的內容)
+    session_id: str = Field(default="default")
+
     # --- 樹狀結構核心 ---
     # 指向父節點的 ID (上一則訊息)
     parent_id: Optional[uuid.UUID] = Field(default=None, foreign_key="message.id")
@@ -39,6 +42,7 @@ class ChatRequest(SQLModel):
     message: str
     parent_id: Optional[uuid.UUID] = None
     model: str = "gpt-3.5-turbo"
+    session_id: str = "default"
 
 class UpdateTitleRequest(SQLModel):
     title: str

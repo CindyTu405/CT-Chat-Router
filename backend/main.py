@@ -102,7 +102,7 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
     history = get_conversation_history(session, request.parent_id)
 
     # 1. 先存使用者的訊息 (User Message)
-    user_msg = Message(role="user", content=request.message, parent_id=request.parent_id)
+    user_msg = Message(role="user", content=request.message, parent_id=request.parent_id, session_id=request.session_id)
     session.add(user_msg)
     session.commit()
     session.refresh(user_msg)
@@ -113,7 +113,8 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
         role="assistant", 
         content="",  # 先留空，等串流完再補
         parent_id=user_msg.id, 
-        model_used=request.model
+        model_used=request.model,
+        session_id=request.session_id
     )
     session.add(ai_msg)
     session.commit()
@@ -153,14 +154,19 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
     )
 
 @app.get("/chats/roots", response_model=list[Message])
-def get_chat_roots(session: Session = Depends(get_session)):
+def get_chat_roots(session_id: str | None = None, session: Session = Depends(get_session)):
     """
     取得所有「對話開頭」 (Root Messages)
     用來顯示在側邊欄列表
     """
     # 1. 條件：parent_id 必須是 None
+    statement = select(Message).where(Message.parent_id == None)
+    
+    if session_id:
+        statement = statement.where(Message.session_id == session_id)
+        
     # 2. 排序：最新的在最上面 (created_at desc)
-    statement = select(Message).where(Message.parent_id == None).order_by(Message.created_at.desc())
+    statement = statement.order_by(Message.created_at.desc())
     return session.exec(statement).all()
 
 @app.get("/chats/{root_id}/history", response_model=list[Message])

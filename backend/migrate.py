@@ -13,5 +13,16 @@ def add_title_column():
     except Exception as e:
         print(f"⚠️ 發生錯誤 (可能欄位已存在): {e}")
 
+def add_session_id_column():
+    print("正在嘗試新增 session_id 欄位...")
+    try:
+        with Session(engine) as session:
+            session.exec(text("ALTER TABLE message ADD COLUMN IF NOT EXISTS session_id VARCHAR DEFAULT 'default';"))
+            session.commit()
+            print("✅ 成功！資料庫已新增 session_id 欄位。")
+    except Exception as e:
+        print(f"⚠️ 發生錯誤 (可能欄位已存在): {e}")
+
 if __name__ == "__main__":
     add_title_column()
+    add_session_id_column()
