@@ -467,8 +467,8 @@ function App() {
                   <optgroup label="OpenRouter (需儲值/免費)">
                     <option value="arcee-ai/trinity-large-preview:free">arcee-ai/trinity-large-preview:free</option>
                     <option value="nvidia/nemotron-3-nano-30b-a3b:free">nvidia/nemotron-3-nano-30b-a3b:free</option>
-                    <option value="stepfun/step-3.5-flash:free">stepfun/step-3.5-flash:free</option>
-                    <option value="deepseek/deepseek-r1-0528:free">deepseek/deepseek-r1-0528:free</option>
+                    <option value="z-ai/glm-4.5-air:free">z-ai/glm-4.5-air:free</option>
+                    <option value="openai/gpt-oss-120b:free">openai/gpt-oss-120b:free</option>
                     <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
                     <option value="anthropic/claude-opus-4.6">claude-opus-4.6</option>
                   </optgroup>
