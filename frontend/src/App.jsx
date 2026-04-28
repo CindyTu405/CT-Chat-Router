@@ -7,6 +7,14 @@ const API_URL = "http://localhost:8000"; // 本機開發用
 
 function App() {
   // --- 狀態管理 ---
+  const [sessionId] = useState(() => {
+    let sid = localStorage.getItem("chat_session_id");
+    if (!sid) {
+      sid = "sess_" + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem("chat_session_id", sid);
+    }
+    return sid;
+  });
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [historyList, setHistoryList] = useState([]); // 側邊欄列表
@@ -29,7 +37,7 @@ function App() {
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = async () => {
     try {
-      const res = await fetch(`${API_URL}/chats/roots`);
+      const res = await fetch(`${API_URL}/chats/roots?session_id=${sessionId}`);
       const data = await res.json();
       setHistoryList(data);
     } catch (error) {
@@ -92,7 +100,8 @@ function App() {
         body: JSON.stringify({
           message: userMessageContent,
           model: model,
-          parent_id: parentId // <--- 把算好的爸爸 ID 傳出去
+          parent_id: parentId, // <--- 把算好的爸爸 ID 傳出去
+          session_id: sessionId
         })
       });
 
@@ -198,7 +207,8 @@ function App() {
         body: JSON.stringify({
           message: newUserMsg.content,
           model: model,
-          parent_id: parentId // <--- 關鍵！接上正確的父親
+          parent_id: parentId, // <--- 關鍵！接上正確的父親
+          session_id: sessionId
         })
       });
 
