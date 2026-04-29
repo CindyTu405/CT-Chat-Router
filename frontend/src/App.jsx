@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
-   X, Trash2, Edit2, Check} from 'lucide-react';
+   X, Trash2, Edit2, Check, ArrowUpDown} from 'lucide-react';
 
 const API_URL = "http://localhost:8000"; // 本機開發用
 // const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
@@ -26,6 +26,7 @@ function App() {
   const [editInput, setEditInput] = useState(""); // 編輯框裡的文字
   const [renamingId, setRenamingId] = useState(null); // 正在改名的對話 ID
   const [renameInput, setRenameInput] = useState(""); // 改名輸入框內容
+  const [sortBy, setSortBy] = useState("updated"); // 新增：排序狀態 ('updated' = 最新活躍, 'created' = 建立時間)
 
   const messagesEndRef = useRef(null);
 
@@ -37,7 +38,7 @@ function App() {
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = async () => {
     try {
-      const res = await fetch(`${API_URL}/chats/roots?session_id=${sessionId}`);
+      const res = await fetch(`${API_URL}/chats/roots?session_id=${sessionId}&sort_by=${sortBy}`);
       const data = await res.json();
       setHistoryList(data);
     } catch (error) {
@@ -47,7 +48,7 @@ function App() {
 
   useEffect(() => {
     fetchHistory();
-  }, []);
+  }, [sortBy]); // 當 sortBy 改變時，自動重新載入列表
 
   // 2. 載入特定對話 (點擊側邊欄觸發)
   const loadChat = async (rootId) => {
@@ -332,9 +333,19 @@ function App() {
           </button>
         </div>
 
-        {/* 歷史紀錄標題 */}
-        <div className="px-4 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider">
-          Recent
+        {/* 歷史紀錄標題與排序按鈕 */}
+        <div className="px-4 py-2 flex items-center justify-between">
+          <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+            Recent
+          </div>
+          <button 
+            onClick={() => setSortBy(prev => prev === 'updated' ? 'created' : 'updated')}
+            className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-[#7DB9DE] transition cursor-pointer"
+            title="切換排序方式"
+          >
+            <ArrowUpDown className="w-3 h-3" />
+            {sortBy === 'updated' ? '依最新回覆' : '依建立日期'}
+          </button>
         </div>
         
         {/* 列表區域 */}
@@ -589,6 +600,15 @@ function App() {
                             {msg.content || <span className="animate-pulse text-gray-400">Thinking...</span>}
                           </div>
                         </div>
+
+                        {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
+                        {msg.role === 'user' && (
+                          <div className="text-[11px] text-gray-400 mt-1.5 mr-1 select-none">
+                            {msg.created_at ? new Date(msg.created_at + (msg.created_at.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
+                              month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false
+                            }) : '剛剛發送'}
+                          </div>
+                        )}
 
                         {/* 鉛筆按鈕 */}
                         {msg.role === 'user' && !isLoading && (

@@ -154,20 +154,51 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
     )
 
 @app.get("/chats/roots", response_model=list[Message])
-def get_chat_roots(session_id: str | None = None, session: Session = Depends(get_session)):
+def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session = Depends(get_session)):
     """
-    取得所有「對話開頭」 (Root Messages)
-    用來顯示在側邊欄列表
+    取得側邊欄列表，支援兩種排序：
+    1. created: 依建立日期排序 (舊版預設)
+    2. updated: 依最後活躍時間排序 (尋找該對話樹中最新的訊息時間)
     """
-    # 1. 條件：parent_id 必須是 None
-    statement = select(Message).where(Message.parent_id == None)
-    
-    if session_id:
-        statement = statement.where(Message.session_id == session_id)
-     
-    # 2. 排序：最新的在最上面 (created_at desc)
-    statement = statement.order_by(Message.created_at.desc())
-    return session.exec(statement).all()
+    if sort_by == "created":
+        # 簡單模式：只看根節點的建立時間
+        statement = select(Message).where(
+            Message.parent_id == None,
+            Message.session_id == session_id
+        ).order_by(Message.created_at.desc())
+        return session.exec(statement).all()
+    else:
+        # 活躍度模式：用遞迴找出每一棵樹「最晚」的活動時間
+        query = text("""
+        WITH RECURSIVE chat_tree AS (
+            -- 1. 先抓出所有根節點 (Roots)
+            SELECT id AS root_id, id AS msg_id, created_at
+            FROM message
+            WHERE parent_id IS NULL AND session_id = :session_id
+            
+            UNION ALL
+            
+            -- 2. 往下遞迴抓出所有子孫
+            SELECT ct.root_id, m.id, m.created_at
+            FROM message m
+            JOIN chat_tree ct ON m.parent_id = ct.msg_id
+        ),
+        tree_max_time AS (
+            -- 3. 找出每個家族(root_id)最新的 created_at
+            SELECT root_id, MAX(created_at) as last_activity
+            FROM chat_tree
+            GROUP BY root_id
+        )
+        -- 4. 依照這個最新時間來排序根節點
+        SELECT m.*
+        FROM message m
+        JOIN tree_max_time tmt ON m.id = tmt.root_id
+        ORDER BY tmt.last_activity DESC;
+        """)
+        
+        # 使用 mappings().all() 確保回傳字典格式，讓 FastAPI 順利轉換
+        results = session.exec(query, params={"session_id": session_id}).mappings().all()
+        return results
 
 @app.get("/chats/{root_id}/history", response_model=list[Message])
 def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)):
