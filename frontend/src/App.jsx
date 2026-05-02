@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
    X, Trash2, Edit2, Check, ArrowUpDown} from 'lucide-react';
 
@@ -36,7 +36,7 @@ function App() {
   }, [messages]);
 
   // 1. 載入側邊欄歷史紀錄 (Roots)
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback( async () => {
     try {
       const res = await fetch(`${API_URL}/chats/roots?session_id=${sessionId}&sort_by=${sortBy}`);
       const data = await res.json();
@@ -44,11 +44,11 @@ function App() {
     } catch (error) {
       console.error("無法載入歷史紀錄:", error);
     }
-  };
+  }, [sessionId, sortBy]); // 依賴 sessionId 和 sortBy
 
   useEffect(() => {
     fetchHistory();
-  }, [sortBy]); // 當 sortBy 改變時，自動重新載入列表
+  }, [fetchHistory]); // 當 sortBy 改變時，自動重新載入列表
 
   // 2. 載入特定對話 (點擊側邊欄觸發)
   const loadChat = async (rootId) => {
