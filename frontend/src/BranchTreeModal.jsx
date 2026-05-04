@@ -15,7 +15,7 @@ const CustomMessageNode = ({ data }) => {
     <div 
       className={`w-64 p-3 rounded-xl shadow-md border-2 ${
         isUser 
-          ? 'bg-[#228DCD] border-[#228DCD] text-white' 
+          ? 'bg-[#228DCD] border-[#7DB9DE] text-white' 
           : 'bg-white border-[#7B90D2] text-gray-800'
       }`}
     >
@@ -154,7 +154,7 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
           <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
             <TbBinaryTree2 className="w-6 h-6 text-[#228DCD]" />
             對話分支地圖
-            <span className="text-xs font-normal text-gray-500 bg-gray-200 px-2 py-1 rounded">可滾動縮放、拖曳平移</span>
+            <span className="text-xs font-normal text-gray-500 bg-gray-200 px-2 py-1 rounded">點擊節點，以開啟對話</span>
           </h2>
           <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition cursor-pointer text-gray-500">
             <X className="w-5 h-5" />
