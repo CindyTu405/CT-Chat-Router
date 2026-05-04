@@ -10,21 +10,41 @@ const API_URL = "http://localhost:8000"; // 確保這裡跟你的 App.jsx 一致
 // --- 1. 定義「自訂節點」的外觀 (最多預覽三行) ---
 const CustomMessageNode = ({ data }) => {
   const isUser = data.role === 'user';
+  
   return (
-    <div className={`w-64 p-3 rounded-xl shadow-md border-2 ${isUser ? 'bg-blue-50 border-blue-300' : 'bg-green-50 border-emerald-300'}`}>
-      <Handle type="target" position={Position.Top} className="w-2 h-2" />
+    <div 
+      className={`w-64 p-3 rounded-xl shadow-md border-2 ${
+        isUser 
+          ? 'bg-[#228DCD] border-[#228DCD] text-white' 
+          : 'bg-white border-[#7B90D2] text-gray-800'
+      }`}
+    >
+      {/* 頂部連接點 (稍微改成中性的灰色，在深色背景上才不突兀) */}
+      <Handle type="target" position={Position.Top} className="w-2 h-2 bg-gray-300 border-none" />
       
-      <div className="flex items-center gap-2 mb-2 border-b pb-1 opacity-80">
-        {isUser ? <User className="w-4 h-4 text-blue-600" /> : <Bot className="w-4 h-4 text-emerald-600" />}
-        <span className="text-xs font-bold text-gray-700">{isUser ? 'User' : 'AI'}</span>
+      {/* 標題與 Icon 區塊 */}
+      <div className={`flex items-center gap-2 mb-2 border-b pb-1 ${
+        isUser ? 'border-white/30 opacity-90' : 'border-gray-200 opacity-80'
+      }`}>
+        {isUser ? (
+          <User className="w-4 h-4 text-white" />
+        ) : (
+          <Bot className="w-4 h-4 text-[#7B90D2]" />
+        )}
+        <span className={`text-xs font-bold ${isUser ? 'text-white' : 'text-gray-700'}`}>
+          {isUser ? 'User' : 'AI'}
+        </span>
       </div>
       
-      {/* line-clamp-3 可以限制文字最多顯示 3 行，多出來的變 ... */}
-      <div className="text-sm text-gray-800 line-clamp-3 whitespace-pre-wrap break-words">
+      {/* 文字預覽內容3行 */}
+      <div className={`text-sm line-clamp-3 whitespace-pre-wrap break-words ${
+        isUser ? 'text-white' : 'text-gray-800'
+      }`}>
         {data.content}
       </div>
       
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2" />
+      {/* 底部連接點 */}
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 bg-gray-300 border-none" />
     </div>
   );
 };
