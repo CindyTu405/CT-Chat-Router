@@ -125,6 +125,8 @@ function App() {
         setTimeout(fetchHistory, 1000);
       }
 
+      fetchHistory();
+
       // 準備接收串流
       setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model}]);
 
