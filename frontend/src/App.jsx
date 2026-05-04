@@ -465,7 +465,7 @@ function App() {
 
       {/* --- 右側主畫面 --- */}
       {/* 加上指定的淺灰色網格背景 */}
-      <div className="flex-1 flex flex-col h-full relative min-w-0 bg-white bg-[linear-gradient(to_right,#f0f0f0_1px,transparent_1px),linear-gradient(to_bottom,#f0f0f0_1px,transparent_1px)] bg-[size:16px_16px]">
+      <div className="flex-1 flex flex-col h-full relative min-w-0 bg-gray-50 bg-[linear-gradient(to_right,#ebebeb_1px,transparent_1px),linear-gradient(to_bottom,#ebebeb_1px,transparent_1px)] bg-[size:16px_16px]">
         
         {/* 頂部導航列 */}
         <div className="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white/80 backdrop-blur-sm z-10 sticky top-0 shadow-sm">
@@ -494,7 +494,7 @@ function App() {
               
               {/* 裝飾用的小星星 Icon */}
               <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none z-10">
-                <Sparkles className="h-3.5 w-3.5 text-yellow-500" />
+                <Sparkles className="h-3.5 w-3.5 text-[#7B90D2]" />
               </div>
 
               {!isCustomModel ? (
@@ -619,11 +619,12 @@ function App() {
                       </div>
                     ) : (
                       <div className="relative group/bubble">
+                        {/* 對話框 */}
                         <div className={`
-                          px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border
+                          px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-[1px]
                           ${msg.role === 'user' 
                             ? 'bg-[#228DCD] text-white rounded-tr-none border-[#228DCD]' 
-                            : 'bg-white text-gray-800 rounded-tl-none border-gray-200'}
+                            : 'bg-white text-gray-800 rounded-tl-none border-[#7B90D2]'}
                         `}>
                           <div className="whitespace-pre-wrap break-words text-[15px]">
                             {msg.content || <span className="animate-pulse text-gray-400">Thinking...</span>}
