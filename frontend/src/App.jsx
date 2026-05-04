@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
    X, Trash2, Edit2, Check, ArrowUpDown} from 'lucide-react';
+import { TbBinaryTree2 } from 'react-icons/tb';
 
 const API_URL = "http://localhost:8000"; // 本機開發用
 // const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
@@ -214,6 +215,7 @@ function App() {
       });
 
       if (!response.ok) throw new Error("API Error");
+      fetchHistory();
 
       // 抓取新 ID
       setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model }]);
@@ -379,8 +381,15 @@ function App() {
               onClick={() => loadChat(chat.id)}
               className="w-full text-left p-3 rounded-lg hover:bg-white/60 group cursor-pointer transition flex items-center gap-3 relative"
             >
-              
-              <MessageSquare className="w-4 h-4 text-gray-500 group-hover:text-[#7DB9DE] transition flex-shrink-0" />
+              {/* ★★★ 修改這裡：判斷是否有分支來決定圖示 ★★★ */}
+              {chat.has_branch ? (
+                <TbBinaryTree2 
+                  className="w-4 h-4 text-[#228DCD] hover:text-[#7DB9DE] transition flex-shrink-0" 
+                  title="這是一個有分支的對話"
+                />
+              ) : (
+                <MessageSquare className="w-4 h-4 text-gray-500 group-hover:text-[#7DB9DE] transition flex-shrink-0" />
+              )}
               <div className="flex-1 min-w-0 pr-6"> {/* pr-6 留空間給 hover 按鈕 */}
                   {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
                 <div className="text-sm text-gray-700 group-hover:text-gray-900 truncate transition font-medium">

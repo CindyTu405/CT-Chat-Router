@@ -107,6 +107,21 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
     session.commit()
     session.refresh(user_msg)
 
+    if request.parent_id and len(history) > 0:
+        # 看看這個「爸爸」現在有幾個「小孩 (回覆)」了
+        children = session.exec(select(Message.id).where(Message.parent_id == request.parent_id)).all()
+        
+        # 如果小孩數量 > 1，代表這是一個分支操作！
+        if len(children) > 1:
+            root_node = history[0]  # history 的第一個元素剛好就是整棵樹的根節點 (Root)
+            
+            # 如果還沒被標記過，就把它標記為 True 並存檔
+            if not root_node.has_branch:
+                # 因為 root_node 已經在 session 裡了，所以直接改屬性再 commit 即可
+                root_node.has_branch = True
+                session.add(root_node)
+                session.commit()
+
     # 2. 立刻建立 AI 訊息 (佔位)
     # 先存一個空字串，目的是為了馬上拿到 ID，確保連結不斷裂
     ai_msg = Message(
