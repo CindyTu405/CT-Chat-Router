@@ -687,7 +687,7 @@ function App() {
             <button 
               onClick={handleSend}
               disabled={isLoading || !input.trim()}
-              className="absolute right-2 bottom-4 p-2.5 bg-[#51A8DD] hover:bg-[#7DB9DE] rounded-xl transition disabled:opacity-80 disabled:cursor-not-allowed cursor-pointer shadow-md"
+              className="absolute right-2 bottom-[15px] p-2.5 bg-[#51A8DD] hover:bg-[#7DB9DE] rounded-xl transition disabled:opacity-80 disabled:cursor-not-allowed cursor-pointer shadow-md"
             >
               <Send className="w-5 h-5 text-white" />
             </button>
