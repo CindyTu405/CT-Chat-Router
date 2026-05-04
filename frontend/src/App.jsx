@@ -455,8 +455,10 @@ function App() {
             <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#7DB9DE] to-[#7B90D2] flex items-center justify-center font-bold text-xs text-white shadow-sm">
               ME
             </div>
-            <div className="text-sm font-medium text-gray-700">User</div>
-            <Settings className="w-4 h-4 ml-auto text-gray-500 cursor-pointer hover:text-[#7DB9DE]" />
+            <div className="text-sm font-medium text-gray-700" >User</div>
+              <div title="只是一個齒輪" className="ml-auto">
+              <Settings className="w-4 h-4 text-gray-500 hover:text-[#7DB9DE]"/>
+              </div>
           </div>
         </div>
       </div>
