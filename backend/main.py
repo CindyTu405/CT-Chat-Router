@@ -319,3 +319,28 @@ def delete_chat(root_id: uuid.UUID, session: Session = Depends(get_session)):
         raise HTTPException(status_code=500, detail=f"刪除失敗: {str(e)}")
         
     return {"status": "ok", "deleted_count": len(all_ids)}
+
+# 取得整棵對話樹
+@app.get("/chats/{root_id}/tree", response_model=list[Message])
+def get_chat_tree(root_id: uuid.UUID, session: Session = Depends(get_session)):
+    """
+    取得整棵對話樹的「所有」節點 (用來畫前端的 React Flow 樹狀圖)
+    """
+    query = text("""
+    WITH RECURSIVE chat_tree AS (
+        -- 1. 找到樹根
+        SELECT id, role, content, model_used, created_at, parent_id, title 
+        FROM message WHERE id = :root_id
+        
+        UNION ALL
+        
+        -- 2. 往下找出所有子子孫孫 (不論有幾個分支全抓)
+        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title 
+        FROM message m
+        JOIN chat_tree ct ON m.parent_id = ct.id
+    )
+    SELECT * FROM chat_tree ORDER BY created_at ASC;
+    """)
+    
+    results = session.exec(query, params={"root_id": root_id}).mappings().all()
+    return results

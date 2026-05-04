@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
    X, Trash2, Edit2, Check, ArrowUpDown} from 'lucide-react';
 import { TbBinaryTree2 } from 'react-icons/tb';
+import BranchTreeModal from './BranchTreeModal';
 
 const API_URL = "http://localhost:8000"; // 本機開發用
 // const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
@@ -28,6 +29,10 @@ function App() {
   const [renamingId, setRenamingId] = useState(null); // 正在改名的對話 ID
   const [renameInput, setRenameInput] = useState(""); // 改名輸入框內容
   const [sortBy, setSortBy] = useState("updated"); // 新增：排序狀態 ('updated' = 最新活躍, 'created' = 建立時間)
+
+  const [isTreeModalOpen, setIsTreeModalOpen] = useState(false); // 控制彈出視窗開關
+  const [currentTreeRootId, setCurrentTreeRootId] = useState(null); // 目前正在看哪棵樹
+  const [lastViewedNodes, setLastViewedNodes] = useState({}); // 記憶每個對話最後點擊的分支節點
 
   const messagesEndRef = useRef(null);
 
@@ -74,6 +79,12 @@ function App() {
     setInput("");
     // 在手機版自動收起側邊欄
     if (window.innerWidth < 768) setSidebarOpen(false);
+  };
+
+  const openTreeModal = (e, rootId) => {
+    e.stopPropagation(); // 防止觸發到父元素的 loadChat
+    setCurrentTreeRootId(rootId);
+    setIsTreeModalOpen(true);
   };
 
   // 4. 發送訊息 (核心邏輯)
@@ -378,15 +389,20 @@ function App() {
           ) : (
             // 一般狀態：顯示按鈕
             <button 
-              onClick={() => loadChat(chat.id)}
+              onClick={() => loadChat(lastViewedNodes[chat.id] || chat.id)}
               className="w-full text-left p-3 rounded-lg hover:bg-white/60 group cursor-pointer transition flex items-center gap-3 relative"
             >
               {/* ★★★ 修改這裡：判斷是否有分支來決定圖示 ★★★ */}
               {chat.has_branch ? (
+                <div 
+                  onClick={(e) => openTreeModal(e, chat.id)}
+                  className="p-1 hover:bg-[#D8E6F0] rounded-md transition z-10 relative"
+                  title="查看對話分支圖"
+                >
                 <TbBinaryTree2 
                   className="w-4 h-4 text-[#228DCD] hover:text-[#7DB9DE] transition flex-shrink-0" 
                   title="這是一個有分支的對話"
-                />
+                /></div>
               ) : (
                 <MessageSquare className="w-4 h-4 text-gray-500 group-hover:text-[#7DB9DE] transition flex-shrink-0" />
               )}
@@ -678,6 +694,19 @@ function App() {
         </div>
 
       </div>
+      {/* ★★★ 放入樹狀圖彈出視窗 ★★★ */}
+      <BranchTreeModal 
+        isOpen={isTreeModalOpen}
+        onClose={() => setIsTreeModalOpen(false)}
+        rootId={currentTreeRootId}
+        onSelectNode={(nodeId) => {
+          // 當使用者在樹狀圖上點擊某個節點時：
+          // 1. 記憶這個選擇 (把 currentTreeRootId 對應到被選的 nodeId)
+          setLastViewedNodes(prev => ({ ...prev, [currentTreeRootId]: nodeId }));
+          // 2. 載入這個節點的對話時間線
+          loadChat(nodeId);
+        }}
+      />
     </div>
   );
 }
