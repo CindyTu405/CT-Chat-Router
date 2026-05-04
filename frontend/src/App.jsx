@@ -398,7 +398,7 @@ function App() {
               {chat.has_branch ? (
                 <div 
                   onClick={(e) => openTreeModal(e, chat.id)}
-                  className="p-1 hover:bg-[#D8E6F0] rounded-md transition z-10 relative"
+                  className="p-0.5 hover:bg-[#D8E6F0] rounded-md transition z-10 relative"
                   title="查看對話分支圖"
                 >
                 <TbBinaryTree2 
@@ -406,7 +406,7 @@ function App() {
                   title="這是一個有分支的對話"
                 /></div>
               ) : (
-                <MessageSquare className="w-4 h-4 text-gray-500 group-hover:text-[#7DB9DE] transition flex-shrink-0" />
+                <MessageSquare className="w-5 h-5 text-gray-500 group-hover:text-[#7DB9DE] transition flex-shrink-0" />
               )}
               <div className="flex-1 min-w-0 pr-6"> {/* pr-6 留空間給 hover 按鈕 */}
                   {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
