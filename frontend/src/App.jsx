@@ -637,7 +637,7 @@ function App() {
                                 remarkPlugins={[remarkGfm]}
                                 components={{
                                   // 處理多行程式碼區塊 (Code Blocks)
-                                  code({ node, inline, className, children, ...props }) {
+                                  code({ inline, className, children, ...props }) {
                                     const match = /language-(\w+)/.exec(className || '');
                                     return !inline && match ? (
                                       <SyntaxHighlighter
