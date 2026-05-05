@@ -586,7 +586,7 @@ function App() {
               {messages.map((msg, index) => (
                 <div 
                   key={index} 
-                  className={`flex gap-4 max-w-3xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                  className={`flex gap-4 max-w-4xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                 >
                   {/* 頭像 */}
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white shadow-sm ${msg.role === 'user' ? 'bg-[#51A8DD]' : 'bg-[#7B90D2]'}`}>
@@ -594,7 +594,11 @@ function App() {
                   </div>
 
                   {/* 訊息內容區塊 */}
-                  <div className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} max-w-[85%] md:max-w-[75%]`}>
+                  <div className={`flex flex-col ${
+                    msg.role === 'user' 
+                      ? 'items-end max-w-[85%] md:max-w-[75%]' // User 保持原本的泡泡寬度限制
+                      : 'items-start flex-1 min-w-0 mr-12' // AI 使用 flex-1 填滿右側所有剩餘空間，min-w-0 防止文字溢出破版
+                  }`}>
                     
                     {/* 編輯模式判斷 */}
                     {editingIndex === index ? (
@@ -738,7 +742,7 @@ function App() {
 
         {/* 輸入框區塊 - 這裡將背景改為透明，融入網格 */}
         <div className="p-4 bg-white/60 backdrop-blur-sm border-t border-gray-200">
-          <div className="max-w-3xl mx-auto relative group">
+          <div className="max-w-4xl mx-auto relative group">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
