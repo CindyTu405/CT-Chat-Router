@@ -67,12 +67,13 @@ function App() {
   useEffect(() => {
     if (textareaRef.current) {
       // 步驟 A: 先把高度強制重置回基礎高度，這樣如果刪除文字，框才會縮小
-      textareaRef.current.style.height = '56px'; 
+      textareaRef.current.style.height = 'auto'; 
       // 步驟 B: 將高度設定為內容的實際高度 (scrollHeight)
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight + 2}px`;
     }
   }, [input]); // <-- 依賴項是 input，文字改變時就會觸發
   // 2. 載入特定對話 (點擊側邊欄觸發)
+
   const loadChat = async (rootId) => {
     try {
       setIsLoading(true);
