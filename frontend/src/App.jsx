@@ -39,6 +39,8 @@ function App() {
   const [currentTreeRootId, setCurrentTreeRootId] = useState(null); // 目前正在看哪棵樹
   const [lastViewedNodes, setLastViewedNodes] = useState({}); // 記憶每個對話最後點擊的分支節點
 
+  const textareaRef = useRef(null);
+
   const messagesEndRef = useRef(null);
 
   // 自動捲動到底部
@@ -61,6 +63,15 @@ function App() {
     fetchHistory();
   }, [fetchHistory]); // 當 sortBy 改變時，自動重新載入列表
 
+  // 監聽 input 內容，自動調整輸入框高度
+  useEffect(() => {
+    if (textareaRef.current) {
+      // 步驟 A: 先把高度強制重置回基礎高度，這樣如果刪除文字，框才會縮小
+      textareaRef.current.style.height = '56px'; 
+      // 步驟 B: 將高度設定為內容的實際高度 (scrollHeight)
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [input]); // <-- 依賴項是 input，文字改變時就會觸發
   // 2. 載入特定對話 (點擊側邊欄觸發)
   const loadChat = async (rootId) => {
     try {
@@ -744,12 +755,13 @@ function App() {
         <div className="p-4 bg-white/60 backdrop-blur-sm border-t border-gray-200">
           <div className="max-w-4xl mx-auto relative group">
             <textarea
+              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="輸入訊息..."
               rows="1"
-              className="w-full bg-white text-gray-800 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-[#7DB9DE]/50 border border-gray-300 group-hover:border-[#7DB9DE] transition resize-none shadow-md"
+              className="w-full bg-white text-gray-800 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-[#7DB9DE]/50 border border-gray-300 group-hover:border-[#7DB9DE] transition resize-none shadow-md max-h-[224px] overflow-y-auto"
               style={{ minHeight: '56px' }}
             />
             <button 
