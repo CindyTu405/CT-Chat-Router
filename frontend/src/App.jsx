@@ -3,6 +3,11 @@ import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
    X, Trash2, Edit2, Check, ArrowUpDown} from 'lucide-react';
 import { TbBinaryTree2 } from 'react-icons/tb';
 import BranchTreeModal from './BranchTreeModal';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+// 這裡選用 vscDarkPlus 主題，看起來會很像 VS Code 的深色模式
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 const API_URL = "http://localhost:8000"; // 本機開發用
 // const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
@@ -626,8 +631,66 @@ function App() {
                             ? 'bg-[#228DCD] text-white rounded-tr-none border-[#228DCD]' 
                             : 'bg-white text-gray-800 rounded-tl-none border-[#7B90D2]'}
                         `}>
-                          <div className="whitespace-pre-wrap break-words text-[15px]">
-                            {msg.content || <span className="animate-pulse text-gray-400">Thinking...</span>}
+                          <div className="whitespace-normal break-words text-[15px] overflow-x-auto">
+                            {msg.content ? (
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                  // 處理多行程式碼區塊 (Code Blocks)
+                                  code({ node, inline, className, children, ...props }) {
+                                    const match = /language-(\w+)/.exec(className || '');
+                                    return !inline && match ? (
+                                      <SyntaxHighlighter
+                                        style={vscDarkPlus}
+                                        language={match[1]}
+                                        PreTag="div"
+                                        className="rounded-xl my-3 shadow-sm text-sm"
+                                        {...props}
+                                      >
+                                        {String(children).replace(/\n$/, '')}
+                                      </SyntaxHighlighter>
+                                    ) : (
+                                      // 處理單行行內程式碼 (Inline Code)
+                                      <code 
+                                        className={`px-1.5 py-0.5 rounded-md font-mono text-[13px] ${
+                                          msg.role === 'user' 
+                                            ? 'bg-blue-600/50 text-white' // 使用者泡泡內的行內程式碼樣式
+                                            : 'bg-gray-100 text-[#E83E8C]' // AI 泡泡內的行內程式碼樣式
+                                        }`} 
+                                        {...props}
+                                      >
+                                        {children}
+                                      </code>
+                                    );
+                                  },
+                                  // 自定義 Markdown 標籤的 Tailwind 樣式，讓排版更好看
+                                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+                                  ul: ({ children }) => <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>,
+                                  ol: ({ children }) => <ol className="list-decimal ml-5 mb-3 space-y-1">{children}</ol>,
+                                  li: ({ children }) => <li className="pl-1">{children}</li>,
+                                  h1: ({ children }) => <h1 className="text-2xl font-bold mb-3 mt-4">{children}</h1>,
+                                  h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-4">{children}</h2>,
+                                  h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-3">{children}</h3>,
+                                  a: ({ children, href }) => (
+                                    <a href={href} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-600 underline underline-offset-2 transition-colors">
+                                      {children}
+                                    </a>
+                                  ),
+                                  blockquote: ({ children }) => (
+                                    <blockquote className="border-l-4 border-gray-300 pl-4 py-1 my-3 text-gray-600 bg-gray-50 rounded-r-lg">
+                                      {children}
+                                    </blockquote>
+                                  ),
+                                  table: ({ children }) => <div className="overflow-x-auto my-4"><table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">{children}</table></div>,
+                                  th: ({ children }) => <th className="px-4 py-2 bg-gray-50 text-left text-sm font-semibold text-gray-700 border-b">{children}</th>,
+                                  td: ({ children }) => <td className="px-4 py-2 text-sm text-gray-600 border-b">{children}</td>,
+                                }}
+                              >
+                                {msg.content}
+                              </ReactMarkdown>
+                            ) : (
+                              <span className="animate-pulse text-gray-400">Thinking...</span>
+                            )}
                           </div>
                         </div>
 
