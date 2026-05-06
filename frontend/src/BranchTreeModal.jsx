@@ -51,24 +51,37 @@ const CustomMessageNode = ({ data }) => {
 
 const nodeTypes = { custom: CustomMessageNode };
 
-// --- 2. Dagre 排版引擎 (自動計算樹狀結構的座標) ---
+// --- 2. Dagre 排版引擎 (加入動態高度估算) ---
 const getLayoutedElements = (nodes, edges) => {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
   
-  // ★ 修改 1: 縮小基礎的垂直間距 (ranksep 從 80 降到 10)，讓 Q&A 靠得更近
+  // 保留你的微調間距
   dagreGraph.setGraph({ rankdir: 'TB', nodesep: 50, ranksep: 10 });
 
   nodes.forEach((node) => {
-    // ★ 修改 2: 動態設定高度。AI 內容多給 120，User 內容少給 80，消除視覺誤差
-    const isUser = node.data.role === 'user';
-    dagreGraph.setNode(node.id, { width: 256, height: isUser ? 80 : 120 });
+    // ★ 核心優化：動態估算文字高度
+    const text = node.data.content || "";
+    
+    // 1. 計算使用者有沒有按 Enter 換行 (\n)
+    const enterLines = text.split('\n').length;
+    // 2. 計算字數換行 (256px 寬度，扣掉 Padding，大約一行可塞 18 個字)
+    const wrapLines = Math.ceil(text.length / 18);
+    // 3. 取兩者最大值。因為有 line-clamp-3，所以最高不會超過 3 行
+    const actualLines = Math.min(3, Math.max(enterLines, wrapLines));
+    
+    // 4. 算出最終精準高度: 基礎 UI (標題+留白) 約 60，每行文字高約 20
+    const estimatedHeight = 60 + (actualLines * 20);
+
+    // 將算好的高度存進 node.data，等一下定位 Y 軸時需要用到
+    node.data.estimatedHeight = estimatedHeight;
+
+    // 餵給 Dagre 引擎最精準的高度
+    dagreGraph.setNode(node.id, { width: 256, height: estimatedHeight });
   });
 
   edges.forEach((edge) => {
-    // ★ 修改 3: 核心分組邏輯
-    // 如果是新回合 (AI 接 User)，就把距離強制拉長 6 倍 (minlen: 6)
-    // 如果是問答配對 (User 接 AI)，就保持 1 倍的緊密距離 (minlen: 1)
+    // 保留你的分組邏輯
     const minlen = edge.data?.isNewTurn ? 6 : 1;
     dagreGraph.setEdge(edge.source, edge.target, { minlen: minlen });
   });
@@ -77,14 +90,13 @@ const getLayoutedElements = (nodes, edges) => {
 
   const layoutedNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
-    const isUser = node.data.role === 'user';
-    const nodeHeight = isUser ? 80 : 120; // 配合上方設定的高度
+    const h = node.data.estimatedHeight; // 拿出剛剛算好的專屬高度
     
     return {
       ...node,
       position: {
         x: nodeWithPosition.x - 256 / 2,
-        y: nodeWithPosition.y - nodeHeight / 2, // ★ 修正 Y 軸定位，對齊真實中心點
+        y: nodeWithPosition.y - h / 2, // ★ 每個節點依照自己的高度去對齊中心點
       },
     };
   });
