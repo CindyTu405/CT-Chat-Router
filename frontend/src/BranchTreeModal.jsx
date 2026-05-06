@@ -55,25 +55,36 @@ const nodeTypes = { custom: CustomMessageNode };
 const getLayoutedElements = (nodes, edges) => {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  // TB 代表 Top to Bottom (由上到下)
-  dagreGraph.setGraph({ rankdir: 'TB', nodesep: 50, ranksep: 80 });
+  
+  // ★ 修改 1: 縮小基礎的垂直間距 (ranksep 從 80 降到 10)，讓 Q&A 靠得更近
+  dagreGraph.setGraph({ rankdir: 'TB', nodesep: 50, ranksep: 10 });
 
   nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 256, height: 120 }); // 預設寬高
+    // ★ 修改 2: 動態設定高度。AI 內容多給 120，User 內容少給 80，消除視覺誤差
+    const isUser = node.data.role === 'user';
+    dagreGraph.setNode(node.id, { width: 256, height: isUser ? 80 : 120 });
   });
+
   edges.forEach((edge) => {
-    dagreGraph.setEdge(edge.source, edge.target);
+    // ★ 修改 3: 核心分組邏輯
+    // 如果是新回合 (AI 接 User)，就把距離強制拉長 6 倍 (minlen: 6)
+    // 如果是問答配對 (User 接 AI)，就保持 1 倍的緊密距離 (minlen: 1)
+    const minlen = edge.data?.isNewTurn ? 6 : 1;
+    dagreGraph.setEdge(edge.source, edge.target, { minlen: minlen });
   });
 
   dagre.layout(dagreGraph);
 
   const layoutedNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
+    const isUser = node.data.role === 'user';
+    const nodeHeight = isUser ? 80 : 120; // 配合上方設定的高度
+    
     return {
       ...node,
       position: {
         x: nodeWithPosition.x - 256 / 2,
-        y: nodeWithPosition.y - 120 / 2,
+        y: nodeWithPosition.y - nodeHeight / 2, // ★ 修正 Y 軸定位，對齊真實中心點
       },
     };
   });
@@ -115,12 +126,15 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
 
           // 建立連接線 (如果有爸爸的話)
           if (msg.parent_id) {
+            const isMsgUser = msg.role === 'user'; // 如果這句話是 User 說的，代表它是接在 AI 下面，開啟了新回合
+            
             initialEdges.push({
               id: `e-${msg.parent_id}-${msg.id}`,
               source: msg.parent_id,
               target: msg.id,
               animated: false, // 讓連線有流動的動畫效果
-              style: { stroke: '#9ca3af', strokeWidth: 2 }
+              style: { stroke: '#9ca3af', strokeWidth: 2 },
+              data: { isNewTurn: isMsgUser } // ★ 將「是否為新回合」的資訊傳給排版引擎
             });
           }
         });
