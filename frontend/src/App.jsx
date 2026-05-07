@@ -776,7 +776,7 @@ function App() {
             </button>
           </div>
           <div className="text-center mt-3 text-xs text-gray-400 font-medium">
-            Powered by Gemini 2.5 & FastAPI
+             AI模型有可能會出錯，請檢察回覆內容。
           </div>
         </div>
 
