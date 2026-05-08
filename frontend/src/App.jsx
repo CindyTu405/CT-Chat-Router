@@ -358,9 +358,9 @@ function App() {
         <div className="p-4">
           <button 
             onClick={startNewChat}
-            className="w-full flex items-center gap-3 px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition border border-gray-300 hover:border-[#7DB9DE] text-sm font-medium cursor-pointer shadow-sm text-gray-700 group"
+            className="w-full flex items-center gap-3 px-4 py-3 bg-[#51A8DD] hover:bg-[#3D9AD1] rounded-xl transition text-sm font-semibold cursor-pointer shadow-md shadow-[#51A8DD]/30 text-white group"
           >
-            <Plus className="w-5 h-5 text-[#7DB9DE]" />
+            <Plus className="w-4 h-4 text-white" />
             New Chat
           </button>
         </div>
@@ -409,7 +409,7 @@ function App() {
             // 一般狀態：顯示按鈕
             <button 
               onClick={() => loadChat(lastViewedNodes[chat.id] || chat.id)}
-              className="w-full text-left p-3 rounded-lg hover:bg-white/60 group cursor-pointer transition flex items-center gap-3 relative"
+              className="w-full text-left p-3 rounded-xl hover:bg-white/80 hover:shadow-sm group cursor-pointer transition-all flex items-center gap-3 relative"
             >
               {/* ★★★ 修改這裡：判斷是否有分支來決定圖示 ★★★ */}
               {chat.has_branch ? (
@@ -536,7 +536,7 @@ function App() {
                     <option value="nvidia/nemotron-3-nano-30b-a3b:free">nvidia/nemotron-3-nano-30b-a3b:free</option>
                     <option value="z-ai/glm-4.5-air:free">z-ai/glm-4.5-air:free</option>
                     <option value="openai/gpt-oss-120b:free">openai/gpt-oss-120b:free</option>
-                    <option value="inclusionai/ling-2.6-1t:free">inclusionai/ling-2.6-1t:free</option>
+                    <option value="poolside/laguna-m.1:free">poolside/laguna-m.1:free</option>
                     <option value="tencent/hy3-preview:free">tencent/hy3-preview:free</option>
                     <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
                     <option value="anthropic/claude-opus-4.6">claude-opus-4.6</option>
@@ -576,17 +576,20 @@ function App() {
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth">
           {messages.length === 0 ? (
             // --- 空狀態 (Empty State) ---
-            <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
-              <div className="w-16 h-16 bg-[#E8F1F5] rounded-2xl flex items-center justify-center mb-2 shadow-sm border border-[#D8E6F0]">
-                <Bot className="w-8 h-8 text-[#7DB9DE]" />
+            <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-5">
+              <div className="w-16 h-16 bg-[#51A8DD] rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-[#51A8DD]/30">
+                <Bot className="w-8 h-8 text-white" />
               </div>
-              <p className="text-xl font-medium text-gray-700">今天想聊些什麼？</p>
+              <div className="text-center space-y-1">
+                <p className="text-2xl font-semibold text-gray-700 tracking-tight">今天想聊些什麼？</p>
+                <p className="text-sm text-gray-400">選一個提示，或直接開始輸入</p>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg px-4">
-                {['解釋一下 Docker 是什麼', '寫一個 Python 爬蟲範例', '給我一個健身計畫', '講個笑話'].map(suggestion => (
+                {['隨機介紹一個景點', '推薦一道食譜', '分享一本書給我', '講個笑話'].map(suggestion => (
                   <button 
                     key={suggestion}
                     onClick={() => setInput(suggestion)}
-                    className="p-3 bg-white border border-gray-200 hover:bg-[#F4F8FA] hover:border-[#7DB9DE] rounded-xl text-sm text-left transition cursor-pointer shadow-md text-gray-600"
+                    className="p-4 bg-white/80 border border-[#7DB9DE] hover:bg-gray-100 hover:border-[#7DB9DE] hover:shadow-md rounded-2xl text-sm text-left transition-all cursor-pointer text-gray-600 font-medium"
                   >
                     {suggestion}
                   </button>
@@ -644,10 +647,10 @@ function App() {
                       <div className="relative group/bubble">
                         {/* 對話框 */}
                         <div className={`
-                          px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-[1px]
+                          px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
                           ${msg.role === 'user' 
-                            ? 'bg-[#228DCD] text-white rounded-tr-none border-[#228DCD]' 
-                            : 'bg-white text-gray-800 rounded-tl-none border-[#7B90D2]'}
+                            ? 'bg-[#228DCD] text-white rounded-tr-none border border-[#1A7DB8]' 
+                            : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
                         `}>
                           <div className="whitespace-normal break-words text-[15px] overflow-x-auto">
                             {msg.content ? (
@@ -755,7 +758,7 @@ function App() {
         </div> 
 
         {/* 輸入框區塊 - 這裡將背景改為透明，融入網格 */}
-        <div className="p-4 bg-white/60 backdrop-blur-sm border-t border-gray-200">
+        <div className="p-4 bg-white/70 backdrop-blur-sm border-t border-gray-200">
           <div className="max-w-4xl mx-auto relative group">
             <textarea
               ref={textareaRef}
@@ -764,13 +767,13 @@ function App() {
               onKeyDown={handleKeyDown}
               placeholder="輸入訊息..."
               rows="1"
-              className="w-full bg-white text-gray-800 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-[#7DB9DE]/50 border border-gray-300 group-hover:border-[#7DB9DE] transition resize-none shadow-md max-h-[224px] overflow-y-auto"
+              className="w-full bg-white text-gray-800 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-[#51A8DD]/40 border border-gray-200 group-hover:border-[#7DB9DE] transition resize-none shadow-sm max-h-[224px] overflow-y-auto"
               style={{ minHeight: '56px' }}
             />
             <button 
               onClick={handleSend}
               disabled={isLoading || !input.trim()}
-              className="absolute right-2 bottom-[15px] p-2.5 bg-[#51A8DD] hover:bg-[#7DB9DE] rounded-xl transition disabled:opacity-80 disabled:cursor-not-allowed cursor-pointer shadow-md"
+              className="absolute right-2 bottom-[15px] p-2.5 bg-[#51A8DD] hover:bg-[#3D9AD1] rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md shadow-[#51A8DD]/25"
             >
               <Send className="w-5 h-5 text-white" />
             </button>
