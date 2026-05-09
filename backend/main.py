@@ -165,7 +165,11 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
     return StreamingResponse(
         stream_generator(), 
         media_type="text/plain",
-        headers={"X-Message-Id": str(ai_msg.id)} 
+        headers={"X-Message-Id": str(ai_msg.id),
+                "X-Accel-Buffering": "no",      # ★ 叫 Nginx 絕對不要緩衝
+                "Cache-Control": "no-cache",    # ★ 不要快取
+                "Connection": "keep-alive"      # ★ 保持連線開啟
+                }
     )
 
 @app.get("/chats/roots", response_model=list[Message])
