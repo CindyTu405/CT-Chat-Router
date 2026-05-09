@@ -80,7 +80,7 @@ function App() {
       const res = await fetch(`${API_URL}/chats/${rootId}/history`);
       const data = await res.json();
       setMessages(data); // 把舊對話填入畫面
-
+      
       // 在手機版點擊後自動收起側邊欄 (優化體驗)
       if (window.innerWidth < 768) setSidebarOpen(false);
     } catch (error) {
@@ -136,7 +136,7 @@ function App() {
       });
 
       if (!response.ok) throw new Error("API Error");
-
+      
       // 成功發送後，如果是第一則訊息，重新整理側邊欄
       if (messages.length === 0) {
         setTimeout(fetchHistory, 1000);
@@ -145,19 +145,19 @@ function App() {
       fetchHistory();
 
       // 準備接收串流
-      setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model}]);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let aiResponseText = "";
-
+      
       // 讀取 Header 中的 ID (如果有的話，這可以讓我們更精確更新狀態，這邊先略過，用 index 更新)
       // const msgId = response.headers.get("X-Message-Id");
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
+        
         const chunk = decoder.decode(value, { stream: true });
         aiResponseText += chunk;
 
@@ -178,12 +178,12 @@ function App() {
           return newMessages;
         });
       }
-
+      
       // 串流結束後，為了確保 parent_id 正確 (因為剛剛只有 content 沒有 id)
       // 我們可以偷偷重新載入一次這串對話 (Optional，但最保險)
       // 不過為了流暢度，我們先不做 reload，
       // 等使用者發下一則時，我們還是缺 ID... 啊！這就是問題所在！
-
+      
       // ★★★ 補強：我們必須拿到 AI 回傳的 ID，不然下一句會斷掉！ ★★★
       // 我們上次在 backend 有加 `expose_headers=["X-Message-Id"]` 記得嗎？
       // 現在派上用場了！
@@ -213,7 +213,7 @@ function App() {
     // 我們只保留 index 之前的訊息 (0 ~ index-1)
     // 例如在 index=2 (Q2) 分支，我們保留 index 0, 1 (Q1, A1)
     const prevMessages = messages.slice(0, index);
-
+    
     // 2. 算出新的 parent_id
     // 如果 prevMessages 是空的，代表我們改的是第一則訊息，所以 parent_id = null
     // 否則，parent_id 就是上一則訊息 (A1) 的 ID
@@ -258,7 +258,7 @@ function App() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
+        
         const chunk = decoder.decode(value, { stream: true });
         aiResponseText += chunk;
 
@@ -289,20 +289,20 @@ function App() {
   // 刪除對話
   const handleDeleteChat = async (e, chatId) => {
     e.stopPropagation(); // 防止觸發 "載入對話"
-
+    
     // 加上簡單的防呆，避免手滑
     if (!confirm("確定要刪除這個對話串嗎？此動作無法復原。")) return;
 
     try {
       await fetch(`${API_URL}/chats/${chatId}`, { method: 'DELETE' });
-
+      
       // ★★★ 清理後的邏輯 ★★★
       // 如果現在畫面上顯示的對話 (messages[0]) 就是我們剛刪除的那個 (chatId)
       // 那就清空畫面，回到 "New Chat" 狀態
       if (messages.length > 0 && messages[0].id === chatId) {
-        startNewChat();
+         startNewChat();
       }
-
+      
       // 重新抓取側邊欄列表
       fetchHistory();
     } catch (error) {
@@ -356,7 +356,7 @@ function App() {
         
         {/* New Chat 按鈕 */}
         <div className="p-4">
-          <button
+          <button 
             onClick={startNewChat}
             className="w-full flex items-center gap-3 px-4 py-3 bg-[#51A8DD] hover:bg-[#3D9AD1] rounded-xl transition text-sm font-semibold cursor-pointer shadow-md shadow-[#51A8DD]/30 text-white group"
           >
@@ -379,7 +379,7 @@ function App() {
             {sortBy === 'updated' ? '依最新回覆' : '依建立日期'}
           </button>
         </div>
-
+        
         {/* 列表區域 */}
         <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-300">
           {historyList.map((chat) => (
@@ -487,7 +487,7 @@ function App() {
         {/* 頂部導航列 */}
         <div className="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white/80 backdrop-blur-sm z-10 sticky top-0 shadow-sm">
           <div className="flex items-center gap-3">
-            <button
+            <button 
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-2 text-gray-500 hover:text-[#7DB9DE] hover:bg-gray-100 rounded-lg transition cursor-pointer"
             >
@@ -506,9 +506,9 @@ function App() {
           </div>
 
           <div className="relative">
-            {/* --- 模型選擇區 (支援下拉與手動輸入) --- */}
+              {/* --- 模型選擇區 (支援下拉與手動輸入) --- */}
             <div className="relative flex items-center gap-2">
-
+              
               {/* 裝飾用的小星星 Icon */}
               <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none z-10">
                 <Sparkles className="h-3.5 w-3.5 text-[#7B90D2]" />
@@ -516,7 +516,7 @@ function App() {
 
               {!isCustomModel ? (
                 // 模式 A：下拉選單
-                <select
+                <select 
                   value={model}
                   onChange={(e) => {
                     if (e.target.value === "custom") {
@@ -541,7 +541,7 @@ function App() {
                   </optgroup>
                   <optgroup label="進階功能">
                     {/* 這個選項是切換到輸入框的鑰匙 */}
-                    <option value="custom">✨ 自訂輸入 (僅限免費模型 ID)...</option>
+                    <option value="custom">✨ 自訂輸入 (貼上模型 ID)...</option>
                   </optgroup>
                 </select>
               ) : (
@@ -626,13 +626,13 @@ function App() {
                           autoFocus
                         />
                         <div className="flex justify-end gap-2 mt-3">
-                          <button
+                          <button 
                             onClick={() => setEditingIndex(null)}
                             className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition"
                           >
                             取消
                           </button>
-                          <button
+                          <button 
                             onClick={() => handleBranch(index)}
                             className="px-3 py-1.5 text-xs text-white bg-[#51A8DD] hover:bg-[#7DB9DE] rounded-lg transition flex items-center gap-1 shadow-sm"
                           >
@@ -748,7 +748,7 @@ function App() {
                   </div>
                 </div>
               ))}
-
+              
               {/* 自動捲動定位點 */}
               <div ref={messagesEndRef} />
             </>
@@ -768,7 +768,7 @@ function App() {
               className="w-full bg-white text-gray-800 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-[#51A8DD]/40 border border-gray-200 group-hover:border-[#7DB9DE] transition resize-none shadow-sm max-h-[224px] overflow-y-auto"
               style={{ minHeight: '56px' }}
             />
-            <button
+            <button 
               onClick={handleSend}
               disabled={isLoading || !input.trim()}
               className="absolute right-2 bottom-[15px] p-2.5 bg-[#51A8DD] hover:bg-[#3D9AD1] rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md shadow-[#51A8DD]/25"
