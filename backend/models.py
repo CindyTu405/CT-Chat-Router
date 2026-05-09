@@ -36,6 +36,9 @@ class Message(SQLModel, table=True):
     # 只有 "對話開頭 (Root)" 的訊息會有這個值，其他訊息通常為 None
     title: str | None = Field(default=None)
 
+    # 新增：是否包含分支的標記
+    has_branch: bool = Field(default=False)
+
 
 # Pydantic 模型 (用於 API 請求驗證，不存入資料庫)
 class ChatRequest(SQLModel):

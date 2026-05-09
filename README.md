@@ -7,7 +7,7 @@ CT-Chat-Router 是一個全端、響應式(RWD)的 AI 聊天應用程式。本�
 
 ## 展示影片 Demo
 
-https://github.com/user-attachments/assets/2412ef11-22ea-40a2-9480-ef57a8c4aed5
+https://github.com/user-attachments/assets/78270ed4-3bd7-4a4c-9262-499483097318
 
 ## 核心功能
 * **多模型動態路由 (Multi-Model Routing):** 後端實作了動態路由機制，原生支援 Google Gemini API，並透過 OpenRouter 整合多款開源/免費模型（如 Arcee AI, DeepSeek 等）。

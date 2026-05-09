@@ -107,6 +107,21 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
     session.commit()
     session.refresh(user_msg)
 
+    if request.parent_id and len(history) > 0:
+        # 看看這個「爸爸」現在有幾個「小孩 (回覆)」了
+        children = session.exec(select(Message.id).where(Message.parent_id == request.parent_id)).all()
+        
+        # 如果小孩數量 > 1，代表這是一個分支操作！
+        if len(children) > 1:
+            root_node = history[0]  # history 的第一個元素剛好就是整棵樹的根節點 (Root)
+            
+            # 如果還沒被標記過，就把它標記為 True 並存檔
+            if not root_node.has_branch:
+                # 因為 root_node 已經在 session 裡了，所以直接改屬性再 commit 即可
+                root_node.has_branch = True
+                session.add(root_node)
+                session.commit()
+
     # 2. 立刻建立 AI 訊息 (佔位)
     # 先存一個空字串，目的是為了馬上拿到 ID，確保連結不斷裂
     ai_msg = Message(
@@ -154,20 +169,51 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
     )
 
 @app.get("/chats/roots", response_model=list[Message])
-def get_chat_roots(session_id: str | None = None, session: Session = Depends(get_session)):
+def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session = Depends(get_session)):
     """
-    取得所有「對話開頭」 (Root Messages)
-    用來顯示在側邊欄列表
+    取得側邊欄列表，支援兩種排序：
+    1. created: 依建立日期排序 (舊版預設)
+    2. updated: 依最後活躍時間排序 (尋找該對話樹中最新的訊息時間)
     """
-    # 1. 條件：parent_id 必須是 None
-    statement = select(Message).where(Message.parent_id == None)
-    
-    if session_id:
-        statement = statement.where(Message.session_id == session_id)
+    if sort_by == "created":
+        # 簡單模式：只看根節點的建立時間
+        statement = select(Message).where(
+            Message.parent_id == None,
+            Message.session_id == session_id
+        ).order_by(Message.created_at.desc())
+        return session.exec(statement).all()
+    else:
+        # 活躍度模式：用遞迴找出每一棵樹「最晚」的活動時間
+        query = text("""
+        WITH RECURSIVE chat_tree AS (
+            -- 1. 先抓出所有根節點 (Roots)
+            SELECT id AS root_id, id AS msg_id, created_at
+            FROM message
+            WHERE parent_id IS NULL AND session_id = :session_id
+            
+            UNION ALL
+            
+            -- 2. 往下遞迴抓出所有子孫
+            SELECT ct.root_id, m.id, m.created_at
+            FROM message m
+            JOIN chat_tree ct ON m.parent_id = ct.msg_id
+        ),
+        tree_max_time AS (
+            -- 3. 找出每個家族(root_id)最新的 created_at
+            SELECT root_id, MAX(created_at) as last_activity
+            FROM chat_tree
+            GROUP BY root_id
+        )
+        -- 4. 依照這個最新時間來排序根節點
+        SELECT m.*
+        FROM message m
+        JOIN tree_max_time tmt ON m.id = tmt.root_id
+        ORDER BY tmt.last_activity DESC;
+        """)
         
-    # 2. 排序：最新的在最上面 (created_at desc)
-    statement = statement.order_by(Message.created_at.desc())
-    return session.exec(statement).all()
+        # 使用 mappings().all() 確保回傳字典格式，讓 FastAPI 順利轉換
+        results = session.exec(query, params={"session_id": session_id}).mappings().all()
+        return results
 
 @app.get("/chats/{root_id}/history", response_model=list[Message])
 def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)):
@@ -273,3 +319,28 @@ def delete_chat(root_id: uuid.UUID, session: Session = Depends(get_session)):
         raise HTTPException(status_code=500, detail=f"刪除失敗: {str(e)}")
         
     return {"status": "ok", "deleted_count": len(all_ids)}
+
+# 取得整棵對話樹
+@app.get("/chats/{root_id}/tree", response_model=list[Message])
+def get_chat_tree(root_id: uuid.UUID, session: Session = Depends(get_session)):
+    """
+    取得整棵對話樹的「所有」節點 (用來畫前端的 React Flow 樹狀圖)
+    """
+    query = text("""
+    WITH RECURSIVE chat_tree AS (
+        -- 1. 找到樹根
+        SELECT id, role, content, model_used, created_at, parent_id, title 
+        FROM message WHERE id = :root_id
+        
+        UNION ALL
+        
+        -- 2. 往下找出所有子子孫孫 (不論有幾個分支全抓)
+        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title 
+        FROM message m
+        JOIN chat_tree ct ON m.parent_id = ct.id
+    )
+    SELECT * FROM chat_tree ORDER BY created_at ASC;
+    """)
+    
+    results = session.exec(query, params={"root_id": root_id}).mappings().all()
+    return results
