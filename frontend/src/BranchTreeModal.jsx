@@ -5,7 +5,9 @@ import dagre from 'dagre';
 import { X, User, Bot } from 'lucide-react';
 import { TbBinaryTree2 } from 'react-icons/tb';
 
-const API_URL = "http://localhost:8000"; // 確保這裡跟你的 App.jsx 一致
+// const API_URL = "http://localhost:8000"; 
+// const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
+const API_URL = import.meta.env.VITE_API_URL;
 
 // --- 1. 定義「自訂節點」的外觀 (最多預覽三行) ---
 const CustomMessageNode = ({ data }) => {

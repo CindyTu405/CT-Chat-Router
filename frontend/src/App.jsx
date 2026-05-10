@@ -10,7 +10,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 // const API_URL = "http://localhost:8000"; // 本機開發用
-const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
+// const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
+const API_URL = import.meta.env.VITE_API_URL;
 
 function App() {
   // --- 狀態管理 ---
