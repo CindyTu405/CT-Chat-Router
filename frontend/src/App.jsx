@@ -121,8 +121,14 @@ function App() {
       parentId = messages[messages.length - 1].id;
     }
 
+    fetchHistory();
+
     // 先顯示 User 訊息 (用 Date.now() 暫時當 key，等後端回傳真正的 ID 後會更新，但這裡先求簡單)
-    setMessages(prev => [...prev, { role: 'user', content: userMessageContent }]);
+    setMessages(prev => [
+      ...prev, 
+      { role: 'user', content: userMessageContent },
+      { role: 'assistant', content: '', model_used: model } // 提早顯示 Thinking
+    ]);
 
     try {
       const response = await fetch(`${API_URL}/chat`, {
@@ -131,29 +137,23 @@ function App() {
         body: JSON.stringify({
           message: userMessageContent,
           model: model,
-          parent_id: parentId, // <--- 把算好的爸爸 ID 傳出去
+          parent_id: parentId,
           session_id: sessionId
         })
       });
 
       if (!response.ok) throw new Error("API Error");
       
-      // 成功發送後，如果是第一則訊息，重新整理側邊欄
       if (messages.length === 0) {
         setTimeout(fetchHistory, 1000);
       }
-
-      fetchHistory();
-
-      // 準備接收串流
-      setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model}]);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let aiResponseText = "";
       
-      // 讀取 Header 中的 ID (如果有的話，這可以讓我們更精確更新狀態，這邊先略過，用 index 更新)
-      // const msgId = response.headers.get("X-Message-Id");
+      // ★ 修正 1：將 ID 的抓取移到 while 迴圈「之前」，這樣迴圈內才能使用
+      const newMsgId = response.headers.get("X-Message-Id");
 
       while (true) {
         const { done, value } = await reader.read();
@@ -164,39 +164,20 @@ function App() {
 
         // 即時更新最後一則 (AI)
         setMessages(prev => {
+          // 防呆 1：如果畫面已經被清空，直接放棄更新
+          if (prev.length === 0) return prev; 
+          
           const newMessages = [...prev];
           const lastMsg = newMessages[newMessages.length - 1];
-          if (lastMsg.role === 'assistant') {
-            lastMsg.content = aiResponseText;
-            // 這裡其實應該也要更新 lastMsg.id，但因為我們下次發送是看 UI 上的最後一則，
-            // 只要後端有存對，這裡沒 ID 暫時沒關係。
-            // 為了嚴謹，若要連續對話不重新整理，後端回傳 ID 還是最好的。
-            // 但目前的 MVP 邏輯：我們是「盲接」，只要有內容就好。
-            // 真正要拿到 ID，需要像上次教的，從 Header 抓 X-Message-Id 並寫入這裡。
-            // 為了不讓程式碼太複雜，我們先假設「使用者不會在 0.1 秒內連續發話」。
-            // (進階做法：把後端回傳的 ID 補進這個 Object)
-          }
+          
+          // 防呆 2：確保最後一則訊息存在，且真的是 AI 的回覆
+          if (!lastMsg || lastMsg.role !== 'assistant') return prev;
+
+          lastMsg.content = aiResponseText;
+          if (newMsgId) lastMsg.id = newMsgId; // 這裡現在可以正常拿到 newMsgId 了
           return newMessages;
         });
-      }
-      
-      // 串流結束後，為了確保 parent_id 正確 (因為剛剛只有 content 沒有 id)
-      // 我們可以偷偷重新載入一次這串對話 (Optional，但最保險)
-      // 不過為了流暢度，我們先不做 reload，
-      // 等使用者發下一則時，我們還是缺 ID... 啊！這就是問題所在！
-      
-      // ★★★ 補強：我們必須拿到 AI 回傳的 ID，不然下一句會斷掉！ ★★★
-      // 我們上次在 backend 有加 `expose_headers=["X-Message-Id"]` 記得嗎？
-      // 現在派上用場了！
-      const newMsgId = response.headers.get("X-Message-Id");
-      if (newMsgId) {
-        setMessages(prev => {
-          const newMessages = [...prev];
-          const lastMsg = newMessages[newMessages.length - 1];
-          lastMsg.id = newMsgId; // <--- 把 ID 補上去！
-          return newMessages;
-        });
-      }
+      } // ★ 修正 2：補上 while 迴圈的右大括號！
 
     } catch (error) {
       console.error("Error:", error);
@@ -211,21 +192,21 @@ function App() {
     if (!editInput.trim() || isLoading) return;
 
     // 1. 準備新的歷史紀錄 (Time Travel)
-    // 我們只保留 index 之前的訊息 (0 ~ index-1)
-    // 例如在 index=2 (Q2) 分支，我們保留 index 0, 1 (Q1, A1)
     const prevMessages = messages.slice(0, index);
     
     // 2. 算出新的 parent_id
-    // 如果 prevMessages 是空的，代表我們改的是第一則訊息，所以 parent_id = null
-    // 否則，parent_id 就是上一則訊息 (A1) 的 ID
     let parentId = null;
     if (prevMessages.length > 0) {
       parentId = prevMessages[prevMessages.length - 1].id;
     }
 
-    // 3. 更新畫面：切斷舊未來，插入新現在
+    // 3. 更新畫面：切斷舊未來，插入新現在，並立刻放入 AI 佔位符 (合併成一次更新)
     const newUserMsg = { role: 'user', content: editInput };
-    setMessages([...prevMessages, newUserMsg]);
+    setMessages([
+      ...prevMessages, 
+      newUserMsg,
+      { role: 'assistant', content: '', model_used: model } // 一口氣放進去
+    ]);
 
     // 退出編輯模式
     setEditingIndex(null);
@@ -233,28 +214,27 @@ function App() {
     setIsLoading(true);
 
     try {
-      // 4. 發送請求 (跟 handleSend 邏輯幾乎一樣)
+      // 4. 發送請求
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: newUserMsg.content,
           model: model,
-          parent_id: parentId, // <--- 關鍵！接上正確的父親
+          parent_id: parentId,
           session_id: sessionId
         })
       });
 
       if (!response.ok) throw new Error("API Error");
+      
+      // 更新側邊欄讓樹狀圖標誌跑出來
       fetchHistory();
-
-      // 抓取新 ID
-      setMessages(prev => [...prev, { role: 'assistant', content: '', model_used: model }]);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let aiResponseText = "";
-      const newMsgId = response.headers.get("X-Message-Id"); // 抓取新 ID
+      const newMsgId = response.headers.get("X-Message-Id");
 
       while (true) {
         const { done, value } = await reader.read();
@@ -264,10 +244,17 @@ function App() {
         aiResponseText += chunk;
 
         setMessages(prev => {
+          // ★ 防呆 1：如果畫面已經被清空，放棄更新
+          if (prev.length === 0) return prev; 
+          
           const newMessages = [...prev];
           const lastMsg = newMessages[newMessages.length - 1];
+          
+          // ★ 防呆 2：確保最後一則真的是 AI 的回覆
+          if (!lastMsg || lastMsg.role !== 'assistant') return prev;
+
           lastMsg.content = aiResponseText;
-          if (newMsgId) lastMsg.id = newMsgId; // 補上 ID
+          if (newMsgId) lastMsg.id = newMsgId; 
           return newMessages;
         });
       }
