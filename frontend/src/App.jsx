@@ -9,8 +9,9 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 // 這裡選用 vscDarkPlus 主題，看起來會很像 VS Code 的深色模式
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
-const API_URL = "http://localhost:8000"; // 本機開發用
+// const API_URL = "http://localhost:8000"; // 本機開發用
 // const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
+const API_URL = import.meta.env.VITE_API_URL;
 
 function App() {
   // --- 狀態管理 ---
