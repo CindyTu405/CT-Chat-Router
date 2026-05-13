@@ -33,8 +33,8 @@ const CustomMessageNode = ({ data }) => {
         ) : (
           <Bot className="w-4 h-4 text-[#7B90D2]" />
         )}
-        <span className={`text-xs font-bold ${isUser ? 'text-white' : 'text-gray-700'}`}>
-          {isUser ? 'User' : 'AI'}
+        <span className={`text-xs font-bold ${isUser ? 'text-white' : 'text-[#7B90D2]'}`}>
+          {isUser ? 'User' : data.model_used}
         </span>
       </div>
       
@@ -134,7 +134,7 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
           initialNodes.push({
             id: msg.id,
             type: 'custom',
-            data: { role: msg.role, content: msg.content },
+            data: { role: msg.role, content: msg.content, model_used: msg.model_used },
             position: { x: 0, y: 0 }, // 初始先放 0,0，等一下給 dagre 排版
           });
 
