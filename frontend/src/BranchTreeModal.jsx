@@ -17,7 +17,7 @@ const CustomMessageNode = ({ data }) => {
     <div 
       className={`w-64 p-3 rounded-xl shadow-md border-2 ${
         isUser 
-          ? 'bg-[#228DCD] border-[#7DB9DE] text-white' 
+          ? 'bg-[#51A8DD] border-[#7DB9DE] text-white' 
           : 'bg-white border-[#7B90D2] text-gray-800'
       }`}
     >
@@ -136,6 +136,7 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
             type: 'custom',
             data: { role: msg.role, content: msg.content, model_used: msg.model_used },
             position: { x: 0, y: 0 }, // 初始先放 0,0，等一下給 dagre 排版
+            draggable: false,
           });
 
           // 建立連接線 (如果有爸爸的話)
@@ -174,7 +175,7 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
     // 黑底半透明背景
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4 md:p-10">
       {/* 彈出視窗本體 */}
-      <div className="bg-white w-full h-full max-w-6xl rounded-2xl shadow-2xl flex flex-col overflow-hidden relative animate-in fade-in zoom-in-95 duration-200">
+      <div className="bg-[#E8F1F5] w-full h-full max-w-6xl rounded-2xl shadow-2xl flex flex-col overflow-hidden relative animate-in fade-in zoom-in-95 duration-200">
         
         {/* 頂部標題列 */}
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50 z-10">
@@ -208,7 +209,7 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
               fitView // 自動縮放讓整棵樹都在畫面內
               minZoom={0.2}
             >
-              <Background color="#ccc" gap={16} />
+              <Background variant='cross' color="#d3e3eb" gap={16} size={2} />
               <Controls />
             </ReactFlow>
           )}
