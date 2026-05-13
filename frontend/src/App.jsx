@@ -94,7 +94,7 @@ function App() {
   // 3. 開啟新對話
   const startNewChat = () => {
     setMessages([]); // 清空畫面
-    setInput("");
+    // setInput("");
     // 在手機版自動收起側邊欄
     if (window.innerWidth < 768) setSidebarOpen(false);
   };
