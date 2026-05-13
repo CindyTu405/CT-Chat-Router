@@ -130,6 +130,8 @@ function App() {
       { role: 'assistant', content: '', model_used: model } // 提早顯示 Thinking
     ]);
 
+    fetchHistory();
+
     try {
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
@@ -436,6 +438,7 @@ function App() {
                           second: '2-digit'
                         });
                       })()}
+                      {/* {console.log("Chat ID:", chat.id, "Last Activity:", chat.last_activity)} */}
                 </div>
               </div>
               {/* ★★★ 懸停操作按鈕 (Group Hover Actions) ★★★ */}

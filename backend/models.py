@@ -47,6 +47,7 @@ class Message(MessageBase, table=True):
 class MessageWithActivity(MessageBase):
     id: uuid.UUID
     last_activity: Optional[datetime] = None
+    model_config = {"from_attributes": True} # ★ 確保 Pydantic 能從資料庫 Row 讀取屬性
 
 # Pydantic 模型 (用於 API 請求驗證，不存入資料庫)
 class ChatRequest(SQLModel):

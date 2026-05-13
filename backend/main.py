@@ -187,37 +187,44 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
         ).order_by(Message.created_at.desc())
         return session.exec(statement).all()
     else:
-        # 活躍度模式：用遞迴找出每一棵樹「最晚」的活動時間
+        # 解決 PostgreSQL 的 m.* 解析問題，明確列出所有欄位
         query = text("""
         WITH RECURSIVE chat_tree AS (
-            -- 1. 先抓出所有根節點 (Roots)
             SELECT id AS root_id, id AS msg_id, created_at
             FROM message
             WHERE parent_id IS NULL AND session_id = :session_id
             
             UNION ALL
             
-            -- 2. 往下遞迴抓出所有子孫
             SELECT ct.root_id, m.id, m.created_at
             FROM message m
             JOIN chat_tree ct ON m.parent_id = ct.msg_id
         ),
         tree_max_time AS (
-            -- 3. 找出每個家族(root_id)最新的 created_at
-            SELECT root_id, MAX(created_at) as last_activity
+            SELECT root_id, MAX(created_at AT TIME ZONE 'UTC') as last_activity -- ★ 強制標註 UTC
             FROM chat_tree
             GROUP BY root_id
         )
-        -- 4. 依照這個最新時間來排序根節點
-        SELECT m.*, tmt.last_activity
+        SELECT 
+            m.id, 
+            m.content, 
+            m.role, 
+            m.model_used, 
+            m.created_at, 
+            m.session_id, 
+            m.parent_id, 
+            m.title, 
+            m.has_branch,
+            tmt.last_activity AS "last_activity"
         FROM message m
         JOIN tree_max_time tmt ON m.id = tmt.root_id
         ORDER BY tmt.last_activity DESC;
         """)
         
-        # 使用 mappings().all() 確保回傳字典格式，讓 FastAPI 順利轉換
         results = session.exec(query, params={"session_id": session_id}).mappings().all()
-        return results
+        
+        # ★ 強制手動映射：把 RowMapping 拆解並塞入白名單模型，絕對不讓 FastAPI/Driver 偷偷丟掉欄位
+        return [MessageWithActivity(**row) for row in results]
 
 @app.get("/chats/{root_id}/history", response_model=list[Message])
 def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)):
