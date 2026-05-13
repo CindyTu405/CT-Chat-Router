@@ -470,7 +470,7 @@ function App() {
 
       {/* --- 右側主畫面 --- */}
       {/* 加上指定的淺灰色網格背景 */}
-      <div className="flex-1 flex flex-col h-full relative min-w-0 bg-gray-50 bg-[linear-gradient(to_right,#ebebeb_1px,transparent_1px),linear-gradient(to_bottom,#ebebeb_1px,transparent_1px)] bg-[size:16px_16px]">
+      <div className="flex-1 flex flex-col h-full relative min-w-0 bg-[#E8F1F5] bg-[linear-gradient(to_right,#d3e3eb_1px,transparent_1px),linear-gradient(to_bottom,#d3e3eb_1px,transparent_1px)] bg-[size:16px_16px]">
         
         {/* 頂部導航列 */}
         <div className="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white/80 backdrop-blur-sm z-10 sticky top-0 shadow-sm">
@@ -525,7 +525,8 @@ function App() {
                     <option value="z-ai/glm-4.5-air:free">z-ai/glm-4.5-air:free</option>
                     <option value="openai/gpt-oss-120b:free">openai/gpt-oss-120b:free</option>
                     <option value="poolside/laguna-m.1:free">poolside/laguna-m.1:free</option>
-                    <option value="tencent/hy3-preview:free">tencent/hy3-preview:free</option>
+                    <option value="minimax/minimax-m2.5:free">minimax/minimax-m2.5:free</option>
+                    <option value="inclusionai/ring-2.6-1t:free">inclusionai/ring-2.6-1t:free</option>
                     <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
                     <option value="anthropic/claude-opus-4.6">claude-opus-4.6</option>
                   </optgroup>
@@ -637,7 +638,7 @@ function App() {
                         <div className={`
                           px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
                           ${msg.role === 'user' 
-                            ? 'bg-[#228DCD] text-white rounded-tr-none border border-[#1A7DB8]' 
+                            ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD]' 
                             : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
                         `}>
                           <div className="whitespace-normal break-words text-[15px] overflow-x-auto">
