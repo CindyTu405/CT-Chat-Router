@@ -7,7 +7,7 @@ import uuid
 
 # 自訂模組
 from database import create_db_and_tables, get_session
-from models import Message, ChatRequest, UpdateTitleRequest
+from models import Message, ChatRequest, UpdateTitleRequest, MessageWithActivity
 # from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
 from openrouter_llm import openrouter_chat_stream
@@ -172,7 +172,7 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
                 }
     )
 
-@app.get("/chats/roots", response_model=list[Message])
+@app.get("/chats/roots", response_model=list[MessageWithActivity])
 def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session = Depends(get_session)):
     """
     取得側邊欄列表，支援兩種排序：
@@ -209,7 +209,7 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
             GROUP BY root_id
         )
         -- 4. 依照這個最新時間來排序根節點
-        SELECT m.*
+        SELECT m.*, tmt.last_activity
         FROM message m
         JOIN tree_max_time tmt ON m.id = tmt.root_id
         ORDER BY tmt.last_activity DESC;

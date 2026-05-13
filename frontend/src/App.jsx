@@ -419,16 +419,23 @@ function App() {
                   {chat.title || chat.content}
                 </div>
                 <div className="text-xs text-gray-500 truncate mt-0.5">
-                   {new Date(chat.created_at + (chat.created_at.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
-                    timeZone: 'Asia/Taipei',
-                    hour12: false, // 24小時制
-                    year: 'numeric',
-                    month: 'numeric',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                  })}
+                    {(() => {
+                        // ★ 根據排序模式決定要顯示哪一個時間戳記
+                        const targetTime = (sortBy === 'updated' && chat.last_activity) 
+                          ? chat.last_activity 
+                          : chat.created_at;
+
+                        return new Date(targetTime + (targetTime.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
+                          timeZone: 'Asia/Taipei',
+                          hour12: false,
+                          year: 'numeric',
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit'
+                        });
+                      })()}
                 </div>
               </div>
               {/* ★★★ 懸停操作按鈕 (Group Hover Actions) ★★★ */}
