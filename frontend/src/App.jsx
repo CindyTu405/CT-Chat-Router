@@ -536,7 +536,7 @@ function App() {
                     <option value="openai/gpt-oss-120b:free">openai/gpt-oss-120b:free</option>
                     <option value="poolside/laguna-m.1:free">poolside/laguna-m.1:free</option>
                     <option value="minimax/minimax-m2.5:free">minimax/minimax-m2.5:free</option>
-                    <option value="inclusionai/ring-2.6-1t:free">inclusionai/ring-2.6-1t:free</option>
+                    <option value="deepseek/deepseek-v4-flash:free">deepseek/deepseek-v4-flash:free</option>
                   </optgroup>
                   <optgroup label="進階功能">
                     {/* 這個選項是切換到輸入框的鑰匙 */}
