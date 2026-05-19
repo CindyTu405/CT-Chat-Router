@@ -84,7 +84,7 @@ Backend API will be available at http://localhost:8000
 ## Deployment (Render)
 This project has been successfully Dockerized. You can test the live demo on Render via the links below:
 
-Backend: [https://ai-chat-backend-ugmu.onrender.com/](https://ai-chat-backend-ugmu.onrender.com/)
+Backend: [https://ct-chat-router.onrender.com/](https://ct-chat-router.onrender.com/)
 Frontend: [https://ai-chat-frontend-smk3.onrender.com/](https://ai-chat-frontend-smk3.onrender.com/)
 
 **Important**: Because I'm using a free hosting tier, please open the Backend link first to wake up the server. Once it's active, open the Frontend link.
