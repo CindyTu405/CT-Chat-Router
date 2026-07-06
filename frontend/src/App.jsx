@@ -28,6 +28,8 @@ function App() {
   const [historyList, setHistoryList] = useState([]); // 側邊欄列表
   const [model, setModel] = useState("gemini-2.5-flash-lite");
   const [isLoading, setIsLoading] = useState(false);
+  const [freeModels, setFreeModels] = useState([]);
+  const [freeModelsLoading, setFreeModelsLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isCustomModel, setIsCustomModel] = useState(false); //即時輸入模型
   const [editingIndex, setEditingIndex] = useState(null); // 哪一則訊息正在被編輯 (index)
@@ -73,6 +75,15 @@ function App() {
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight + 2}px`;
     }
   }, [input]); // <-- 依賴項是 input，文字改變時就會觸發
+
+  // 載入 OpenRouter 免費模型清單
+  useEffect(() => {
+    fetch(`${API_URL}/api/free-models`)
+      .then(res => res.json())
+      .then(data => setFreeModels(data.models || []))
+      .catch(err => console.error("無法載入免費模型:", err))
+      .finally(() => setFreeModelsLoading(false));
+  }, []);
   // 2. 載入特定對話 (點擊側邊欄觸發)
 
   const loadChat = async (rootId) => {
@@ -530,15 +541,15 @@ function App() {
                     <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
                   </optgroup>
                   <optgroup label="OpenRouter (需儲值/免費)">
-                    <option value="nvidia/nemotron-3-super-120b-a12b:free">nvidia/nemotron-3-super-120b-a12b:free</option>
-                    <option value="nvidia/nemotron-3-nano-30b-a3b:free">nvidia/nemotron-3-nano-30b-a3b:free</option>
-                    <option value="z-ai/glm-4.5-air:free">z-ai/glm-4.5-air:free</option>
-                    <option value="openai/gpt-oss-120b:free">openai/gpt-oss-120b:free</option>
-                    <option value="poolside/laguna-m.1:free">poolside/laguna-m.1:free</option>
-                    <option value="minimax/minimax-m2.5:free">minimax/minimax-m2.5:free</option>
-                    <option value="deepseek/deepseek-v4-flash:free">deepseek/deepseek-v4-flash:free</option>
-                    <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-                    <option value="anthropic/claude-opus-4.6">claude-opus-4.6</option>
+                    {freeModelsLoading ? (
+                      <option disabled>載入中...</option>
+                    ) : freeModels.length === 0 ? (
+                      <option disabled>暫無免費模型</option>
+                    ) : (
+                      freeModels.map(m => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))
+                    )}
                   </optgroup>
                   <optgroup label="進階功能">
                     {/* 這個選項是切換到輸入框的鑰匙 */}

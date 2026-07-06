@@ -1,5 +1,5 @@
 from typing import Optional, List
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
 from pydantic import BaseModel
 import uuid
@@ -58,3 +58,9 @@ class ChatRequest(SQLModel):
 
 class UpdateTitleRequest(SQLModel):
     title: str
+
+
+class FreeModelsCache(SQLModel, table=True):
+    id: int = Field(default=1, primary_key=True)
+    models_json: str = Field(default="[]")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
