@@ -61,6 +61,6 @@ https://github.com/user-attachments/assets/78270ed4-3bd7-4a4c-9262-499483097318
 因為使用的是免費方案，必須先點開後端網址喚醒，等待載入完成後再點開前端網址即可使用。
 對話紀錄會綁定瀏覽器顯示，但全部記錄會存在資料庫，**請勿輸入任何敏感資訊**。
 
-後端:[https://ai-chat-backend-ugmu.onrender.com/](https://ai-chat-backend-ugmu.onrender.com/)
+後端:[https://ct-chat-router.onrender.com/](https://ct-chat-router.onrender.com/)
 前端:[https://ai-chat-frontend-smk3.onrender.com/](https://ai-chat-frontend-smk3.onrender.com/)
 

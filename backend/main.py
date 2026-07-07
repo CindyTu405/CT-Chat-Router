@@ -7,10 +7,11 @@ import uuid
 
 # 自訂模組
 from database import create_db_and_tables, get_session
-from models import Message, ChatRequest, UpdateTitleRequest, MessageWithActivity
+from models import Message, ChatRequest, UpdateTitleRequest, MessageWithActivity, FreeModelsCache
 # from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
 from openrouter_llm import openrouter_chat_stream
+from scraper import get_free_models
 
 
 
@@ -355,3 +356,9 @@ def get_chat_tree(root_id: uuid.UUID, session: Session = Depends(get_session)):
     
     results = session.exec(query, params={"root_id": root_id}).mappings().all()
     return results
+
+
+@app.get("/api/free-models")
+def get_free_models_endpoint(session: Session = Depends(get_session)):
+    models = get_free_models(session)
+    return {"models": models}
