@@ -169,6 +169,28 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
     fetchTreeData();
   }, [isOpen, rootId]);
 
+  // ==========================================
+  // ★ 新增：監聽 Esc 鍵關閉彈出視窗的邏輯
+  // ==========================================
+  useEffect(() => {
+    // 如果視窗沒打開，就不用浪費效能去監聽鍵盤
+    if (!isOpen) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose(); // 呼叫關閉視窗的方法
+      }
+    };
+
+    // 綁定鍵盤事件
+    window.addEventListener('keydown', handleKeyDown);
+
+    // 組件關閉或卸載時，把監聽器清掉（好習慣，避免記憶體洩漏）
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]); 
+
   if (!isOpen) return null;
 
   return (
