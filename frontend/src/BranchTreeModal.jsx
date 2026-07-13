@@ -173,7 +173,15 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
 
   return (
     // 黑底半透明背景
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4 md:p-10">
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4 md:p-10"
+      onClick={(e) => {
+          // 關鍵：如果點擊的目標 (e.target) 是這個背景層本身 (e.currentTarget)
+          // 代表使用者點在視窗外面，我們就呼叫 onClose() 關閉視窗
+          if (e.target === e.currentTarget) {
+            onClose();
+          }
+        }}
+    >
       {/* 彈出視窗本體 */}
       <div className="bg-[#E8F1F5] w-full h-full max-w-6xl rounded-2xl shadow-2xl flex flex-col overflow-hidden relative animate-in fade-in zoom-in-95 duration-200">
         
