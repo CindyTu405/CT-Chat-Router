@@ -20,4 +20,4 @@ RUN uv export --frozen --no-dev --no-hashes -o requirements.lock.txt \
 # 複製程式碼 (雖然 docker-compose 有掛載 volumes，但正規打包還是要 COPY)
 COPY . .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", ]
