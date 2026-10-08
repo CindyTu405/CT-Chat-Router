@@ -27,8 +27,8 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     depends_on:
-      - db:
-          condition: service_healthy
+      db:
+        condition: service_healthy
     # 不開 ports,由 nginx 代理
 
   web:

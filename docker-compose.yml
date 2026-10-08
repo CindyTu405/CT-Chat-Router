@@ -30,8 +30,8 @@ services:
     ports:
       - "5050:80"
     depends_on:
-      - db:
-          condition: service_healthy
+      db:
+        condition: service_healthy
 
   # FastAPI 後端服務
   api:
