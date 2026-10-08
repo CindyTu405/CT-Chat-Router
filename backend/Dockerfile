@@ -13,8 +13,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 複製套件清單並安裝
-COPY pyproject.toml uv.lock* ./
-RUN uv pip install --system -r pyproject.toml
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-dev --no-hashes -o requirements.lock.txt \
+    && uv pip install --system -r requirements.lock.txt
 
 # 複製程式碼 (雖然 docker-compose 有掛載 volumes，但正規打包還是要 COPY)
 COPY . .
