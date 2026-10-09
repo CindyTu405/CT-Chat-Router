@@ -3,6 +3,7 @@ import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
    X, Trash2, Edit2, Check, ArrowUpDown} from 'lucide-react';
 import { TbBinaryTree2 } from 'react-icons/tb';
 import BranchTreeModal from './BranchTreeModal';
+import { formatDateTime, formatShortDateTime } from './dateUtils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -438,16 +439,9 @@ function App() {
                           ? chat.last_activity 
                           : chat.created_at;
 
-                        return new Date(targetTime + (targetTime.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
-                          timeZone: 'Asia/Taipei',
-                          hour12: false,
-                          year: 'numeric',
-                          month: 'numeric',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit'
-                        });
+                        // 用共用工具解析 (後端回傳 UTC)，並依「使用者所在時區」顯示。
+                        // 解析失敗時回傳空字串，避免畫面上出現 Invalid Date。
+                        return formatDateTime(targetTime);
                       })()}
                       {/* {console.log("Chat ID:", chat.id, "Last Activity:", chat.last_activity)} */}
                 </div>
@@ -728,9 +722,7 @@ function App() {
                         {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
                         {msg.role === 'user' && (
                           <div className="text-[11px] text-gray-400 mt-1.5 mr-1 select-none">
-                            {msg.created_at ? new Date(msg.created_at + (msg.created_at.endsWith("Z") ? "" : "Z")).toLocaleString('zh-TW', {
-                              month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false
-                            }) : '剛剛發送'}
+                            {formatShortDateTime(msg.created_at) || '剛剛發送'}
                           </div>
                         )}
 

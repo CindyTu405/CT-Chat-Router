@@ -202,7 +202,12 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
             JOIN chat_tree ct ON m.parent_id = ct.msg_id
         ),
         tree_max_time AS (
-            SELECT root_id, MAX(created_at AT TIME ZONE 'UTC') as last_activity -- ★ 強制標註 UTC
+            SELECT root_id, MAX(created_at) as last_activity
+            -- created_at 欄位是 TIMESTAMP WITHOUT TIME ZONE，存的就是 UTC。
+            -- 這裡刻意「不要」用 AT TIME ZONE 'UTC'：那會把結果變成 timestamptz，
+            -- 回傳的 offset 會跟著 DB 的 TimeZone 設定跑 (本機 Asia/Taipei → +08:00，
+            -- EC2 若是 UTC → +00:00)，前端很容易判斷錯時區。
+            -- 維持 naive UTC，由 models.to_utc_iso() 統一輸出結尾帶 Z 的字串。
             FROM chat_tree
             GROUP BY root_id
         )
