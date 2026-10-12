@@ -1,14 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Bot, User, Settings, Menu, Sparkles, Plus, MessageSquare, Pencil,
-   X, Trash2, Edit2, Check, ArrowUpDown} from 'lucide-react';
-import { TbBinaryTree2 } from 'react-icons/tb';
+import { useState, useEffect, useCallback } from 'react';
 import BranchTreeModal from './BranchTreeModal';
-import { formatDateTime, formatShortDateTime } from './dateUtils';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-// 這裡選用 vscDarkPlus 主題，看起來會很像 VS Code 的深色模式
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import Sidebar from './components/Sidebar';
+import ChatHeader from './components/ChatHeader';
+import MessageList from './components/MessageList';
+import ChatInput from './components/ChatInput';
 
 // const API_URL = "http://localhost:8000"; // 本機開發用
 // const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
@@ -43,15 +38,6 @@ function App() {
   const [currentTreeRootId, setCurrentTreeRootId] = useState(null); // 目前正在看哪棵樹
   const [lastViewedNodes, setLastViewedNodes] = useState({}); // 記憶每個對話最後點擊的分支節點
 
-  const textareaRef = useRef(null);
-
-  const messagesEndRef = useRef(null);
-
-  // 自動捲動到底部
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = useCallback( async () => {
     try {
@@ -66,16 +52,6 @@ function App() {
   useEffect(() => {
     fetchHistory();
   }, [fetchHistory]); // 當 sortBy 改變時，自動重新載入列表
-
-  // 監聽 input 內容，自動調整輸入框高度
-  useEffect(() => {
-    if (textareaRef.current) {
-      // 步驟 A: 先把高度強制重置回基礎高度，這樣如果刪除文字，框才會縮小
-      textareaRef.current.style.height = 'auto'; 
-      // 步驟 B: 將高度設定為內容的實際高度 (scrollHeight)
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight + 2}px`;
-    }
-  }, [input]); // <-- 依賴項是 input，文字改變時就會觸發
 
   // 載入 OpenRouter 免費模型清單
   useEffect(() => {
@@ -281,13 +257,6 @@ function App() {
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   // 刪除對話
   const handleDeleteChat = async (e, chatId) => {
     e.stopPropagation(); // 防止觸發 "載入對話"
@@ -352,438 +321,57 @@ function App() {
     // 整體背景改為白色，文字改為深色
     <div className="flex h-screen bg-white text-gray-800 font-sans overflow-hidden">
       
-      {/* --- 左側側邊欄 --- */}
-      {/* 套用指定的更淺灰藍色 #E8F1F5 */}
-      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} bg-[#E8F1F5] border-r border-gray-300 transition-all duration-300 flex flex-col flex-shrink-0 relative`}>
-        
-        {/* New Chat 按鈕 */}
-        <div className="p-4">
-          <button 
-            onClick={startNewChat}
-            className="w-full flex items-center gap-3 px-4 py-3 bg-[#51A8DD] hover:bg-[#3D9AD1] rounded-xl transition text-sm font-semibold cursor-pointer shadow-md shadow-[#51A8DD]/30 text-white group"
-          >
-            <Plus className="w-4 h-4 text-white" />
-            New Chat
-          </button>
-        </div>
-
-        {/* 歷史紀錄標題與排序按鈕 */}
-        <div className="px-4 py-2 flex items-center justify-between">
-          <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-            Recent
-          </div>
-          <button 
-            onClick={() => setSortBy(prev => prev === 'updated' ? 'created' : 'updated')}
-            className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-[#7DB9DE] transition cursor-pointer"
-            title="切換排序方式"
-          >
-            <ArrowUpDown className="w-3 h-3" />
-            {sortBy === 'updated' ? '依最新回覆' : '依建立日期'}
-          </button>
-        </div>
-        
-        {/* 列表區域 */}
-        <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-300">
-          {historyList.map((chat) => (
-            <div key={chat.id} className="group relative">
-          {/* 判斷：如果是正在改名的狀態，顯示輸入框 */}
-          {renamingId === chat.id ? (
-            <div className="p-2 mx-2 bg-white border border-[#7DB9DE] rounded-lg flex items-center gap-2 shadow-sm">
-              <input
-                className="flex-1 bg-transparent text-sm text-gray-800 outline-none min-w-0"
-                value={renameInput}
-                onChange={(e) => setRenameInput(e.target.value)}
-                autoFocus
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter') submitRename(e);
-                    if (e.key === 'Escape') setRenamingId(null);
-                }}
-              />
-              <button onClick={submitRename} className="text-green-500 hover:text-green-600">
-                <Check className="w-4 h-4" />
-              </button>
-              <button onClick={() => setRenamingId(null)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          ) : (
-            // 一般狀態：顯示按鈕
-            <button 
-              onClick={() => loadChat(lastViewedNodes[chat.id] || chat.id)}
-              className="w-full text-left p-3 rounded-xl hover:bg-white/80 hover:shadow-sm group cursor-pointer transition-all flex items-center gap-3 relative"
-            >
-              {/* ★★★ 修改這裡：判斷是否有分支來決定圖示 ★★★ */}
-              {chat.has_branch ? (
-                <div 
-                  onClick={(e) => openTreeModal(e, chat.id)}
-                  className="p-0.5 hover:bg-[#D8E6F0] rounded-md transition z-10 relative"
-                  title="查看對話分支圖"
-                >
-                <TbBinaryTree2 
-                  className="w-4 h-4 text-[#228DCD] hover:text-[#7DB9DE] transition flex-shrink-0" 
-                  title="這是一個有分支的對話"
-                /></div>
-              ) : (
-                <MessageSquare className="w-5 h-5 text-gray-500 group-hover:text-[#7DB9DE] transition flex-shrink-0" />
-              )}
-              <div className="flex-1 min-w-0 pr-6"> {/* pr-6 留空間給 hover 按鈕 */}
-                  {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
-                <div className="text-sm text-gray-700 group-hover:text-gray-900 truncate transition font-medium">
-                  {chat.title || chat.content}
-                </div>
-                <div className="text-xs text-gray-500 truncate mt-0.5">
-                    {(() => {
-                        // ★ 根據排序模式決定要顯示哪一個時間戳記
-                        const targetTime = (sortBy === 'updated' && chat.last_activity) 
-                          ? chat.last_activity 
-                          : chat.created_at;
-
-                        // 用共用工具解析 (後端回傳 UTC)，並依「使用者所在時區」顯示。
-                        // 解析失敗時回傳空字串，避免畫面上出現 Invalid Date。
-                        return formatDateTime(targetTime);
-                      })()}
-                      {/* {console.log("Chat ID:", chat.id, "Last Activity:", chat.last_activity)} */}
-                </div>
-              </div>
-              {/* ★★★ 懸停操作按鈕 (Group Hover Actions) ★★★ */}
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 rounded-md p-1 shadow-sm border border-gray-200">
-                <div 
-                  onClick={(e) => startRenaming(e, chat)}
-                  className="p-1.5 text-gray-500 hover:text-[#7DB9DE] hover:bg-gray-100 rounded cursor-pointer"
-                  title="重新命名"
-                >
-                  <Edit2 className="w-3.5 h-3.5" />
-                </div>
-                <div 
-                  onClick={(e) => handleDeleteChat(e, chat.id)}
-                  className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-gray-100 rounded cursor-pointer"
-                  title="刪除對話"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </div>
-              </div>
-            </button>
-          )}
-        </div>
-      ))}
-        </div>
-
-        {/* 底部設定區 */}
-        <div className="p-4 border-t border-gray-300 bg-[#E8F1F5]">
-          <div className="flex items-center gap-3 px-2">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#7DB9DE] to-[#7B90D2] flex items-center justify-center font-bold text-xs text-white shadow-sm">
-              ME
-            </div>
-            <div className="text-sm font-medium text-gray-700" >User</div>
-              <div title="只是一個齒輪" className="ml-auto">
-              <Settings className="w-4 h-4 text-gray-500 hover:text-[#7DB9DE]"/>
-              </div>
-          </div>
-        </div>
-      </div>
+      <Sidebar
+        sidebarOpen={sidebarOpen}
+        historyList={historyList}
+        sortBy={sortBy}
+        setSortBy={setSortBy}
+        renamingId={renamingId}
+        setRenamingId={setRenamingId}
+        renameInput={renameInput}
+        setRenameInput={setRenameInput}
+        lastViewedNodes={lastViewedNodes}
+        onStartNewChat={startNewChat}
+        onLoadChat={loadChat}
+        onOpenTreeModal={openTreeModal}
+        onDeleteChat={handleDeleteChat}
+        onStartRenaming={startRenaming}
+        onSubmitRename={submitRename}
+      />
 
       {/* --- 右側主畫面 --- */}
       {/* 加上指定的淺灰色網格背景 */}
       <div className="flex-1 flex flex-col h-full relative min-w-0 bg-[#E8F1F5] bg-[linear-gradient(to_right,#d3e3eb_1px,transparent_1px),linear-gradient(to_bottom,#d3e3eb_1px,transparent_1px)] bg-[size:16px_16px]">
         
-        {/* 頂部導航列 */}
-        <div className="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white/80 backdrop-blur-sm z-10 sticky top-0 shadow-sm">
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 text-gray-500 hover:text-[#7DB9DE] hover:bg-gray-100 rounded-lg transition cursor-pointer"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            {/* 標題顯示區域 */}
-            <span className="font-medium text-gray-800 truncate max-w-[150px] md:max-w-md">
-              {messages.length > 0 ? (
-                // 有對話時：優先顯示 title，沒有則顯示內容摘要
-                messages[0].title || messages[0].content.slice(0, 20) + (messages[0].content.length > 20 ? "..." : "")
-              ) : (
-                // 沒對話時 (New Chat)
-                "AI Chat"
-              )}
-            </span>
-          </div>
+        <ChatHeader
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          messages={messages}
+          model={model}
+          setModel={setModel}
+          isCustomModel={isCustomModel}
+          setIsCustomModel={setIsCustomModel}
+          freeModels={freeModels}
+          freeModelsLoading={freeModelsLoading}
+        />
 
-          <div className="relative">
-              {/* --- 模型選擇區 (支援下拉與手動輸入) --- */}
-            <div className="relative flex items-center gap-2">
-              
-              {/* 裝飾用的小星星 Icon */}
-              <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none z-10">
-                <Sparkles className="h-3.5 w-3.5 text-[#7B90D2]" />
-              </div>
+        <MessageList
+          messages={messages}
+          isLoading={isLoading}
+          editingIndex={editingIndex}
+          setEditingIndex={setEditingIndex}
+          editInput={editInput}
+          setEditInput={setEditInput}
+          setInput={setInput}
+          onBranch={handleBranch}
+        />
 
-              {!isCustomModel ? (
-                // 模式 A：下拉選單
-                <select 
-                  value={model}
-                  onChange={(e) => {
-                    if (e.target.value === "custom") {
-                      setIsCustomModel(true);
-                      setModel(""); // 清空，讓使用者準備輸入
-                    } else {
-                      setModel(e.target.value);
-                    }
-                  }}
-                  className="bg-white border border-gray-300 text-gray-700 text-xs md:text-sm rounded-lg focus:ring-[#7DB9DE] focus:border-[#7DB9DE] block w-40 md:w-56 pl-8 p-2 appearance-none cursor-pointer hover:bg-gray-50 transition shadow-sm"
-                >
-                  <optgroup label="Google (原生 API)">
-                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
-                  </optgroup>
-                  <optgroup label="OpenRouter (需儲值/免費)">
-                    {freeModelsLoading ? (
-                      <option disabled>載入中...</option>
-                    ) : freeModels.length === 0 ? (
-                      <option disabled>暫無免費模型</option>
-                    ) : (
-                      freeModels.map(m => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                      ))
-                    )}
-                  </optgroup>
-                  <optgroup label="進階功能">
-                    {/* 這個選項是切換到輸入框的鑰匙 */}
-                    <option value="custom">✨ 自訂輸入 (貼上模型 ID)...</option>
-                  </optgroup>
-                </select>
-              ) : (
-                // 模式 B：手動輸入框
-                <div className="flex items-center gap-1">
-                  <input
-                    type="text"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="例如: qwen/qwen-2.5-72b..."
-                    className="bg-white border border-[#7DB9DE] text-gray-800 text-xs md:text-sm rounded-lg focus:ring-2 focus:ring-[#7DB9DE] block w-40 md:w-56 pl-8 p-2 transition outline-none shadow-sm"
-                    autoFocus // 切換過來時自動聚焦
-                  />
-                  <button
-                    onClick={() => {
-                      setIsCustomModel(false);
-                      setModel("gemini-2.5-flash-lite"); // 取消時切回預設模型
-                    }}
-                    className="text-gray-500 hover:text-gray-800 text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded transition cursor-pointer"
-                  >
-                    取消
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* 對話視窗 */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth">
-          {messages.length === 0 ? (
-            // --- 空狀態 (Empty State) ---
-            <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-5">
-              <div className="w-16 h-16 bg-[#51A8DD] rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-[#51A8DD]/30">
-                <Bot className="w-8 h-8 text-white" />
-              </div>
-              <div className="text-center space-y-1">
-                <p className="text-2xl font-semibold text-gray-700 tracking-tight">今天想聊些什麼？</p>
-                <p className="text-sm text-gray-400">選一個提示，或直接開始輸入</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg px-4">
-                {['隨機介紹一個景點', '推薦一道食譜', '分享一本書給我', '講個笑話'].map(suggestion => (
-                  <button 
-                    key={suggestion}
-                    onClick={() => setInput(suggestion)}
-                    className="p-4 bg-white/80 border border-[#7DB9DE] hover:bg-gray-100 hover:border-[#7DB9DE] hover:shadow-md rounded-2xl text-sm text-left transition-all cursor-pointer text-gray-600 font-medium"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            // --- 對話列表 (Chat List) ---
-            // 修正重點 1: 使用 Fragment (<>...</>) 包裹多個元素
-            <>
-              {messages.map((msg, index) => (
-                <div 
-                  key={index} 
-                  className={`flex gap-4 max-w-4xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
-                >
-                  {/* 頭像 */}
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white shadow-sm ${msg.role === 'user' ? 'bg-[#51A8DD]' : 'bg-[#7B90D2]'}`}>
-                    {msg.role === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
-                  </div>
-
-                  {/* 訊息內容區塊 */}
-                  <div className={`flex flex-col ${
-                    msg.role === 'user' 
-                      ? 'items-end max-w-[85%] md:max-w-[75%]' // User 保持原本的泡泡寬度限制
-                      : 'items-start flex-1 min-w-0 mr-12' // AI 使用 flex-1 填滿右側所有剩餘空間，min-w-0 防止文字溢出破版
-                  }`}>
-                    
-                    {/* 編輯模式判斷 */}
-                    {editingIndex === index ? (
-                      <div className="w-full bg-white p-3 rounded-2xl border border-[#7DB9DE] shadow-md animate-in fade-in zoom-in-95 duration-200">
-                        <textarea
-                          value={editInput}
-                          onChange={(e) => setEditInput(e.target.value)}
-                          className="w-full bg-gray-50 text-gray-800 p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#7DB9DE] outline-none resize-none text-sm"
-                          rows="3"
-                          autoFocus
-                        />
-                        <div className="flex justify-end gap-2 mt-3">
-                          <button 
-                            onClick={() => setEditingIndex(null)}
-                            className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition"
-                          >
-                            取消
-                          </button>
-                          <button 
-                            onClick={() => handleBranch(index)}
-                            className="px-3 py-1.5 text-xs text-white bg-[#51A8DD] hover:bg-[#7DB9DE] rounded-lg transition flex items-center gap-1 shadow-sm"
-                          >
-                            <Send className="w-3 h-3" />
-                            分支並發送
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="relative group/bubble">
-                        {/* 對話框 */}
-                        <div className={`
-                          px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
-                          ${msg.role === 'user' 
-                            ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD]' 
-                            : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
-                        `}>
-                          <div className="whitespace-normal break-words text-[15px] overflow-x-auto">
-                            {msg.content ? (
-                              <ReactMarkdown
-                                remarkPlugins={[remarkGfm]}
-                                components={{
-                                  // 處理多行程式碼區塊 (Code Blocks)
-                                  code({ inline, className, children, ...props }) {
-                                    const match = /language-(\w+)/.exec(className || '');
-                                    return !inline && match ? (
-                                      <SyntaxHighlighter
-                                        style={vscDarkPlus}
-                                        language={match[1]}
-                                        PreTag="div"
-                                        className="rounded-xl my-3 shadow-sm text-sm"
-                                        {...props}
-                                      >
-                                        {String(children).replace(/\n$/, '')}
-                                      </SyntaxHighlighter>
-                                    ) : (
-                                      // 處理單行行內程式碼 (Inline Code)
-                                      <code 
-                                        className={`px-1.5 py-0.5 rounded-md font-mono text-[13px] ${
-                                          msg.role === 'user' 
-                                            ? 'bg-blue-600/50 text-white' // 使用者泡泡內的行內程式碼樣式
-                                            : 'bg-gray-100 text-[#E83E8C]' // AI 泡泡內的行內程式碼樣式
-                                        }`} 
-                                        {...props}
-                                      >
-                                        {children}
-                                      </code>
-                                    );
-                                  },
-                                  // 自定義 Markdown 標籤的 Tailwind 樣式，讓排版更好看
-                                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
-                                  ul: ({ children }) => <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>,
-                                  ol: ({ children }) => <ol className="list-decimal ml-5 mb-3 space-y-1">{children}</ol>,
-                                  li: ({ children }) => <li className="pl-1">{children}</li>,
-                                  h1: ({ children }) => <h1 className="text-2xl font-bold mb-3 mt-4">{children}</h1>,
-                                  h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-4">{children}</h2>,
-                                  h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-3">{children}</h3>,
-                                  a: ({ children, href }) => (
-                                    <a href={href} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-600 underline underline-offset-2 transition-colors">
-                                      {children}
-                                    </a>
-                                  ),
-                                  blockquote: ({ children }) => (
-                                    <blockquote className="border-l-4 border-gray-300 pl-4 py-1 my-3 text-gray-600 bg-gray-50 rounded-r-lg">
-                                      {children}
-                                    </blockquote>
-                                  ),
-                                  table: ({ children }) => <div className="overflow-x-auto my-4"><table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">{children}</table></div>,
-                                  th: ({ children }) => <th className="px-4 py-2 bg-gray-50 text-left text-sm font-semibold text-gray-700 border-b">{children}</th>,
-                                  td: ({ children }) => <td className="px-4 py-2 text-sm text-gray-600 border-b">{children}</td>,
-                                }}
-                              >
-                                {msg.content}
-                              </ReactMarkdown>
-                            ) : (
-                              <span className="animate-pulse text-gray-400">Thinking...</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
-                        {msg.role === 'user' && (
-                          <div className="text-[11px] text-gray-400 mt-1.5 mr-1 select-none">
-                            {formatShortDateTime(msg.created_at) || '剛剛發送'}
-                          </div>
-                        )}
-
-                        {/* 鉛筆按鈕 */}
-                        {msg.role === 'user' && !isLoading && (
-                          <button
-                            onClick={() => {
-                              setEditingIndex(index);
-                              setEditInput(msg.content);
-                            }}
-                            className="absolute -left-8 top-2 p-1.5 text-gray-400 hover:text-[#51A8DD] bg-white hover:bg-gray-50 rounded-full opacity-0 group-hover/bubble:opacity-100 transition-all shadow border border-gray-200 cursor-pointer"
-                            title="編輯並開啟新分支"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 模型標籤 */}
-                    {msg.role === 'assistant' && msg.model_used && (
-                      <div className="mt-1.5 ml-1 text-[11px] text-gray-400 flex items-center gap-1 font-mono">
-                        <Sparkles className="w-3 h-3 text-gray-400" />
-                        {msg.model_used}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              
-              {/* 自動捲動定位點 */}
-              <div ref={messagesEndRef} />
-            </>
-          )}
-        </div> 
-
-        {/* 輸入框區塊 - 這裡將背景改為透明，融入網格 */}
-        <div className="p-4 bg-white/70 backdrop-blur-sm border-t border-gray-200">
-          <div className="max-w-4xl mx-auto relative group">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="輸入訊息..."
-              rows="1"
-              className="w-full bg-white text-gray-800 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-[#51A8DD]/40 border border-gray-200 group-hover:border-[#7DB9DE] transition resize-none shadow-sm max-h-[224px] overflow-y-auto"
-              style={{ minHeight: '56px' }}
-            />
-            <button 
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-              className="absolute right-2 bottom-[15px] p-2.5 bg-[#51A8DD] hover:bg-[#3D9AD1] rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md shadow-[#51A8DD]/25"
-            >
-              <Send className="w-5 h-5 text-white" />
-            </button>
-          </div>
-          <div className="text-center mt-3 text-xs text-gray-400 font-medium">
-             AI模型有可能會出錯，請檢察回覆內容。
-          </div>
-        </div>
+        <ChatInput
+          input={input}
+          setInput={setInput}
+          isLoading={isLoading}
+          onSend={handleSend}
+        />
 
       </div>
       {/* ★★★ 放入樹狀圖彈出視窗 ★★★ */}
