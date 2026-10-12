@@ -26,7 +26,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [freeModels, setFreeModels] = useState([]);
   const [freeModelsLoading, setFreeModelsLoading] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [isCustomModel, setIsCustomModel] = useState(false); //即時輸入模型
   const [editingIndex, setEditingIndex] = useState(null); // 哪一則訊息正在被編輯 (index)
   const [editInput, setEditInput] = useState(""); // 編輯框裡的文字
