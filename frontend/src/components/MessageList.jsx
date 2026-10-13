@@ -6,6 +6,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 // 這裡選用 vscDarkPlus 主題，看起來會很像 VS Code 的深色模式
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { formatShortDateTime } from '../dateUtils';
+import { handleEnterKey } from '../keyUtils';
 
 // 中間對話視窗：空狀態提示、訊息氣泡（Markdown／程式碼高亮）、分支編輯框
 function MessageList({
@@ -76,6 +77,8 @@ function MessageList({
                     <textarea
                       value={editInput}
                       onChange={(e) => setEditInput(e.target.value)}
+                      // P3: 手機端（< 768px）Enter 換行；PC 端 Enter 觸發「分支並發送」、Shift + Enter 換行
+                      onKeyDown={(e) => handleEnterKey(e, () => onBranch(index))}
                       className="w-full bg-gray-50 text-gray-800 p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#7DB9DE] outline-none resize-none text-sm"
                       rows="3"
                       autoFocus

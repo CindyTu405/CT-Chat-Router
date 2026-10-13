@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
+import { handleEnterKey } from '../keyUtils';
 
 // 底部輸入區塊：自動高度的輸入框、送出按鈕、Enter 行為處理
 function ChatInput({ input, setInput, isLoading, onSend }) {
@@ -19,11 +20,9 @@ function ChatInput({ input, setInput, isLoading, onSend }) {
     textareaRef.current.style.height = `${textareaRef.current.scrollHeight + 2}px`;
   }, [input]); // <-- 依賴項是 input，文字改變時就會觸發
 
+  // P3: 手機端（< 768px）Enter 改為換行，PC 端維持 Enter 送出、Shift + Enter 換行
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      onSend();
-    }
+    handleEnterKey(e, onSend);
   };
 
   return (
