@@ -1,1 +1,19 @@
 @import "tailwindcss";
+
+/* E5 修正（P5b）：animate-in / fade-in / zoom-in-95 / duration-200 來自 v3 的
+ * tailwindcss-animate 外掛，Tailwind v4 沒有對應樣式、完全沒有效果。
+ * 改以原生 CSS keyframes 實作等效的「淡入 + 95%→100% 縮放進場」。 */
+@keyframes fade-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-zoom-in {
+  animation: fade-zoom-in 0.2s ease-out;
+}

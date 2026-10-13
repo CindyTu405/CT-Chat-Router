@@ -205,7 +205,7 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
         }}
     >
       {/* 彈出視窗本體 */}
-      <div className="bg-[#E8F1F5] w-full h-full max-w-6xl rounded-2xl shadow-2xl flex flex-col overflow-hidden relative animate-in fade-in zoom-in-95 duration-200">
+      <div className="bg-[#E8F1F5] w-full h-full max-w-6xl rounded-2xl shadow-2xl flex flex-col overflow-hidden relative animate-fade-zoom-in">
         
         {/* 頂部標題列 */}
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50 z-10">

@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, ArrowUpDown, Check, X, Trash2, Edit2, MessageSquare, Settings } from 'lucide-react';
 import { TbBinaryTree2 } from 'react-icons/tb';
 import { formatDateTime, groupByTimeRange } from '../dateUtils';
+import TimelineRail from './TimelineRail';
 
 // 一列對話：左側載入按鈕 + 右側獨立操作按鈕（分支圖／改名／刪除）
 // E4 修正：不再把 <div onClick> 巢狀在 <button> 內，操作項目改為真正的 <button>，
@@ -139,6 +140,18 @@ function Sidebar({
     [historyList, sortBy]
   );
 
+  // P5b：以視窗寬度 768px 區分 PC / 手機（與 P1/P3 的斷點一致）。
+  // PC 顯示右側獨立導航列；手機改用捲動時浮現的 Google 相簿式 scrubber，避免壓縮列表空間。
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // 列表捲動容器；TimelineRail 以它為基準做捲動定位與 scroll spy
+  const scrollRef = useRef(null);
+
   return (
     // --- 左側側邊欄 ---
     // 套用指定的更淺灰藍色 #E8F1F5
@@ -170,40 +183,55 @@ function Sidebar({
         </button>
       </div>
 
-      {/* 列表區域：依時間軸分組，群組標題 sticky */}
-      <div className="flex-1 overflow-y-auto px-2 pb-2 scrollbar-thin scrollbar-thumb-gray-300">
-        {timeGroups.map((group) => (
-          <section key={group.key} className="mb-1">
-            {/* -mx-2 讓不透明背景蓋住列表容器的左右 padding，避免捲動時項目從縫隙穿出 */}
-            <h3 className="sticky top-0 z-10 -mx-2 bg-[#E8F1F5] px-2 py-1.5 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              {group.label}
-            </h3>
-            <div className="space-y-1">
-              {group.items.map((chat) => (
-                renamingId === chat.id ? (
-                  <ChatRenameRow
-                    key={chat.id}
-                    renameInput={renameInput}
-                    setRenameInput={setRenameInput}
-                    setRenamingId={setRenamingId}
-                    onSubmitRename={onSubmitRename}
-                  />
-                ) : (
-                  <ChatRow
-                    key={chat.id}
-                    chat={chat}
-                    sortBy={sortBy}
-                    lastViewedNode={lastViewedNodes[chat.id]}
-                    onLoadChat={onLoadChat}
-                    onOpenTreeModal={onOpenTreeModal}
-                    onStartRenaming={onStartRenaming}
-                    onDeleteChat={onDeleteChat}
-                  />
-                )
-              ))}
-            </div>
-          </section>
-        ))}
+      {/* 列表區域：依時間軸分組，群組標題 sticky；右側疊加時間軸導航（P5b）
+          E5 修正：scrollbar-thin / scrollbar-thumb-gray-300 是 v3 外掛 class，Tailwind v4 無效，
+          改寫成等效的原生屬性寫法（Firefox 用 scrollbar-width/color，WebKit 用偽元素變體）。 */}
+      <div className="flex-1 min-h-0 relative">
+        <div
+          ref={scrollRef}
+          className="h-full overflow-y-auto px-2 pb-2 [scrollbar-width:thin] [scrollbar-color:#d1d5db_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300"
+        >
+          {timeGroups.map((group) => (
+            <section key={group.key} data-timeline-group={group.key} className="mb-1">
+              {/* -mx-2 讓不透明背景蓋住列表容器的左右 padding，避免捲動時項目從縫隙穿出 */}
+              <h3 className="sticky top-0 z-10 -mx-2 bg-[#E8F1F5] px-2 py-1.5 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                {group.label}
+              </h3>
+              {/* PC 版預留右側導航列通道（pr-12）；手機版 scrubber 是浮動的，不佔空間 */}
+              <div className={`space-y-1 ${isMobile ? '' : 'pr-12'}`}>
+                {group.items.map((chat) => (
+                  renamingId === chat.id ? (
+                    <ChatRenameRow
+                      key={chat.id}
+                      renameInput={renameInput}
+                      setRenameInput={setRenameInput}
+                      setRenamingId={setRenamingId}
+                      onSubmitRename={onSubmitRename}
+                    />
+                  ) : (
+                    <ChatRow
+                      key={chat.id}
+                      chat={chat}
+                      sortBy={sortBy}
+                      lastViewedNode={lastViewedNodes[chat.id]}
+                      onLoadChat={onLoadChat}
+                      onOpenTreeModal={onOpenTreeModal}
+                      onStartRenaming={onStartRenaming}
+                      onDeleteChat={onDeleteChat}
+                    />
+                  )
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+
+        {/* P5b：PC 右側獨立導航列 / 手機版浮動 scrubber */}
+        <TimelineRail
+          groups={timeGroups}
+          scrollRef={scrollRef}
+          isMobile={isMobile}
+        />
       </div>
 
       {/* 底部設定區 */}

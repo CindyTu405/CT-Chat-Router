@@ -73,7 +73,7 @@ function MessageList({
                 
                 {/* 編輯模式判斷 */}
                 {editingIndex === index ? (
-                  <div className="w-full bg-white p-3 rounded-2xl border border-[#7DB9DE] shadow-md animate-in fade-in zoom-in-95 duration-200">
+                  <div className="w-full bg-white p-3 rounded-2xl border border-[#7DB9DE] shadow-md animate-fade-zoom-in">
                     <textarea
                       value={editInput}
                       onChange={(e) => setEditInput(e.target.value)}
