@@ -7,12 +7,16 @@ function ChatInput({ input, setInput, isLoading, onSend }) {
 
   // 監聽 input 內容，自動調整輸入框高度
   useEffect(() => {
-    if (textareaRef.current) {
-      // 步驟 A: 先把高度強制重置回基礎高度，這樣如果刪除文字，框才會縮小
-      textareaRef.current.style.height = 'auto'; 
-      // 步驟 B: 將高度設定為內容的實際高度 (scrollHeight)
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight + 2}px`;
+    if (!textareaRef.current) return;
+    // P2: 未輸入（含只有空白字元）時維持單行高度
+    if (input.trim() === '') {
+      textareaRef.current.style.height = '56px';
+      return;
     }
+    // 步驟 A: 先把高度強制重置回基礎高度，這樣如果刪除文字，框才會縮小
+    textareaRef.current.style.height = 'auto';
+    // 步驟 B: 將高度設定為內容的實際高度 (scrollHeight)
+    textareaRef.current.style.height = `${textareaRef.current.scrollHeight + 2}px`;
   }, [input]); // <-- 依賴項是 input，文字改變時就會觸發
 
   const handleKeyDown = (e) => {
