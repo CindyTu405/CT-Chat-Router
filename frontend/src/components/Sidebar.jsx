@@ -155,7 +155,8 @@ function Sidebar({
   return (
     // --- 左側側邊欄 ---
     // 套用指定的更淺灰藍色 #E8F1F5
-    <div className={`${sidebarOpen ? 'w-80' : 'w-0'} bg-[#E8F1F5] border-r border-gray-300 transition-all duration-300 flex flex-col flex-shrink-0 relative`}>
+    // P5b-fix（B2）：加上 overflow-hidden，收起（w-0）時內容不再溢出到主畫面、不攔截觸控
+    <div className={`${sidebarOpen ? 'w-80' : 'w-0'} overflow-hidden bg-[#E8F1F5] border-r border-gray-300 transition-all duration-300 flex flex-col flex-shrink-0 relative`}>
 
       {/* New Chat 按鈕 */}
       <div className="p-4">
@@ -227,11 +228,15 @@ function Sidebar({
         </div>
 
         {/* P5b：PC 右側獨立導航列 / 手機版浮動 scrubber */}
-        <TimelineRail
-          groups={timeGroups}
-          scrollRef={scrollRef}
-          isMobile={isMobile}
-        />
+        {/* P5b-fix（B2）：側邊欄收起時不渲染 TimelineRail，卸載即重置
+            visible／scrubbing 狀態與淡出計時器，避免標籤殘留並攔截主畫面觸控。 */}
+        {sidebarOpen && (
+          <TimelineRail
+            groups={timeGroups}
+            scrollRef={scrollRef}
+            isMobile={isMobile}
+          />
+        )}
       </div>
 
       {/* 底部設定區 */}

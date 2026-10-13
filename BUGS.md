@@ -39,4 +39,4 @@
 - **修正方向**（待確認後執行）：
   - 收起側邊欄時，不渲染 `TimelineRail`，或強制 `visible=false`、`scrubbing=false`。
   - 在外層容器加上 `overflow-hidden`，避免溢出。
-- **狀態**：待修，需新增步驟 `P5b-fix`
+- **狀態**：已完成

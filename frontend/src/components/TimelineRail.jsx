@@ -109,6 +109,18 @@ export default function TimelineRail({ groups, scrollRef, isMobile }) {
   // 卸載時清掉淡出計時器
   useEffect(() => () => clearHideTimer(), []);
 
+  // P5b-fix（B2）：斷點切換（手機↔PC）時重設顯示／拖曳狀態並清除殘留計時器。
+  // 側邊欄收起的情境已由父層不再渲染本元件處理（卸載即重置）；此處補上 resize
+  // 跨越斷點的情況——若拖曳時 pointerup 未觸發，scrubbing 會卡在 true，
+  // 導致所有群組標籤常駐並攔截觸控。
+  useEffect(() => {
+    scrubbingRef.current = false;
+    movedRef.current = false;
+    setScrubbing(false);
+    setVisible(false);
+    clearHideTimer();
+  }, [isMobile]);
+
   // 拖曳時依手指 Y 座標找最近的標籤（用各標籤垂直中心比距離，超出範圍自然貼到首/末群組）
   const pickByPointer = (clientY) => {
     const labels = labelRefs.current.slice(0, count);
