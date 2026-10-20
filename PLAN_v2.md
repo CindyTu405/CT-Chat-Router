@@ -112,6 +112,16 @@ BYOK（OAuth 連線 + 手動輸入加密儲存）、免費 tier 額度計數、�
 
 ---
 
+## 五-C、Phase 1 任務拆解（資料模型遷移）
+
+| 編號 | 任務 | 驗收標準 | 依賴 |
+|---|---|---|---|
+| P1-1 | 新增 `Branch` 實體 + `Message` 加 `branch_id`/`anchor_message_id` | `import models` 成功；metadata 有 `branch` 表；`message` 表有兩個新欄位 | 無 |
+| P1-2 | 產生 + 套用 Alembic migration | migration 含 `branch` 表 + `message` 加欄位；`upgrade head` 成功；舊資料（32 筆）保留 | P1-1 |
+| P1-3 | 驗證舊功能不壞 | `import main` ok；`/chats/roots`、`/chats/{root_id}/history` 仍正常 | P1-2 |
+
+---
+
 ## 六、Obsidian 匯出規格
 
 ```
