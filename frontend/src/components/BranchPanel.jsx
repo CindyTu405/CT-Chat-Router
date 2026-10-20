@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Send, Bot, User, GitBranch, X, PanelRightClose } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -29,7 +29,61 @@ function BranchPanel({
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
+  // 面板寬度（可拖曳調整）：280 ~ 640px
+  const MIN_PANEL_WIDTH = 280;
+  const MAX_PANEL_WIDTH = 640;
+  const [panelWidth, setPanelWidth] = useState(380);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const clampPanelWidth = (width) =>
+    Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, width));
+
   const activeBranch = branches.find((b) => b.id === activeBranchId) || null;
+
+  // 拖曳時在 window 上監聽 pointermove / pointerup，並鎖住文字選取
+  useEffect(() => {
+    if (!isResizing) return undefined;
+
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    // 面板貼齊視窗右側，所以寬度 = 視窗寬 - 指標 x
+    const handlePointerMove = (e) => {
+      setPanelWidth(clampPanelWidth(window.innerWidth - e.clientX));
+    };
+    const handlePointerUp = () => {
+      setIsResizing(false);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+    };
+  }, [isResizing]);
+
+  // 視窗縮小時把寬度拉回可用範圍內
+  useEffect(() => {
+    const handleWindowResize = () => {
+      setPanelWidth((width) => clampPanelWidth(width));
+    };
+    window.addEventListener('resize', handleWindowResize);
+    return () => window.removeEventListener('resize', handleWindowResize);
+  }, []);
+
+  const handleResizeStart = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    setIsResizing(true);
+  };
 
   // 切換分支或新訊息進來時，自動捲到底部
   useEffect(() => {
@@ -48,7 +102,22 @@ function BranchPanel({
   }, [activeBranch?.input, activeBranchId]);
 
   return (
-    <aside className="hidden md:flex w-[380px] flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)]">
+    <aside
+      style={{ width: `${panelWidth}px` }}
+      className="relative hidden md:flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)]"
+    >
+      {/* --- 左側拖曳把手：調整面板寬度 --- */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="拖曳調整分支面板寬度"
+        title="拖曳調整寬度"
+        onPointerDown={handleResizeStart}
+        className={`absolute left-0 top-0 z-10 h-full w-[6px] cursor-col-resize transition-colors ${
+          isResizing ? 'bg-[#51A8DD]/60' : 'bg-transparent hover:bg-[#51A8DD]/40'
+        }`}
+      />
+
       {/* --- 面板標題 --- */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white/70 backdrop-blur-sm">
         <div className="flex items-center gap-2 min-w-0">
