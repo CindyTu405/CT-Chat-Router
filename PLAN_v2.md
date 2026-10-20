@@ -122,6 +122,20 @@ BYOK（OAuth 連線 + 手動輸入加密儲存）、免費 tier 額度計數、�
 
 ---
 
+## 五-D、Phase 2 任務拆解（分支重設計）
+
+| 編號 | 任務 | 驗收標準 | 依賴 |
+|---|---|---|---|
+| P2-1 | 修 history/tree 的 SELECT 補齊欄位 | `/chats/{root}/history`、`/tree` 回傳正確的 `session_id`/`has_branch`/`branch_id`/`anchor_message_id`（不再填預設值） | 無 |
+| P2-2 | `ChatRequest` + `chat_endpoint` 支援 `branch_id`/`anchor_message_id` | 帶 branch_id 送訊息時，user/assistant 訊息都標記該 branch_id | P2-1 |
+| P2-3 | 建立分支 API `POST /chats/{root}/branches` | 傳 anchor_message_id + 選取文字 → 建 Branch 記錄 + 分支第一則訊息 | P2-2 |
+| P2-4 | 前端文字選取 + 建立分支入口 | 選取 AI 回覆文字 → 出現「建立分支」按鈕 | 無（前端） |
+| P2-5 | 右側分割視窗 + 多 tab 分支面板 | 分支在右側開啟、可同時多條 tab、各自獨立對話 | P2-3、P2-4 |
+| P2-6 | 主線忽略分支上下文 | 主視窗只走主幹（branch_id IS NULL），分支上下文不混入 | P2-2、P2-5 |
+| P2-7 | 分支地圖重設計（主幹垂直、分支向右） | React Flow 主幹由上而下、分支由左至右、葉節點可刪 | P2-3 |
+
+---
+
 ## 六、Obsidian 匯出規格
 
 ```
