@@ -164,7 +164,8 @@ async def chat_endpoint(payload: ChatRequest, request: Request, session: Session
     history = get_conversation_history(session, payload.parent_id)
 
     # 1. 先存使用者的訊息 (User Message)
-    user_msg = Message(role="user", content=payload.message, parent_id=payload.parent_id, session_id=payload.session_id)
+    user_msg = Message(role="user", content=payload.message, parent_id=payload.parent_id, session_id=payload.session_id,
+                       branch_id=payload.branch_id, anchor_message_id=payload.anchor_message_id)
     session.add(user_msg)
     session.commit()
     session.refresh(user_msg)
@@ -191,7 +192,8 @@ async def chat_endpoint(payload: ChatRequest, request: Request, session: Session
         content="",  # 先留空，等串流完再補
         parent_id=user_msg.id, 
         model_used=payload.model,
-        session_id=payload.session_id
+        session_id=payload.session_id,
+        branch_id=payload.branch_id  # 跟隨 user_msg 的分支（不回填 anchor）
     )
     session.add(ai_msg)
     session.commit()
