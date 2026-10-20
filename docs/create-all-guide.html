@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>create_all 教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 後端教學</span>
+    <h1>create_all 是什麼</h1>
+    <p>它怎麼建表、為什麼以前離不開它、又為什麼現在要停用。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>一句話解釋</h2>
+    <p><strong><code>create_all</code> 就是「把你 code 裡定義的資料表，缺哪張就建哪張」的內建功能。</strong></p>
+    <p>在這個專案裡，它包在 <code>backend/database.py</code>：</p>
+    <pre><code><span class="cm"># backend/database.py</span>
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)</code></pre>
+    <p>然後由 FastAPI 的 <code>lifespan</code>（伺服器啟動時）呼叫：</p>
+    <pre><code><span class="cm"># backend/main.py</span>
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("正在檢查並建立資料庫 Table...")
+    create_db_and_tables()   <span class="cm"># 啟動時自動建表</span>
+    yield</code></pre>
+    <p>所以每次伺服器啟動，它都會「檢查一遍有沒有缺表」。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>它到底做了什麼</h2>
+    <p>你的 model 檔裡，凡是 <code>table=True</code> 的類別，都是一張「表的定義」：</p>
+    <ul>
+      <li><code>Message</code> → <code>message</code> 表</li>
+      <li><code>User</code> → <code>user</code> 表</li>
+      <li><code>AuthSession</code> → <code>auth_session</code> 表</li>
+      <li><code>FreeModelsCache</code> → <code>freemodelscache</code> 表</li>
+    </ul>
+    <p><code>create_all</code> 會把這些定義收集起來，對每一張「資料庫裡還不存在」的表執行 <code>CREATE TABLE</code>：</p>
+    <div class="flow">
+      <div class="box">models.py<br>(所有 table=True 的定義)</div>
+      <div class="arrow">→</div>
+      <div class="box">掃描資料庫<br>(哪些表缺了)</div>
+      <div class="arrow">→</div>
+      <div class="box">補建缺的表<br>(CREATE TABLE)</div>
+    </div>
+    <p class="muted">關鍵字是「缺」——它只補「不存在」的表，已存在的完全不理。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>它的三個致命限制</h2>
+
+    <h3>① 只建不「改」</h3>
+    <p>表已經存在，它就跳過。你想給現有表「加一個欄位」，它一點忙都幫不上。</p>
+    <div class="warn"><b>這個專案就吃過虧：</b>你之前要加 <code>title</code>、<code>session_id</code> 欄位時，<code>create_all</code> 完全無動於衷（因為 <code>message</code> 表早就建好了），最後只好手寫一支 <code>migrate.py</code>，用 <code>ALTER TABLE</code> 硬加：</div>
+    <pre><code><span class="cm"># 舊的 backend/migrate.py（手動救火）</span>
+session.exec(text("ALTER TABLE message ADD COLUMN IF NOT EXISTS title VARCHAR;"))
+session.exec(text("ALTER TABLE message ADD COLUMN IF NOT EXISTS session_id VARCHAR DEFAULT 'default';"))</code></pre>
+
+    <h3>② 沒有版本紀錄</h3>
+    <p>它不知道「建過什麼、建到哪一版」。每次就傻傻地「缺什麼補什麼」，沒有歷史可以查。</p>
+
+    <h3>③ 不能回退</h3>
+    <p>建錯了沒有「退回上一版」的機制，只能自己手動救。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>create_all vs Alembic</h2>
+    <table>
+      <tr><th>能力</th><th>create_all</th><th>Alembic</th></tr>
+      <tr><td>建新表</td><td>✅</td><td>✅</td></tr>
+      <tr><td>改現有表（加欄位、改型別）</td><td>❌ 不會動</td><td>✅ autogenerate 自動產生</td></tr>
+      <tr><td>版本紀錄（知道建到哪）</td><td>❌</td><td>✅ <code>alembic_version</code> 表</td></tr>
+      <tr><td>回退上一版</td><td>❌</td><td>✅ <code>downgrade</code></td></tr>
+      <tr><td>多台環境同步</td><td>❌ 容易不同步</td><td>✅ 每台各自 <code>upgrade head</code></td></tr>
+    </table>
+    <p>結論：<code>create_all</code> 適合「第一次把整個資料庫建出來」的雛形階段；專案長大、要改結構之後，就該換 Alembic。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>為什麼現在要停用它</h2>
+    <p>我們已經引了 <strong>Alembic</strong>（見 <a href="alembic-guide.html">Alembic 教學</a>）。如果兩者並存，等於<strong>兩套系統同時在管資料庫結構</strong>，會打架：</p>
+    <ul>
+      <li>Alembic 的紀錄說「我建到 v3」，但 <code>create_all</code> 又默默建了一張 Alembic 不知道的表。</li>
+      <li>之後 <code>alembic revision --autogenerate</code> 比對時就會看到「憑空多出來的表」，產生錯亂。</li>
+    </ul>
+    <div class="tip"><b>所以 P0-10 要做的，就是把 <code>lifespan</code> 裡那行 <code>create_db_and_tables()</code> 拿掉。</b>以後建表、改表一律走 Alembic。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>停用之後，建表靠什麼</h2>
+    <p>靠一條指令：</p>
+    <pre><code>alembic upgrade head   <span class="cm"># 套用所有 migration，建出/更新到最新結構</span></code></pre>
+    <p>以後的標準流程變成：</p>
+    <div class="flow">
+      <div class="box">改 model<br>(加表/加欄位)</div>
+      <div class="arrow">→</div>
+      <div class="box">revision --autogenerate<br>(產生 migration)</div>
+      <div class="arrow">→</div>
+      <div class="box">檢查 migration</div>
+      <div class="arrow">→</div>
+      <div class="box">upgrade head<br>(套用)</div>
+    </div>
+    <p class="muted">乾淨、可重現、可回退，而且每台機器（本機、Render 正式機）都長得一樣。</p>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 由 Hermes Agent 產生 · 2026-10-20</p>
+
+</div>
+</body>
+</html>
