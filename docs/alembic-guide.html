@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alembic 資料庫遷移教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75;
+    font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb);
+    color: #fff;
+    border-radius: 16px;
+    padding: 36px 32px;
+    margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px 28px;
+    margin-bottom: 22px;
+    box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    padding: 16px 18px; border-radius: 10px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }              /* comment / muted */
+  .tip, .warn {
+    border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px;
+  }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  svg.diagram { width: 100%; height: auto; display: block; margin: 14px 0; }
+  .kbd {
+    display: inline-block; background: #fff; border: 1px solid #cbd5e1; border-bottom-width: 2px;
+    border-radius: 6px; padding: 1px 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .85em;
+  }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 後端教學</span>
+    <h1>Alembic 資料庫遷移（Migration）教學</h1>
+    <p>為什麼需要它、它在這個專案做了什麼、以及你之後怎麼用它。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>先搞清楚問題：為什麼需要「遷移」</h2>
+    <p>資料庫的結構（有哪些表、每個表有哪些欄位）不是寫死一次就不再變的。專案長大，你一定會：</p>
+    <ul>
+      <li>加新表（例如接下來要加的 <code>user</code>、<code>session</code> 表）。</li>
+      <li>給現有表加欄位（這個專案已經加過 <code>title</code>、<code>session_id</code>）。</li>
+      <li>改欄位型別、加索引、加外鍵。</li>
+    </ul>
+    <p>問題是：<strong>這些結構變更，要怎麼「有順序、可重現、可回溯」地套用到資料庫？</strong></p>
+    <p>這個專案現在的做法有兩個：</p>
+    <ul>
+      <li><code>database.py</code> 裡的 <code>SQLModel.metadata.create_all(engine)</code> —— 只會「建出不存在的表」，<strong>不會改已存在的表</strong>。</li>
+      <li><code>migrate.py</code> —— 手寫的一支一支 <code>ALTER TABLE ...</code> 腳本，要自己記得執行、自己記得順序。</li>
+    </ul>
+    <div class="warn"><b>migrate.py 的痛點：</b>沒有版本紀錄（不知道哪支跑過）、只能前進不能後退（沒有「退回上一版」）、改錯了要自己手動救。開發機和正式機（Render 上的 PostgreSQL）很容易不同步。</div>
+    <p>Alembic 就是用來解決這個問題的標準工具。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>Alembic 是什麼</h2>
+    <p><strong>Alembic 是 SQLAlchemy 官方出的「資料庫遷移工具」</strong>。你的 <code>sqlmodel</code> 其實就是包在 SQLAlchemy 外面的殼，所以 Alembic 可以直接認得你的 <code>SQLModel</code> 表定義。</p>
+    <p>它把「每一次結構變更」記錄成一個有編號的版本（revision），像 git 的 commit 一樣：</p>
+    <table>
+      <tr><th>對應概念</th><th>Git</th><th>Alembic</th></tr>
+      <tr><td>一次變更</td><td>commit</td><td>revision（一個 migration 檔）</td></tr>
+      <tr><td>往前套用</td><td>合併分支</td><td><code>upgrade</code></td></tr>
+      <tr><td>往後退回</td><td><code>git revert</code></td><td><code>downgrade</code></td></tr>
+      <tr><td>看歷史</td><td><code>git log</code></td><td><code>alembic history</code></td></tr>
+      <tr><td>記錄進度</td><td>commit 指針</td><td>資料庫裡的 <code>alembic_version</code> 表</td></tr>
+    </table>
+    <p class="muted">Alembic 會在資料庫裡建一張 <code>alembic_version</code> 表，記住「目前套用到哪一版」，所以多台機器／環境永遠知道彼此差幾版。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>三個核心概念</h2>
+
+    <h3>① revision（版本）</h3>
+    <p>一個 revision = 一個 Python 檔，放在 <code>alembic/versions/</code> 資料夾。檔名像 <code>3a1b2c4d5e6f_add_user_and_session_tables.py</code>，前面那串是版本 id，後面是人讀得懂的描述。每個檔都有 <code>upgrade()</code> 和 <code>downgrade()</code> 兩個函式。</p>
+
+    <h3>② upgrade / downgrade（前進／後退）</h3>
+    <div class="flow">
+      <div class="box">v1<br>初始表</div>
+      <div class="arrow">→</div>
+      <div class="box">v2<br>加 user 表</div>
+      <div class="arrow">→</div>
+      <div class="box">v3<br>加 session 表</div>
+    </div>
+    <p class="muted" style="text-align:center">upgrade 沿箭頭往前走；downgrade 反方向退回。想退回 v2，就是對 v3 執行 downgrade。</p>
+
+    <h3>③ autogenerate（自動生成）</h3>
+    <p>你不需要手寫 <code>CREATE TABLE</code> 或 <code>ALTER TABLE</code>。Alembic 會：</p>
+    <div class="flow">
+      <div class="box">models.py<br>(你想要的結構)</div>
+      <div class="arrow">⇄ 比對</div>
+      <div class="box">資料庫<br>(目前的結構)</div>
+      <div class="arrow">→</div>
+      <div class="box">產生 migration 檔<br>(差異部分)</div>
+    </div>
+    <p>它比對「程式碼裡的 model」和「資料庫實際長相」，自動把差別寫成一個 revision。你只要檢查一下再套用即可。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>在本專案的設定（我接下來會做的事）</h2>
+    <p>要在這個專案引入 Alembic，有三樣東西要建立：</p>
+    <ul>
+      <li><code>alembic.ini</code> —— Alembic 的設定檔（讀連線字串）。</li>
+      <li><code>alembic/env.py</code> —— 告訴 Alembic「你的表定義在哪裡」，關鍵是這一行：</li>
+    </ul>
+    <pre><code><span class="cm"># alembic/env.py（簡化）</span>
+from sqlmodel import SQLModel
+from backend import models   <span class="cm"># 一定要 import，讓所有 table=True 的 model 都註冊進 metadata</span>
+target_metadata = SQLModel.metadata</code></pre>
+    <ul>
+      <li><code>alembic/versions/</code> —— 存放每個 migration 檔。</li>
+    </ul>
+    <div class="tip"><b>關鍵：</b><code>SQLModel.metadata</code> 會自動收集所有 <code>class Xxx(SQLModel, table=True)</code> 的表。所以 autogenerate 前，<strong>一定要先 import 那些 model</strong>，否則 Alembic 會以為表不存在、想把它們全部刪掉。</div>
+    <p>連線字串會沿用 <code>database.py</code> 裡的 <code>DATABASE_URL</code>（從 <code>.env</code> / <code>docker-compose.yml</code> 讀的那個），所以對同一個資料庫操作。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>日常工作流（改結構時的標準動作）</h2>
+    <ol>
+      <li><strong>改 model</strong>：在 <code>models.py</code> 新增／修改 <code>table=True</code> 的類別或欄位。</li>
+      <li><strong>自動生成 migration</strong>：
+        <pre><code>alembic revision --autogenerate -m "add user and session tables"</code></pre>
+      </li>
+      <li><strong>檢查產生的檔案</strong>：打開 <code>alembic/versions/</code> 最新那個檔，確認 <code>upgrade()</code> / <code>downgrade()</code> 內容正確（autogenerate 不是萬能，偶爾要手補）。</li>
+      <li><strong>套用到資料庫</strong>：
+        <pre><code>alembic upgrade head   <span class="cm"># 套到最新版</span></code></pre>
+      </li>
+      <li><strong>要退一步</strong>：
+        <pre><code>alembic downgrade -1  <span class="cm"># 退回上一版</span></code></pre>
+      </li>
+      <li><strong>看目前狀態</strong>：
+        <pre><code>alembic current    <span class="cm"># 資料庫現在在哪一版</span>
+alembic history    <span class="cm"># 所有版本清單</span></code></pre>
+      </li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>命令速查表</h2>
+    <table>
+      <tr><th>命令</th><th>作用</th></tr>
+      <tr><td><code>alembic init alembic</code></td><td>初始化（建立 alembic.ini、env.py、versions/）—— 只做一次</td></tr>
+      <tr><td><code>alembic revision --autogenerate -m "描述"</code></td><td>依 model 差異自動產生新版本</td></tr>
+      <tr><td><code>alembic upgrade head</code></td><td>套用所有未套用的版本（到最新）</td></tr>
+      <tr><td><code>alembic upgrade &lt;revision&gt;</code></td><td>套用到指定版本</td></tr>
+      <tr><td><code>alembic downgrade -1</code></td><td>退回上一個版本</td></tr>
+      <tr><td><code>alembic current</code></td><td>顯示資料庫目前版本</td></tr>
+      <tr><td><code>alembic history</code></td><td>列出所有版本（含父版本鏈）</td></tr>
+      <tr><td><code>alembic stamp head</code></td><td>直接「標記」到某版而不跑 SQL（用在「表其實已經建好」的情境）</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>常見陷阱（SQLModel 特別要注意）</h2>
+    <ul>
+      <li><strong>忘了 import model</strong> → autogenerate 會產生「刪表」的錯誤 migration。永遠確保 <code>env.py</code> 有 import 所有 model。</li>
+      <li><strong>autogenerate 不是萬能</strong>：欄位改名（rename）、改型別、加 <code>server_default</code>、enum 變更等，有時偵測不到或產生錯的 SQL。生成後<strong>一定要人工看一遍</strong>。</li>
+      <li><strong>downgrade 要自己寫好</strong>：autogenerate 的 <code>downgrade()</code> 通常只有「drop table / drop column」，若你的 upgrade 動了資料（例如搬資料），downgrade 要手補對應的還原邏輯。</li>
+      <li><strong>已套用的 migration 別再改</strong>：如果 v2 已經在某台機器跑過，就不要回頭改 v2 的內容，否則那台機器和你本機的歷史會分叉。錯了就「再新增一個 revision 去修正」。</li>
+      <li><strong>別跟 <code>create_all</code> 混用</strong>：引入 Alembic 後，<code>database.py</code> 的 <code>create_db_and_tables()</code> 要停用，否則兩套機制會打架。之後一律用 <code>alembic upgrade head</code> 建表。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>Phase 0 我會實際怎麼用它</h2>
+    <p>Phase 0（安全地基）要加 <code>user</code> 表和 <code>session</code> 表，並把對話綁到使用者身上。實際步驟：</p>
+    <pre><code><span class="cm"># 1. 安裝</span>
+pip install alembic
+
+<span class="cm"># 2. 初始化（在 backend/ 下執行）</span>
+alembic init alembic
+
+<span class="cm"># 3. 改 env.py 指向 SQLModel.metadata（見第 4 節）</span>
+
+<span class="cm"># 4. 在 models.py 新增 User、Session 兩個 table=True 類別</span>
+
+<span class="cm"># 5. 自動生成第一個 migration</span>
+alembic revision --autogenerate -m "add user and session tables"
+
+<span class="cm"># 6. 檢查、套用</span>
+alembic upgrade head</code></pre>
+    <p>之後每個 Phase 的結構變更（例如 Phase 1 的 <code>Branch</code> 表、<code>Message</code> 加 <code>branch_id</code> 欄位）都是「改 model → <code>revision --autogenerate</code> → 檢查 → <code>upgrade head</code>」這四步，乾淨且每台環境可重現。</p>
+    <div class="tip"><b>這份教學建立的習慣：</b>從今以後，資料庫結構一律走 Alembic，不再手寫 <code>migrate.py</code> 或 <code>create_all</code>。</div>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 由 Hermes Agent 產生 · 2026-10-18</p>
+
+</div>
+</body>
+</html>
