@@ -11,7 +11,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 # 自訂模組
-from database import create_db_and_tables, get_session
+from database import get_session
 from auth_routes import router as auth_router
 from models import Message, ChatRequest, UpdateTitleRequest, MessageWithActivity, FreeModelsCache
 # from mock_llm import mock_chat_stream
@@ -24,8 +24,7 @@ from scraper import get_free_models
 # 1. Lifespan (生命週期管理器)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("正在檢查並建立資料庫 Table...")
-    create_db_and_tables()
+    # 資料表一律由 Alembic 管理（alembic upgrade head），啟動時不再自動 create_all。
     yield
     print("伺服器關閉中...")
 

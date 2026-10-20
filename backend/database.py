@@ -1,4 +1,4 @@
-from sqlmodel import SQLModel, create_engine, Session
+from sqlmodel import create_engine, Session
 import os
 from urllib.parse import quote
 
@@ -55,7 +55,3 @@ engine = create_engine(DATABASE_URL, echo=True)
 def get_session():
     with Session(engine) as session:
         yield session
-
-# 初始化資料庫 (建立 Table)
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
