@@ -306,46 +306,30 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
 @app.get("/chats/{root_id}/history", response_model=list[Message])
 def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)):
     """
-    修改版 v3：加入 mappings() 確保欄位對應正確
+    (P2-6) history 只回「跟 root 相同 branch_id」的那條線。
+
+    root 是主幹 (branch_id IS NULL) 就只走主幹；
+    root 是分支根 (branch_id = X) 就只走 X 這條分支，不跨越回祖先主幹。
+    這樣主線與分支各自乾淨，不會被別條分支的最新訊息污染。
     """
     
-    # 1. 找出最新的一則訊息 ID (Leaf Node)
-    latest_msg_query = text("""
-    WITH RECURSIVE chat_descendants AS (
-        SELECT id, created_at FROM message WHERE id = :root_id
-        UNION ALL
-        SELECT m.id, m.created_at FROM message m
-        JOIN chat_descendants cd ON m.parent_id = cd.id
-    )
-    SELECT id FROM chat_descendants ORDER BY created_at DESC LIMIT 1;
-    """)
-    
-    # 執行並取得第一筆結果 (Row)
-    row = session.exec(latest_msg_query, params={"root_id": root_id}).first()
-    
-    if not row:
-        return []
-    
-    # 從 Tuple 取出 ID
-    latest_id = row[0]
-
-    # 2. 從最新訊息往上找祖先 (Recursive Upwards)
-    # ★★★ 重點：這裡要選出所有欄位，確保回傳完整 ★★★
+    # 單一遞迴 CTE：從 root 往下遞迴，只沿著 branch_id 與父節點相同的子訊息走。
+    # IS NOT DISTINCT FROM：NULL 對 NULL 視為相等，主幹 (NULL) 才比對得起來。
     path_query = text("""
     WITH RECURSIVE chat_path AS (
         SELECT id, role, content, model_used, created_at, parent_id, title, session_id, has_branch, branch_id, anchor_message_id
-        FROM message WHERE id = :latest_id
+        FROM message WHERE id = :root_id
         UNION ALL
-        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title, m.session_id, m.has_branch, m.branch_id, m.anchor_message_id 
+        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title, m.session_id, m.has_branch, m.branch_id, m.anchor_message_id
         FROM message m
-        JOIN chat_path cp ON cp.parent_id = m.id
+        JOIN chat_path cp ON m.parent_id = cp.id
+        WHERE m.branch_id IS NOT DISTINCT FROM cp.branch_id
     )
     SELECT * FROM chat_path ORDER BY created_at ASC;
     """)
     
-    # ★★★ 關鍵修正：加上 .mappings() ★★★
-    # 這會將 SQL 結果轉為字典列表，FastAPI 才能正確轉換成 JSON
-    results = session.exec(path_query, params={"latest_id": latest_id}).mappings().all()
+    # mappings() 將 SQL 結果轉為字典列表，FastAPI 才能正確轉換成 JSON
+    results = session.exec(path_query, params={"root_id": root_id}).mappings().all()
     
     return results
 
