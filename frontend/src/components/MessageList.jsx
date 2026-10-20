@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { Bot, User, Sparkles, GitBranch } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,18 +7,111 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { formatShortDateTime } from '../dateUtils';
 
+// Markdown 樣式覆寫（程式碼區塊、表格、連結…），依氣泡角色決定行內程式碼配色。
+// 抽成函式，讓「單段渲染」與「錨點切段渲染」共用同一套樣式。
+const buildMarkdownComponents = (role) => ({
+  // 處理多行程式碼區塊 (Code Blocks)
+  code({ inline, className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className || '');
+    return !inline && match ? (
+      <SyntaxHighlighter
+        style={vscDarkPlus}
+        language={match[1]}
+        PreTag="div"
+        className="rounded-xl my-3 shadow-sm text-sm"
+        {...props}
+      >
+        {String(children).replace(/\n$/, '')}
+      </SyntaxHighlighter>
+    ) : (
+      // 處理單行行內程式碼 (Inline Code)
+      <code
+        className={`px-1.5 py-0.5 rounded-md font-mono text-[13px] ${
+          role === 'user'
+            ? 'bg-blue-600/50 text-white' // 使用者泡泡內的行內程式碼樣式
+            : 'bg-gray-100 text-[#E83E8C]' // AI 泡泡內的行內程式碼樣式
+        }`}
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  },
+  // 自定義 Markdown 標籤的 Tailwind 樣式，讓排版更好看
+  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal ml-5 mb-3 space-y-1">{children}</ol>,
+  li: ({ children }) => <li className="pl-1">{children}</li>,
+  h1: ({ children }) => <h1 className="text-2xl font-bold mb-3 mt-4">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-4">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-3">{children}</h3>,
+  a: ({ children, href }) => (
+    <a href={href} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-600 underline underline-offset-2 transition-colors">
+      {children}
+    </a>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-4 border-gray-300 pl-4 py-1 my-3 text-gray-600 bg-gray-50 rounded-r-lg">
+      {children}
+    </blockquote>
+  ),
+  table: ({ children }) => <div className="overflow-x-auto my-4"><table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">{children}</table></div>,
+  th: ({ children }) => <th className="px-4 py-2 bg-gray-50 text-left text-sm font-semibold text-gray-700 border-b">{children}</th>,
+  td: ({ children }) => <td className="px-4 py-2 text-sm text-gray-600 border-b">{children}</td>,
+});
+
+// (P2-12) 把訊息內容依錨點文字切成「純文字片段 / 錨點片段」交錯的陣列。
+// 錨點文字在內容裡找不到就忽略，不會壞掉。
+const buildAnchorSegments = (content, anchors) => {
+  let segments = [{ type: 'text', text: content }];
+
+  (anchors || []).forEach((branch) => {
+    const needle = branch?.anchor_text;
+    if (!needle) return;
+
+    const next = [];
+    segments.forEach((seg) => {
+      if (seg.type !== 'text' || !seg.text.includes(needle)) {
+        next.push(seg);
+        return;
+      }
+      seg.text.split(needle).forEach((piece, i) => {
+        if (i > 0) next.push({ type: 'anchor', text: needle, branch });
+        if (piece) next.push({ type: 'text', text: piece });
+      });
+    });
+    segments = next;
+  });
+
+  return segments;
+};
+
 // 中間對話視窗：空狀態提示、訊息氣泡（Markdown／程式碼高亮）、選取文字建立分支
 function MessageList({
   messages,
   isLoading,
   setInput,
   onCreateBranch,
+  branchList = [],
+  onOpenBranch = () => {},
 }) {
   const messagesEndRef = useRef(null);
 
   // (P2-4) 選取 AI 回覆後的浮動「建立分支」按鈕狀態
   const [branchSel, setBranchSel] = useState(null); // { messageId, text, x, y } | null
   const branchBtnRef = useRef(null);
+
+  // (P2-12) message id → 掛在這則訊息上的分支（只收有 anchor_text 的）
+  const anchorsByMessageId = useMemo(() => {
+    const map = new Map();
+    (branchList || []).forEach((branch) => {
+      if (!branch?.anchor_text || !branch?.anchor_message_id) return;
+      const list = map.get(branch.anchor_message_id);
+      if (list) list.push(branch);
+      else map.set(branch.anchor_message_id, [branch]);
+    });
+    return map;
+  }, [branchList]);
 
   // 點擊按鈕以外的地方 / 捲動 / 視窗縮放時，收起浮動按鈕
   useEffect(() => {
@@ -80,6 +173,47 @@ function MessageList({
     onCreateBranch(branchSel.messageId, branchSel.text);
     window.getSelection()?.removeAllRanges();
     setBranchSel(null);
+  };
+
+  // 單段 Markdown 渲染（沿用同一套 components）
+  const renderMarkdown = (content, role, key) => (
+    <ReactMarkdown
+      key={key}
+      remarkPlugins={[remarkGfm]}
+      components={buildMarkdownComponents(role)}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+
+  // (P2-12) 有錨點就切段渲染：文字段落照舊走 Markdown，中間插可點擊的高亮
+  const renderContent = (msg) => {
+    const anchors = anchorsByMessageId.get(msg.id) || [];
+    const segments = buildAnchorSegments(msg.content, anchors);
+    const hasAnchor = segments.some((seg) => seg.type === 'anchor');
+
+    if (!hasAnchor) {
+      return renderMarkdown(msg.content, msg.role);
+    }
+
+    return (
+      <div>
+        {segments.map((seg, i) =>
+          seg.type === 'anchor' ? (
+            <mark
+              key={`a-${i}`}
+              onClick={() => onOpenBranch(seg.branch)}
+              title={`開啟分支：${seg.branch.title || '新分支'}`}
+              className="bg-amber-200/80 text-inherit rounded-sm px-0.5 underline decoration-amber-500/70 decoration-2 underline-offset-2 cursor-pointer transition-colors hover:bg-amber-300"
+            >
+              {seg.text}
+            </mark>
+          ) : (
+            renderMarkdown(seg.text, msg.role, `t-${i}`)
+          )
+        )}
+      </div>
+    );
   };
 
   // 自動捲動到底部
@@ -146,61 +280,7 @@ function MessageList({
                       onMouseUp={msg.role === 'assistant' ? (e) => handleAssistantMouseUp(e, msg) : undefined}
                     >
                       {msg.content ? (
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            // 處理多行程式碼區塊 (Code Blocks)
-                            code({ inline, className, children, ...props }) {
-                              const match = /language-(\w+)/.exec(className || '');
-                              return !inline && match ? (
-                                <SyntaxHighlighter
-                                  style={vscDarkPlus}
-                                  language={match[1]}
-                                  PreTag="div"
-                                  className="rounded-xl my-3 shadow-sm text-sm"
-                                  {...props}
-                                >
-                                  {String(children).replace(/\n$/, '')}
-                                </SyntaxHighlighter>
-                              ) : (
-                                // 處理單行行內程式碼 (Inline Code)
-                                <code 
-                                  className={`px-1.5 py-0.5 rounded-md font-mono text-[13px] ${
-                                    msg.role === 'user' 
-                                      ? 'bg-blue-600/50 text-white' // 使用者泡泡內的行內程式碼樣式
-                                      : 'bg-gray-100 text-[#E83E8C]' // AI 泡泡內的行內程式碼樣式
-                                  }`} 
-                                  {...props}
-                                >
-                                  {children}
-                                </code>
-                              );
-                            },
-                            // 自定義 Markdown 標籤的 Tailwind 樣式，讓排版更好看
-                            p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
-                            ul: ({ children }) => <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>,
-                            ol: ({ children }) => <ol className="list-decimal ml-5 mb-3 space-y-1">{children}</ol>,
-                            li: ({ children }) => <li className="pl-1">{children}</li>,
-                            h1: ({ children }) => <h1 className="text-2xl font-bold mb-3 mt-4">{children}</h1>,
-                            h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-4">{children}</h2>,
-                            h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-3">{children}</h3>,
-                            a: ({ children, href }) => (
-                              <a href={href} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-600 underline underline-offset-2 transition-colors">
-                                {children}
-                              </a>
-                            ),
-                            blockquote: ({ children }) => (
-                              <blockquote className="border-l-4 border-gray-300 pl-4 py-1 my-3 text-gray-600 bg-gray-50 rounded-r-lg">
-                                {children}
-                              </blockquote>
-                            ),
-                            table: ({ children }) => <div className="overflow-x-auto my-4"><table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">{children}</table></div>,
-                            th: ({ children }) => <th className="px-4 py-2 bg-gray-50 text-left text-sm font-semibold text-gray-700 border-b">{children}</th>,
-                            td: ({ children }) => <td className="px-4 py-2 text-sm text-gray-600 border-b">{children}</td>,
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
+                        renderContent(msg)
                       ) : (
                         <span className="animate-pulse text-gray-400">Thinking...</span>
                       )}

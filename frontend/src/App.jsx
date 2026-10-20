@@ -44,6 +44,10 @@ function App() {
   const [activeBranchId, setActiveBranchId] = useState(null);
   const [branchPanelOpen, setBranchPanelOpen] = useState(false);
 
+  // ★★★ (P2-12) 持久化錨點高亮：目前對話的所有分支（GET /chats/{root_id}/branches）★★★
+  // 只放後端回來的原始資料，畫面靠 anchor_message_id + anchor_text 在訊息裡畫重點
+  const [branchList, setBranchList] = useState([]);
+
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = useCallback( async () => {
     try {
@@ -69,12 +73,32 @@ function App() {
   }, []);
   // 2. 載入特定對話 (點擊側邊欄觸發)
 
+  // (P2-12) 取得這棵對話樹的所有分支，供錨點文字持久高亮使用
+  const loadBranchList = useCallback(async (rootId) => {
+    if (!rootId) {
+      setBranchList([]);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/chats/${rootId}/branches`);
+      if (!res.ok) throw new Error("API Error");
+      const data = await res.json();
+      setBranchList(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("載入分支清單失敗:", error);
+      setBranchList([]);
+    }
+  }, []);
+
   const loadChat = async (rootId) => {
     try {
       setIsLoading(true);
       const res = await fetch(`${API_URL}/chats/${rootId}/history`);
       const data = await res.json();
       setMessages(data); // 把舊對話填入畫面
+
+      // (P2-12) 順便載入分支清單，讓已存在的錨點文字立刻亮起來
+      loadBranchList(data?.[0]?.id);
       
       // 在手機版點擊後自動收起側邊欄 (優化體驗)
       if (window.innerWidth < 768) setSidebarOpen(false);
@@ -209,6 +233,39 @@ function App() {
     }
   }, []);
 
+  // ★★★ (P2-12) 點擊錨點高亮 → 在右側面板開啟對應分支 ★★★
+  // 已經開著就只切換，不重複開 tab
+  const openBranchFromHighlight = (branch) => {
+    if (!branch) return;
+
+    if (branches.some(b => b.id === branch.id)) {
+      setActiveBranchId(branch.id);
+      setBranchPanelOpen(true);
+      return;
+    }
+
+    // 還沒有任何訊息的分支：把錨點文字放進輸入框，等使用者自己送出
+    const newTab = {
+      id: branch.id,
+      anchorMessageId: branch.anchor_message_id,
+      rootMessageId: branch.root_message_id,
+      title: branch.title || '新分支',
+      messages: [],
+      input: branch.root_message_id ? '' : (branch.anchor_text || ''),
+      isLoading: false,
+    };
+
+    setBranches(prev => (
+      prev.some(b => b.id === branch.id) ? prev : [...prev, newTab]
+    ));
+    setActiveBranchId(branch.id);
+    setBranchPanelOpen(true);
+
+    if (branch.root_message_id) {
+      loadBranchMessages(branch.id, branch.root_message_id);
+    }
+  };
+
   // ★★★ (P2-4) 選取 AI 回覆文字 → 建立分支 ★★★
   // (P2-5) 成功後在右側面板開一個新 tab，並載入該分支的訊息
   const handleCreateBranch = async (anchorMessageId, selectedText) => {
@@ -254,6 +311,9 @@ function App() {
       ));
       setActiveBranchId(data.branch_id);
       setBranchPanelOpen(true);
+
+      // (P2-12) 重新抓分支清單，讓剛建立的錨點文字立刻變成可點擊的高亮
+      loadBranchList(rootId);
 
       // 更新側邊欄，讓樹狀圖標誌 (has_branch) 出現
       fetchHistory();
@@ -460,6 +520,8 @@ function App() {
           isLoading={isLoading}
           setInput={setInput}
           onCreateBranch={handleCreateBranch}
+          branchList={branchList}
+          onOpenBranch={openBranchFromHighlight}
         />
 
         <ChatInput
