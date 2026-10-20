@@ -29,10 +29,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# CORS 設定
+# CORS 設定：只允許白名單來源（環境變數 CORS_ORIGINS，逗號分隔）。
+# 不可用 "*"：allow_credentials=True 時萬用 origin 會讓任何網站帶著 cookie 呼叫 API。
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS", "http://localhost:5173,http://localhost:8000"
+    ).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
