@@ -26,6 +26,24 @@ def to_utc_iso(value: Optional[datetime]) -> Optional[str]:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+# ===== Phase 1：分支 (Branch) 實體 =====
+# 一個 Branch 代表從某則訊息 (anchor) 分岔出來的一條對話線。
+# root_message_id 是這條分支的對話起點，anchor_message_id 是分岔點；
+# parent_branch_id 讓分支可以再分支 (樹狀結構)。
+class Branch(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    root_message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
+    anchor_message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
+    title: Optional[str] = None
+    parent_branch_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="branch.id"
+    )
+    # naive UTC，理由同 Message.created_at
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
+
+
 # 這是 Message 的資料表定義
 class MessageBase(SQLModel):
     # 對話內容
@@ -61,6 +79,17 @@ class MessageBase(SQLModel):
 
     # 新增：是否包含分支的標記
     has_branch: bool = Field(default=False)
+
+    # --- Phase 1：分支 (Branch) ---
+    # 這則訊息屬於哪個分支 (None = 尚未歸屬任何分支)
+    branch_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="branch.id", index=True
+    )
+
+    # 這個分支從哪一則訊息分岔出去 (分支的錨點訊息)
+    anchor_message_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="message.id"
+    )
 
     @field_serializer("created_at")
     def serialize_created_at(self, value: Optional[datetime], _info) -> Optional[str]:
