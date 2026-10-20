@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, text
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import os
 import uuid
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # 自訂模組
 from database import create_db_and_tables, get_session
@@ -28,6 +31,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# 2. Rate limit (slowapi)：以來源 IP 為 key。
+# /chat 會觸發付費 LLM 呼叫，限制每分鐘 10 次，避免被刷。
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS 設定：只允許白名單來源（環境變數 CORS_ORIGINS，逗號分隔）。
 # 不可用 "*"：allow_credentials=True 時萬用 origin 會讓任何網站帶著 cookie 呼叫 API。
@@ -118,20 +127,21 @@ def get_conversation_history(session: Session, parent_id: uuid.UUID | None) -> l
     return history
 
 @app.post("/chat")
-async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_session)):
+@limiter.limit("10/minute")
+async def chat_endpoint(payload: ChatRequest, request: Request, session: Session = Depends(get_session)):
     # ★★★ 修正補上：先取得歷史對話紀錄 ★★★
     # 這行是為了讓後面的 gemini_chat_stream / openrouter_chat_stream 有 history 可以用
-    history = get_conversation_history(session, request.parent_id)
+    history = get_conversation_history(session, payload.parent_id)
 
     # 1. 先存使用者的訊息 (User Message)
-    user_msg = Message(role="user", content=request.message, parent_id=request.parent_id, session_id=request.session_id)
+    user_msg = Message(role="user", content=payload.message, parent_id=payload.parent_id, session_id=payload.session_id)
     session.add(user_msg)
     session.commit()
     session.refresh(user_msg)
 
-    if request.parent_id and len(history) > 0:
+    if payload.parent_id and len(history) > 0:
         # 看看這個「爸爸」現在有幾個「小孩 (回覆)」了
-        children = session.exec(select(Message.id).where(Message.parent_id == request.parent_id)).all()
+        children = session.exec(select(Message.id).where(Message.parent_id == payload.parent_id)).all()
         
         # 如果小孩數量 > 1，代表這是一個分支操作！
         if len(children) > 1:
@@ -150,8 +160,8 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
         role="assistant", 
         content="",  # 先留空，等串流完再補
         parent_id=user_msg.id, 
-        model_used=request.model,
-        session_id=request.session_id
+        model_used=payload.model,
+        session_id=payload.session_id
     )
     session.add(ai_msg)
     session.commit()
@@ -163,10 +173,10 @@ async def chat_endpoint(request: ChatRequest, session: Session = Depends(get_ses
         
         # 交通警察邏輯
         # 注意：這裡使用的 history 變數，就是最上面撈出來的那個
-        if request.model.startswith("gemini"):
-            stream = gemini_chat_stream(request.message, history, request.model)
+        if payload.model.startswith("gemini"):
+            stream = gemini_chat_stream(payload.message, history, payload.model)
         else:
-            stream = openrouter_chat_stream(request.message, history, request.model)
+            stream = openrouter_chat_stream(payload.message, history, payload.model)
 
         # 開始串流
         async for chunk in stream:
