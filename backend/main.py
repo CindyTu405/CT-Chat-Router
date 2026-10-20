@@ -56,6 +56,20 @@ app.add_middleware(
     expose_headers=["X-Message-Id"],
 )
 
+# 模型白名單（免費 tier）：環境變數 ALLOWED_MODELS，逗號分隔。
+# 支援 `prefix*` 前綴匹配（例如 "gemini*" 允許所有 gemini 開頭的模型），其餘為精確比對。
+# 目的：避免使用者填入任意 OpenRouter 付費 model ID，燒掉平台金鑰。
+ALLOWED_MODELS = [m.strip() for m in os.getenv("ALLOWED_MODELS", "gemini*").split(",") if m.strip()]
+
+def is_model_allowed(model: str) -> bool:
+    for entry in ALLOWED_MODELS:
+        if entry.endswith("*"):
+            if model.startswith(entry[:-1]):
+                return True
+        elif model == entry:
+            return True
+    return False
+
 # authlib 的 authorize_redirect 需要 session 存 OAuth state（CSRF 防護）。
 # 生產環境務必用環境變數覆寫 SESSION_SECRET_KEY。
 app.add_middleware(
@@ -129,6 +143,11 @@ def get_conversation_history(session: Session, parent_id: uuid.UUID | None) -> l
 @app.post("/chat")
 @limiter.limit("10/minute")
 async def chat_endpoint(payload: ChatRequest, request: Request, session: Session = Depends(get_session)):
+    # 0. 模型白名單檢查（免費 tier）：必須在任何寫入 DB / 呼叫 LLM 之前就擋掉，
+    #    否則會留下沒有回覆的孤兒訊息；而且串流一旦開始就無法再回 403。
+    if not is_model_allowed(payload.model):
+        raise HTTPException(status_code=403, detail=f"Model '{payload.model}' is not allowed on this plan")
+
     # ★★★ 修正補上：先取得歷史對話紀錄 ★★★
     # 這行是為了讓後面的 gemini_chat_stream / openrouter_chat_stream 有 history 可以用
     history = get_conversation_history(session, payload.parent_id)
