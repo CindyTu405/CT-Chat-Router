@@ -41,7 +41,7 @@ function App() {
 
   // ★★★ (P2-5) 右側分支面板 ★★★
   // 每條分支各自持有訊息串與輸入框，彼此獨立，不影響主視窗的 messages
-  // 形狀：{ id, rootMessageId, title, messages, input, isLoading }
+  // 形狀：{ id, anchorMessageId, rootMessageId, title, messages, input, isLoading }
   const [branches, setBranches] = useState([]);
   const [activeBranchId, setActiveBranchId] = useState(null);
   const [branchPanelOpen, setBranchPanelOpen] = useState(false);
@@ -308,7 +308,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           anchor_message_id: anchorMessageId,
-          content: selectedText,
+          anchor_text: selectedText,
         }),
       });
 
@@ -319,22 +319,23 @@ function App() {
       // tab 標題：選取文字前 20 字（換行壓成空白）
       const title = selectedText.replace(/\s+/g, " ").trim().slice(0, 20) || "新分支";
 
+      // (P2-10) 分支還不會有任何訊息：選取文字只放進輸入框，等使用者自己送出
       // 同一條分支已經開著就只切換，不重複開 tab
       setBranches(prev => (
         prev.some(b => b.id === data.branch_id)
           ? prev
           : [...prev, {
               id: data.branch_id,
-              rootMessageId: data.root_message_id,
+              anchorMessageId: data.anchor_message_id,
+              rootMessageId: data.root_message_id, // 後端回 null，等第一則訊息送出後才回填
               title,
               messages: [],
-              input: "",
+              input: selectedText,
               isLoading: false,
             }]
       ));
       setActiveBranchId(data.branch_id);
       setBranchPanelOpen(true);
-      loadBranchMessages(data.branch_id, data.root_message_id);
 
       // 更新側邊欄，讓樹狀圖標誌 (has_branch) 出現
       fetchHistory();
@@ -345,6 +346,7 @@ function App() {
   };
 
   // (P2-5) 在某條分支裡送訊息：parent_id = 該分支最後一則訊息，branch_id = 該分支
+  // (P2-10) 分支還沒有任何訊息時，第一則要是 anchor 的子節點
   const sendBranchMessage = async (branchId) => {
     const branch = branches.find(b => b.id === branchId);
     if (!branch || !branch.input.trim() || branch.isLoading) return;
@@ -352,7 +354,7 @@ function App() {
     const content = branch.input;
     const parentId = branch.messages.length > 0
       ? branch.messages[branch.messages.length - 1].id
-      : null;
+      : (branch.anchorMessageId || null);
 
     // 先清空輸入框 + 放上 User 訊息與 AI 佔位符
     updateBranch(branchId, b => ({
@@ -421,7 +423,10 @@ function App() {
     } finally {
       updateBranch(branchId, b => ({ ...b, isLoading: false }));
       // 串流結束後回抓歷史，補上伺服器端的訊息 id（下一則的 parent_id 才會正確）
-      loadBranchMessages(branchId, branch.rootMessageId);
+      // (P2-10) 全新的分支 rootMessageId 還是 null，打 /chats/null/history 只會失敗，直接跳過
+      if (branch.rootMessageId) {
+        loadBranchMessages(branchId, branch.rootMessageId);
+      }
     }
   };
 
