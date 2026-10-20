@@ -281,11 +281,12 @@ function MessageList({
         </>
       )}
 
-      {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕（mousedown 阻止預設行為，避免選取被清掉） ★★★ */}
+      {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕 ★★★ */}
+      {/* 注意：不要在這裡攔截 mousedown（例如 e.preventDefault()），否則會吃掉滑鼠預設行為、妨礙選取與複製。
+          選取的文字在按鈕出現時已存進 branchSel state，因此 onClick 不需要靠 mousedown 保住選取。 */}
       {branchSel && (
         <button
           ref={branchBtnRef}
-          onMouseDown={(e) => e.preventDefault()}
           onClick={createBranchFromSelection}
           style={{ left: branchSel.x, top: branchSel.y }}
           className="fixed -translate-x-1/2 -translate-y-full z-50 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#7B90D2] hover:bg-[#51A8DD] rounded-full shadow-lg border border-white/50 transition-colors cursor-pointer"
