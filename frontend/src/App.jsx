@@ -29,8 +29,6 @@ function App() {
   const [freeModelsLoading, setFreeModelsLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [isCustomModel, setIsCustomModel] = useState(false); //即時輸入模型
-  const [editingIndex, setEditingIndex] = useState(null); // 哪一則訊息正在被編輯 (index)
-  const [editInput, setEditInput] = useState(""); // 編輯框裡的文字
   const [renamingId, setRenamingId] = useState(null); // 正在改名的對話 ID
   const [renameInput, setRenameInput] = useState(""); // 改名輸入框內容
   const [sortBy, setSortBy] = useState("updated"); // 新增：排序狀態 ('updated' = 最新活躍, 'created' = 建立時間)
@@ -180,86 +178,6 @@ function App() {
     } catch (error) {
       console.error("Error:", error);
       setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 連線錯誤，請檢查後端是否啟動。" }]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // ★★★ 核心功能：從中途分支 (Branching) ★★★
-  const handleBranch = async (index) => {
-    if (!editInput.trim() || isLoading) return;
-
-    // 1. 準備新的歷史紀錄 (Time Travel)
-    const prevMessages = messages.slice(0, index);
-    
-    // 2. 算出新的 parent_id
-    let parentId = null;
-    if (prevMessages.length > 0) {
-      parentId = prevMessages[prevMessages.length - 1].id;
-    }
-
-    // 3. 更新畫面：切斷舊未來，插入新現在，並立刻放入 AI 佔位符 (合併成一次更新)
-    const newUserMsg = { role: 'user', content: editInput };
-    setMessages([
-      ...prevMessages, 
-      newUserMsg,
-      { role: 'assistant', content: '', model_used: model } // 一口氣放進去
-    ]);
-
-    // 退出編輯模式
-    setEditingIndex(null);
-    setEditInput("");
-    setIsLoading(true);
-
-    try {
-      // 4. 發送請求
-      const response = await fetch(`${API_URL}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: newUserMsg.content,
-          model: model,
-          parent_id: parentId,
-          session_id: sessionId
-        })
-      });
-
-      if (!response.ok) throw new Error("API Error");
-      
-      // 更新側邊欄讓樹狀圖標誌跑出來
-      fetchHistory();
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let aiResponseText = "";
-      const newMsgId = response.headers.get("X-Message-Id");
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        aiResponseText += chunk;
-
-        setMessages(prev => {
-          // ★ 防呆 1：如果畫面已經被清空，放棄更新
-          if (prev.length === 0) return prev; 
-          
-          const newMessages = [...prev];
-          const lastMsg = newMessages[newMessages.length - 1];
-          
-          // ★ 防呆 2：確保最後一則真的是 AI 的回覆
-          if (!lastMsg || lastMsg.role !== 'assistant') return prev;
-
-          lastMsg.content = aiResponseText;
-          if (newMsgId) lastMsg.id = newMsgId; 
-          return newMessages;
-        });
-      }
-
-    } catch (error) {
-      console.error("Error:", error);
-      setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 分支建立失敗" }]);
     } finally {
       setIsLoading(false);
     }
@@ -540,12 +458,7 @@ function App() {
         <MessageList
           messages={messages}
           isLoading={isLoading}
-          editingIndex={editingIndex}
-          setEditingIndex={setEditingIndex}
-          editInput={editInput}
-          setEditInput={setEditInput}
           setInput={setInput}
-          onBranch={handleBranch}
           onCreateBranch={handleCreateBranch}
         />
 

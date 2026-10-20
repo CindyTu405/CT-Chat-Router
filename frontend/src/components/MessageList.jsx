@@ -1,23 +1,17 @@
 import { useRef, useEffect, useState } from 'react';
-import { Send, Bot, User, Pencil, Sparkles, GitBranch } from 'lucide-react';
+import { Bot, User, Sparkles, GitBranch } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 // 這裡選用 vscDarkPlus 主題，看起來會很像 VS Code 的深色模式
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { formatShortDateTime } from '../dateUtils';
-import { handleEnterKey } from '../keyUtils';
 
-// 中間對話視窗：空狀態提示、訊息氣泡（Markdown／程式碼高亮）、分支編輯框
+// 中間對話視窗：空狀態提示、訊息氣泡（Markdown／程式碼高亮）、選取文字建立分支
 function MessageList({
   messages,
   isLoading,
-  editingIndex,
-  setEditingIndex,
-  editInput,
-  setEditInput,
   setInput,
-  onBranch,
   onCreateBranch,
 }) {
   const messagesEndRef = useRef(null);
@@ -138,132 +132,88 @@ function MessageList({
                   : 'items-start flex-1 min-w-0 mr-12' // AI 使用 flex-1 填滿右側所有剩餘空間，min-w-0 防止文字溢出破版
               }`}>
                 
-                {/* 編輯模式判斷 */}
-                {editingIndex === index ? (
-                  <div className="w-full bg-white p-3 rounded-2xl border border-[#7DB9DE] shadow-md animate-fade-zoom-in">
-                    <textarea
-                      value={editInput}
-                      onChange={(e) => setEditInput(e.target.value)}
-                      // P3: 手機端（< 768px）Enter 換行；PC 端 Enter 觸發「分支並發送」、Shift + Enter 換行
-                      onKeyDown={(e) => handleEnterKey(e, () => onBranch(index))}
-                      className="w-full bg-gray-50 text-gray-800 p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#7DB9DE] outline-none resize-none text-sm"
-                      rows="3"
-                      autoFocus
-                    />
-                    <div className="flex justify-end gap-2 mt-3">
-                      <button 
-                        onClick={() => setEditingIndex(null)}
-                        className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition"
-                      >
-                        取消
-                      </button>
-                      <button 
-                        onClick={() => onBranch(index)}
-                        className="px-3 py-1.5 text-xs text-white bg-[#51A8DD] hover:bg-[#7DB9DE] rounded-lg transition flex items-center gap-1 shadow-sm"
-                      >
-                        <Send className="w-3 h-3" />
-                        分支並發送
-                      </button>
+                <div className="relative group/bubble">
+                  {/* 對話框 */}
+                  <div className={`
+                    px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
+                    ${msg.role === 'user' 
+                      ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD]' 
+                      : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
+                  `}>
+                    {/* (P2-4) 只有 AI 回覆可以「選取文字 → 建立分支」 */}
+                    <div
+                      className="whitespace-normal break-words text-[15px] overflow-x-auto"
+                      onMouseUp={msg.role === 'assistant' ? (e) => handleAssistantMouseUp(e, msg) : undefined}
+                    >
+                      {msg.content ? (
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            // 處理多行程式碼區塊 (Code Blocks)
+                            code({ inline, className, children, ...props }) {
+                              const match = /language-(\w+)/.exec(className || '');
+                              return !inline && match ? (
+                                <SyntaxHighlighter
+                                  style={vscDarkPlus}
+                                  language={match[1]}
+                                  PreTag="div"
+                                  className="rounded-xl my-3 shadow-sm text-sm"
+                                  {...props}
+                                >
+                                  {String(children).replace(/\n$/, '')}
+                                </SyntaxHighlighter>
+                              ) : (
+                                // 處理單行行內程式碼 (Inline Code)
+                                <code 
+                                  className={`px-1.5 py-0.5 rounded-md font-mono text-[13px] ${
+                                    msg.role === 'user' 
+                                      ? 'bg-blue-600/50 text-white' // 使用者泡泡內的行內程式碼樣式
+                                      : 'bg-gray-100 text-[#E83E8C]' // AI 泡泡內的行內程式碼樣式
+                                  }`} 
+                                  {...props}
+                                >
+                                  {children}
+                                </code>
+                              );
+                            },
+                            // 自定義 Markdown 標籤的 Tailwind 樣式，讓排版更好看
+                            p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+                            ul: ({ children }) => <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal ml-5 mb-3 space-y-1">{children}</ol>,
+                            li: ({ children }) => <li className="pl-1">{children}</li>,
+                            h1: ({ children }) => <h1 className="text-2xl font-bold mb-3 mt-4">{children}</h1>,
+                            h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-4">{children}</h2>,
+                            h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-3">{children}</h3>,
+                            a: ({ children, href }) => (
+                              <a href={href} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-600 underline underline-offset-2 transition-colors">
+                                {children}
+                              </a>
+                            ),
+                            blockquote: ({ children }) => (
+                              <blockquote className="border-l-4 border-gray-300 pl-4 py-1 my-3 text-gray-600 bg-gray-50 rounded-r-lg">
+                                {children}
+                              </blockquote>
+                            ),
+                            table: ({ children }) => <div className="overflow-x-auto my-4"><table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">{children}</table></div>,
+                            th: ({ children }) => <th className="px-4 py-2 bg-gray-50 text-left text-sm font-semibold text-gray-700 border-b">{children}</th>,
+                            td: ({ children }) => <td className="px-4 py-2 text-sm text-gray-600 border-b">{children}</td>,
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      ) : (
+                        <span className="animate-pulse text-gray-400">Thinking...</span>
+                      )}
                     </div>
                   </div>
-                ) : (
-                  <div className="relative group/bubble">
-                    {/* 對話框 */}
-                    <div className={`
-                      px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
-                      ${msg.role === 'user' 
-                        ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD]' 
-                        : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
-                    `}>
-                      {/* (P2-4) 只有 AI 回覆可以「選取文字 → 建立分支」 */}
-                      <div
-                        className="whitespace-normal break-words text-[15px] overflow-x-auto"
-                        onMouseUp={msg.role === 'assistant' ? (e) => handleAssistantMouseUp(e, msg) : undefined}
-                      >
-                        {msg.content ? (
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              // 處理多行程式碼區塊 (Code Blocks)
-                              code({ inline, className, children, ...props }) {
-                                const match = /language-(\w+)/.exec(className || '');
-                                return !inline && match ? (
-                                  <SyntaxHighlighter
-                                    style={vscDarkPlus}
-                                    language={match[1]}
-                                    PreTag="div"
-                                    className="rounded-xl my-3 shadow-sm text-sm"
-                                    {...props}
-                                  >
-                                    {String(children).replace(/\n$/, '')}
-                                  </SyntaxHighlighter>
-                                ) : (
-                                  // 處理單行行內程式碼 (Inline Code)
-                                  <code 
-                                    className={`px-1.5 py-0.5 rounded-md font-mono text-[13px] ${
-                                      msg.role === 'user' 
-                                        ? 'bg-blue-600/50 text-white' // 使用者泡泡內的行內程式碼樣式
-                                        : 'bg-gray-100 text-[#E83E8C]' // AI 泡泡內的行內程式碼樣式
-                                    }`} 
-                                    {...props}
-                                  >
-                                    {children}
-                                  </code>
-                                );
-                              },
-                              // 自定義 Markdown 標籤的 Tailwind 樣式，讓排版更好看
-                              p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
-                              ul: ({ children }) => <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>,
-                              ol: ({ children }) => <ol className="list-decimal ml-5 mb-3 space-y-1">{children}</ol>,
-                              li: ({ children }) => <li className="pl-1">{children}</li>,
-                              h1: ({ children }) => <h1 className="text-2xl font-bold mb-3 mt-4">{children}</h1>,
-                              h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-4">{children}</h2>,
-                              h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-3">{children}</h3>,
-                              a: ({ children, href }) => (
-                                <a href={href} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-600 underline underline-offset-2 transition-colors">
-                                  {children}
-                                </a>
-                              ),
-                              blockquote: ({ children }) => (
-                                <blockquote className="border-l-4 border-gray-300 pl-4 py-1 my-3 text-gray-600 bg-gray-50 rounded-r-lg">
-                                  {children}
-                                </blockquote>
-                              ),
-                              table: ({ children }) => <div className="overflow-x-auto my-4"><table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">{children}</table></div>,
-                              th: ({ children }) => <th className="px-4 py-2 bg-gray-50 text-left text-sm font-semibold text-gray-700 border-b">{children}</th>,
-                              td: ({ children }) => <td className="px-4 py-2 text-sm text-gray-600 border-b">{children}</td>,
-                            }}
-                          >
-                            {msg.content}
-                          </ReactMarkdown>
-                        ) : (
-                          <span className="animate-pulse text-gray-400">Thinking...</span>
-                        )}
-                      </div>
+
+                  {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
+                  {msg.role === 'user' && (
+                    <div className="text-[11px] text-gray-400 mt-1.5 mr-1 select-none">
+                      {formatShortDateTime(msg.created_at) || '剛剛發送'}
                     </div>
-
-                    {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
-                    {msg.role === 'user' && (
-                      <div className="text-[11px] text-gray-400 mt-1.5 mr-1 select-none">
-                        {formatShortDateTime(msg.created_at) || '剛剛發送'}
-                      </div>
-                    )}
-
-                    {/* 鉛筆按鈕 */}
-                    {msg.role === 'user' && !isLoading && (
-                      <button
-                        onClick={() => {
-                          setEditingIndex(index);
-                          setEditInput(msg.content);
-                        }}
-                        className="absolute -left-8 top-2 p-1.5 text-gray-400 hover:text-[#51A8DD] bg-white hover:bg-gray-50 rounded-full opacity-0 group-hover/bubble:opacity-100 transition-all shadow border border-gray-200 cursor-pointer"
-                        title="編輯並開啟新分支"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
 
                 {/* 模型標籤 */}
                 {msg.role === 'assistant' && msg.model_used && (
