@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar';
 import ChatHeader from './components/ChatHeader';
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
+import BranchPanel from './components/BranchPanel';
 
 // const API_URL = "http://localhost:8000"; // 本機開發用
 // const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
@@ -37,6 +38,13 @@ function App() {
   const [isTreeModalOpen, setIsTreeModalOpen] = useState(false); // 控制彈出視窗開關
   const [currentTreeRootId, setCurrentTreeRootId] = useState(null); // 目前正在看哪棵樹
   const [lastViewedNodes, setLastViewedNodes] = useState({}); // 記憶每個對話最後點擊的分支節點
+
+  // ★★★ (P2-5) 右側分支面板 ★★★
+  // 每條分支各自持有訊息串與輸入框，彼此獨立，不影響主視窗的 messages
+  // 形狀：{ id, rootMessageId, title, messages, input, isLoading }
+  const [branches, setBranches] = useState([]);
+  const [activeBranchId, setActiveBranchId] = useState(null);
+  const [branchPanelOpen, setBranchPanelOpen] = useState(false);
 
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = useCallback( async () => {
@@ -257,7 +265,34 @@ function App() {
     }
   };
 
+  // ★★★ (P2-5) 分支面板：狀態操作小工具 ★★★
+  const updateBranch = useCallback((branchId, updater) => {
+    setBranches(prev => prev.map(b => (b.id === branchId ? updater(b) : b)));
+  }, []);
+
+  // 取得某條分支的線性訊息 (GET /chats/{root_message_id}/history)
+  // 後端是「從子樹裡最新的葉節點往上找祖先」，所以回傳會包含分支起點之前的祖先。
+  // 面板只顯示分支自己那一段，因此從 rootMessageId 開始切。
+  const loadBranchMessages = useCallback(async (branchId, rootMessageId) => {
+    try {
+      const res = await fetch(`${API_URL}/chats/${rootMessageId}/history`);
+      if (!res.ok) throw new Error("API Error");
+      const data = await res.json();
+      const startIdx = data.findIndex(m => m.id === rootMessageId);
+      const branchMessages = startIdx >= 0 ? data.slice(startIdx) : data;
+      setBranches(prev => prev.map(b => {
+        if (b.id !== branchId) return b;
+        // 剛送出的訊息後端可能還沒寫完，回抓結果比畫面上少時就保留現況，避免訊息被清掉
+        if (branchMessages.length < b.messages.length) return b;
+        return { ...b, messages: branchMessages };
+      }));
+    } catch (error) {
+      console.error("載入分支訊息失敗:", error);
+    }
+  }, []);
+
   // ★★★ (P2-4) 選取 AI 回覆文字 → 建立分支 ★★★
+  // (P2-5) 成功後在右側面板開一個新 tab，並載入該分支的訊息
   const handleCreateBranch = async (anchorMessageId, selectedText) => {
     // root_id 一律取目前時間線的第一則訊息 (messages[0])。
     // 剛開始的新對話還沒重新載入歷史，messages[0] 還沒有真正的 id，就沒得建立分支。
@@ -280,13 +315,122 @@ function App() {
       if (!res.ok) throw new Error("API Error");
 
       const data = await res.json();
-      console.log("branch created:", data.branch_id);
+
+      // tab 標題：選取文字前 20 字（換行壓成空白）
+      const title = selectedText.replace(/\s+/g, " ").trim().slice(0, 20) || "新分支";
+
+      // 同一條分支已經開著就只切換，不重複開 tab
+      setBranches(prev => (
+        prev.some(b => b.id === data.branch_id)
+          ? prev
+          : [...prev, {
+              id: data.branch_id,
+              rootMessageId: data.root_message_id,
+              title,
+              messages: [],
+              input: "",
+              isLoading: false,
+            }]
+      ));
+      setActiveBranchId(data.branch_id);
+      setBranchPanelOpen(true);
+      loadBranchMessages(data.branch_id, data.root_message_id);
 
       // 更新側邊欄，讓樹狀圖標誌 (has_branch) 出現
       fetchHistory();
     } catch (error) {
       console.error("建立分支失敗:", error);
       alert("建立分支失敗，請檢查後端連線");
+    }
+  };
+
+  // (P2-5) 在某條分支裡送訊息：parent_id = 該分支最後一則訊息，branch_id = 該分支
+  const sendBranchMessage = async (branchId) => {
+    const branch = branches.find(b => b.id === branchId);
+    if (!branch || !branch.input.trim() || branch.isLoading) return;
+
+    const content = branch.input;
+    const parentId = branch.messages.length > 0
+      ? branch.messages[branch.messages.length - 1].id
+      : null;
+
+    // 先清空輸入框 + 放上 User 訊息與 AI 佔位符
+    updateBranch(branchId, b => ({
+      ...b,
+      input: "",
+      isLoading: true,
+      messages: [
+        ...b.messages,
+        { role: 'user', content },
+        { role: 'assistant', content: '', model_used: model },
+      ],
+    }));
+
+    try {
+      const response = await fetch(`${API_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: content,
+          model: model,
+          parent_id: parentId,
+          session_id: sessionId,
+          branch_id: branchId,
+        }),
+      });
+
+      if (!response.ok) throw new Error("API Error");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let aiResponseText = "";
+      const newMsgId = response.headers.get("X-Message-Id");
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        aiResponseText += chunk;
+
+        // 只更新這條分支的最後一則 AI 訊息
+        updateBranch(branchId, b => {
+          if (b.messages.length === 0) return b;
+          const msgs = [...b.messages];
+          const lastMsg = msgs[msgs.length - 1];
+          if (!lastMsg || lastMsg.role !== 'assistant') return b;
+          msgs[msgs.length - 1] = {
+            ...lastMsg,
+            content: aiResponseText,
+            ...(newMsgId ? { id: newMsgId } : {}),
+          };
+          return { ...b, messages: msgs };
+        });
+      }
+    } catch (error) {
+      console.error("分支訊息送出失敗:", error);
+      updateBranch(branchId, b => {
+        const msgs = [...b.messages];
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.content) {
+          msgs[msgs.length - 1] = { ...lastMsg, content: "⚠️ 連線錯誤，請檢查後端是否啟動。" };
+          return { ...b, messages: msgs };
+        }
+        return { ...b, messages: [...msgs, { role: 'assistant', content: "⚠️ 連線錯誤，請檢查後端是否啟動。" }] };
+      });
+    } finally {
+      updateBranch(branchId, b => ({ ...b, isLoading: false }));
+      // 串流結束後回抓歷史，補上伺服器端的訊息 id（下一則的 parent_id 才會正確）
+      loadBranchMessages(branchId, branch.rootMessageId);
+    }
+  };
+
+  // (P2-5) 關閉分支 tab；關的是當前分支就切到別支，沒有就回到空狀態
+  const closeBranch = (branchId) => {
+    const next = branches.filter(b => b.id !== branchId);
+    setBranches(next);
+    if (activeBranchId === branchId) {
+      setActiveBranchId(next.length > 0 ? next[next.length - 1].id : null);
     }
   };
 
@@ -408,6 +552,21 @@ function App() {
         />
 
       </div>
+
+      {/* ★★★ (P2-5) 右側分支面板（與主視窗並排） ★★★ */}
+      {branchPanelOpen && (
+        <BranchPanel
+          branches={branches}
+          activeBranchId={activeBranchId}
+          model={model}
+          onSelectBranch={setActiveBranchId}
+          onCloseBranch={closeBranch}
+          onInputChange={(branchId, text) => updateBranch(branchId, b => ({ ...b, input: text }))}
+          onSend={sendBranchMessage}
+          onToggle={() => setBranchPanelOpen(false)}
+        />
+      )}
+
       {/* ★★★ 放入樹狀圖彈出視窗 ★★★ */}
       <BranchTreeModal 
         isOpen={isTreeModalOpen}
