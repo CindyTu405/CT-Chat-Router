@@ -13,7 +13,15 @@ from slowapi.errors import RateLimitExceeded
 # 自訂模組
 from database import get_session
 from auth_routes import router as auth_router
-from models import Message, ChatRequest, UpdateTitleRequest, MessageWithActivity, FreeModelsCache
+from models import (
+    Message,
+    ChatRequest,
+    UpdateTitleRequest,
+    MessageWithActivity,
+    FreeModelsCache,
+    Branch,
+    CreateBranchRequest,
+)
 # from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
 from openrouter_llm import openrouter_chat_stream
@@ -424,6 +432,108 @@ def get_chat_tree(root_id: uuid.UUID, session: Session = Depends(get_session)):
     
     results = session.exec(query, params={"root_id": root_id}).mappings().all()
     return results
+
+
+@app.post("/chats/{root_id}/branches")
+def create_branch(
+    root_id: uuid.UUID,
+    payload: CreateBranchRequest,
+    session: Session = Depends(get_session),
+):
+    """
+    (P2-3) 從某則既有訊息 (anchor) 分岔出一條新分支。
+
+    流程：
+    1. 驗證 root 與 anchor 都存在，且 anchor 真的位於 root 這棵樹上。
+    2. 建立新分支的第一則 user 訊息 (branch_id 先 None)，flush 取得 message.id。
+    3. 建立 Branch (root_message_id = 這則新訊息)，flush 取得 branch.id。
+    4. 回填 message.branch_id，並把整棵樹的根標記 has_branch = True，commit。
+
+    為什麼要分兩段 flush：message.branch_id -> branch.id 與
+    branch.root_message_id -> message.id 互相參考，先寫其中一邊會撞 FK。
+    """
+    # --- 1. 驗證 ---
+    root_msg = session.get(Message, root_id)
+    if not root_msg:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    anchor_msg = session.get(Message, payload.anchor_message_id)
+    if not anchor_msg:
+        raise HTTPException(status_code=404, detail="Anchor message not found")
+
+    # 簡單驗證 anchor 屬於 root 這棵樹：從 anchor 往上遞迴找祖先，看是否會走到 root
+    belongs = session.exec(
+        text("""
+        WITH RECURSIVE ancestors AS (
+            SELECT id, parent_id FROM message WHERE id = :anchor_id
+            UNION ALL
+            SELECT m.id, m.parent_id FROM message m
+            JOIN ancestors a ON a.parent_id = m.id
+        )
+        SELECT id FROM ancestors WHERE id = :root_id LIMIT 1;
+        """),
+        params={"anchor_id": payload.anchor_message_id, "root_id": root_id},
+    ).first()
+    if not belongs:
+        raise HTTPException(
+            status_code=400, detail="Anchor message does not belong to this chat"
+        )
+
+    # --- 2. 分支的第一則 user 訊息 ---
+    new_msg = Message(
+        role="user",
+        content=payload.content,
+        parent_id=payload.anchor_message_id,
+        session_id=root_msg.session_id,  # 沿用該 root 的 session
+        branch_id=None,  # 等 branch 建好再回填
+        anchor_message_id=payload.anchor_message_id,
+    )
+    session.add(new_msg)
+    session.flush()  # 取得 new_msg.id
+
+    # --- 3. Branch 本體 ---
+    branch = Branch(
+        root_message_id=new_msg.id,
+        anchor_message_id=payload.anchor_message_id,
+        title=payload.content[:50],
+        # 若 anchor 本身已屬於某條分支，代表這是「分支再分支」
+        parent_branch_id=anchor_msg.branch_id,
+    )
+    session.add(branch)
+    session.flush()  # 取得 branch.id
+
+    # --- 4. 回填 + 標記 root，一次 commit ---
+    new_msg.branch_id = branch.id
+    session.add(new_msg)
+
+    root_of_tree = root_msg
+    if root_msg.parent_id is not None:
+        # root_id 若不是樹根，往上找出 parent_id IS NULL 的那一則
+        real_root_id = session.exec(
+            text("""
+            WITH RECURSIVE ancestors AS (
+                SELECT id, parent_id FROM message WHERE id = :start_id
+                UNION ALL
+                SELECT m.id, m.parent_id FROM message m
+                JOIN ancestors a ON a.parent_id = m.id
+            )
+            SELECT id FROM ancestors WHERE parent_id IS NULL LIMIT 1;
+            """),
+            params={"start_id": root_id},
+        ).first()
+        if real_root_id:
+            root_of_tree = session.get(Message, real_root_id[0])
+
+    if root_of_tree:
+        root_of_tree.has_branch = True
+        session.add(root_of_tree)
+
+    session.commit()
+
+    return {
+        "branch_id": str(branch.id),
+        "root_message_id": str(new_msg.id),
+    }
 
 
 @app.get("/api/free-models")

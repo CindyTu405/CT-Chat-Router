@@ -127,6 +127,14 @@ class UpdateTitleRequest(SQLModel):
     title: str
 
 
+# ===== Phase 2 (P2-3)：建立分支的請求 =====
+# anchor_message_id: 從哪一則既有的訊息分岔出去
+# content: 新分支的第一則 user 訊息內容
+class CreateBranchRequest(SQLModel):
+    anchor_message_id: uuid.UUID
+    content: str
+
+
 class FreeModelsCache(SQLModel, table=True):
     id: int = Field(default=1, primary_key=True)
     models_json: str = Field(default="[]")
