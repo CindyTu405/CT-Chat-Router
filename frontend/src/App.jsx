@@ -257,6 +257,39 @@ function App() {
     }
   };
 
+  // ★★★ (P2-4) 選取 AI 回覆文字 → 建立分支 ★★★
+  const handleCreateBranch = async (anchorMessageId, selectedText) => {
+    // root_id 一律取目前時間線的第一則訊息 (messages[0])。
+    // 剛開始的新對話還沒重新載入歷史，messages[0] 還沒有真正的 id，就沒得建立分支。
+    const rootId = messages[0]?.id;
+    if (!rootId) {
+      alert("請先重新載入對話再建立分支");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/chats/${rootId}/branches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          anchor_message_id: anchorMessageId,
+          content: selectedText,
+        }),
+      });
+
+      if (!res.ok) throw new Error("API Error");
+
+      const data = await res.json();
+      console.log("branch created:", data.branch_id);
+
+      // 更新側邊欄，讓樹狀圖標誌 (has_branch) 出現
+      fetchHistory();
+    } catch (error) {
+      console.error("建立分支失敗:", error);
+      alert("建立分支失敗，請檢查後端連線");
+    }
+  };
+
   // 刪除對話
   const handleDeleteChat = async (e, chatId) => {
     e.stopPropagation(); // 防止觸發 "載入對話"
@@ -364,6 +397,7 @@ function App() {
           setEditInput={setEditInput}
           setInput={setInput}
           onBranch={handleBranch}
+          onCreateBranch={handleCreateBranch}
         />
 
         <ChatInput

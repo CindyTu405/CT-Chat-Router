@@ -1,5 +1,5 @@
-import { useRef, useEffect } from 'react';
-import { Send, Bot, User, Pencil, Sparkles } from 'lucide-react';
+import { useRef, useEffect, useState } from 'react';
+import { Send, Bot, User, Pencil, Sparkles, GitBranch } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -18,8 +18,75 @@ function MessageList({
   setEditInput,
   setInput,
   onBranch,
+  onCreateBranch,
 }) {
   const messagesEndRef = useRef(null);
+
+  // (P2-4) 選取 AI 回覆後的浮動「建立分支」按鈕狀態
+  const [branchSel, setBranchSel] = useState(null); // { messageId, text, x, y } | null
+  const branchBtnRef = useRef(null);
+
+  // 點擊按鈕以外的地方 / 捲動 / 視窗縮放時，收起浮動按鈕
+  useEffect(() => {
+    if (!branchSel) return;
+    const handleDocMouseDown = (e) => {
+      if (branchBtnRef.current?.contains(e.target)) return; // 點按鈕本身時保留（交給 onClick）
+      setBranchSel(null);
+    };
+    const close = () => setBranchSel(null);
+    document.addEventListener('mousedown', handleDocMouseDown);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('mousedown', handleDocMouseDown);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [branchSel]);
+
+  // (P2-4) 在 AI 泡泡內放開滑鼠：若選取了文字，就在選取處上方顯示「建立分支」按鈕
+  const handleAssistantMouseUp = (e, msg) => {
+    if (!onCreateBranch) return;
+
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      setBranchSel(null);
+      return;
+    }
+
+    const text = selection.toString().trim();
+    if (!text) {
+      setBranchSel(null);
+      return;
+    }
+
+    // 選取必須完全落在這個 AI 泡泡內
+    if (
+      !e.currentTarget.contains(selection.anchorNode) ||
+      !e.currentTarget.contains(selection.focusNode)
+    ) {
+      return;
+    }
+
+    // 串流中的訊息還沒有真正的 id，不能當 anchor
+    if (!msg.id) return;
+
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    const halfButton = 60; // 粗略半寬，避免按鈕被視窗邊界切掉
+    setBranchSel({
+      messageId: msg.id,
+      text,
+      x: Math.min(Math.max(rect.left + rect.width / 2, halfButton), window.innerWidth - halfButton),
+      y: Math.max(rect.top - 8, 48),
+    });
+  };
+
+  const createBranchFromSelection = () => {
+    if (!branchSel) return;
+    onCreateBranch(branchSel.messageId, branchSel.text);
+    window.getSelection()?.removeAllRanges();
+    setBranchSel(null);
+  };
 
   // 自動捲動到底部
   useEffect(() => {
@@ -108,7 +175,11 @@ function MessageList({
                         ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD]' 
                         : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
                     `}>
-                      <div className="whitespace-normal break-words text-[15px] overflow-x-auto">
+                      {/* (P2-4) 只有 AI 回覆可以「選取文字 → 建立分支」 */}
+                      <div
+                        className="whitespace-normal break-words text-[15px] overflow-x-auto"
+                        onMouseUp={msg.role === 'assistant' ? (e) => handleAssistantMouseUp(e, msg) : undefined}
+                      >
                         {msg.content ? (
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
@@ -208,6 +279,21 @@ function MessageList({
           {/* 自動捲動定位點 */}
           <div ref={messagesEndRef} />
         </>
+      )}
+
+      {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕（mousedown 阻止預設行為，避免選取被清掉） ★★★ */}
+      {branchSel && (
+        <button
+          ref={branchBtnRef}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={createBranchFromSelection}
+          style={{ left: branchSel.x, top: branchSel.y }}
+          className="fixed -translate-x-1/2 -translate-y-full z-50 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#7B90D2] hover:bg-[#51A8DD] rounded-full shadow-lg border border-white/50 transition-colors cursor-pointer"
+          title="用選取的文字建立新分支"
+        >
+          <GitBranch className="w-3.5 h-3.5" />
+          建立分支
+        </button>
       )}
     </div> 
   );
