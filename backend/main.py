@@ -61,13 +61,25 @@ app.add_middleware(
 # 目的：避免使用者填入任意 OpenRouter 付費 model ID，燒掉平台金鑰。
 ALLOWED_MODELS = [m.strip() for m in os.getenv("ALLOWED_MODELS", "gemini*").split(",") if m.strip()]
 
-def is_model_allowed(model: str) -> bool:
+def is_model_allowed(model: str, session: Session | None = None) -> bool:
     for entry in ALLOWED_MODELS:
         if entry.endswith("*"):
             if model.startswith(entry[:-1]):
                 return True
         elif model == entry:
             return True
+
+    # 環境變數白名單沒中，再查 OpenRouter 免費模型清單（動態，由 scraper 快取）。
+    # 這段包 try/except：快取/網路出問題時只是「少允許一些模型」，
+    # 絕不能讓白名單本身拋錯（否則整個 chat 端點 500）。
+    if session is not None:
+        try:
+            for item in get_free_models(session):
+                if isinstance(item, dict) and item.get("id") == model:
+                    return True
+        except Exception as e:
+            print(f"[whitelist] 取得免費模型清單失敗，忽略: {e}")
+
     return False
 
 # authlib 的 authorize_redirect 需要 session 存 OAuth state（CSRF 防護）。
@@ -145,7 +157,7 @@ def get_conversation_history(session: Session, parent_id: uuid.UUID | None) -> l
 async def chat_endpoint(payload: ChatRequest, request: Request, session: Session = Depends(get_session)):
     # 0. 模型白名單檢查（免費 tier）：必須在任何寫入 DB / 呼叫 LLM 之前就擋掉，
     #    否則會留下沒有回覆的孤兒訊息；而且串流一旦開始就無法再回 403。
-    if not is_model_allowed(payload.model):
+    if not is_model_allowed(payload.model, session):
         raise HTTPException(status_code=403, detail=f"Model '{payload.model}' is not allowed on this plan")
 
     # ★★★ 修正補上：先取得歷史對話紀錄 ★★★
