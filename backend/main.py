@@ -3,10 +3,13 @@ from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, text
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+import os
 import uuid
 
 # 自訂模組
 from database import create_db_and_tables, get_session
+from auth_routes import router as auth_router
 from models import Message, ChatRequest, UpdateTitleRequest, MessageWithActivity, FreeModelsCache
 # from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
@@ -35,6 +38,16 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Message-Id"],
 )
+
+# authlib 的 authorize_redirect 需要 session 存 OAuth state（CSRF 防護）。
+# 生產環境務必用環境變數覆寫 SESSION_SECRET_KEY。
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-change-me"),
+)
+
+# OAuth 登入 / 回呼 / 登出
+app.include_router(auth_router)
 
 
 @app.get("/")
