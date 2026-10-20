@@ -178,6 +178,15 @@ async def chat_endpoint(payload: ChatRequest, request: Request, session: Session
     session.commit()
     session.refresh(user_msg)
 
+    # (P2-9) 分支的第一則訊息要回填成該分支的 root_message_id：
+    # 建立分支時不再預先塞一則 user 訊息，root 等使用者真的送出第一句話才綁定。
+    if payload.branch_id:
+        branch = session.get(Branch, payload.branch_id)
+        if branch and branch.root_message_id is None:
+            branch.root_message_id = user_msg.id
+            session.add(branch)
+            session.commit()
+
     if payload.parent_id and len(history) > 0:
         # 看看這個「爸爸」現在有幾個「小孩 (回覆)」了
         children = session.exec(select(Message.id).where(Message.parent_id == payload.parent_id)).all()
@@ -425,16 +434,15 @@ def create_branch(
     session: Session = Depends(get_session),
 ):
     """
-    (P2-3) 從某則既有訊息 (anchor) 分岔出一條新分支。
+    (P2-9) 從某則既有訊息 (anchor) 分岔出一條新分支。
 
     流程：
     1. 驗證 root 與 anchor 都存在，且 anchor 真的位於 root 這棵樹上。
-    2. 建立新分支的第一則 user 訊息 (branch_id 先 None)，flush 取得 message.id。
-    3. 建立 Branch (root_message_id = 這則新訊息)，flush 取得 branch.id。
-    4. 回填 message.branch_id，並把整棵樹的根標記 has_branch = True，commit。
-
-    為什麼要分兩段 flush：message.branch_id -> branch.id 與
-    branch.root_message_id -> message.id 互相參考，先寫其中一邊會撞 FK。
+    2. 直接建立 Branch：root_message_id 先留 None，等這條分支的第一則
+       user 訊息送出時，由 /chat 回填 (見 chat_endpoint)。
+       為什麼不再預建第一則 user 訊息：使用者可能只是想「先開一條分支」，
+       預先塞空訊息會在樹上留下沒有內容的節點，也讓 root 的語意變模糊。
+    3. 把整棵樹的根標記 has_branch = True，commit。
     """
     # --- 1. 驗證 ---
     root_msg = session.get(Message, root_id)
@@ -463,33 +471,24 @@ def create_branch(
             status_code=400, detail="Anchor message does not belong to this chat"
         )
 
-    # --- 2. 分支的第一則 user 訊息 ---
-    new_msg = Message(
-        role="user",
-        content=payload.content,
-        parent_id=payload.anchor_message_id,
-        session_id=root_msg.session_id,  # 沿用該 root 的 session
-        branch_id=None,  # 等 branch 建好再回填
-        anchor_message_id=payload.anchor_message_id,
-    )
-    session.add(new_msg)
-    session.flush()  # 取得 new_msg.id
+    # --- 2. Branch 本體（title 取 anchor_text 的單行前 50 字）---
+    if payload.anchor_text and payload.anchor_text.strip():
+        title = " ".join(payload.anchor_text.split())[:50]
+    else:
+        title = "新分支"
 
-    # --- 3. Branch 本體 ---
     branch = Branch(
-        root_message_id=new_msg.id,
+        root_message_id=None,
         anchor_message_id=payload.anchor_message_id,
-        title=payload.content[:50],
+        anchor_text=payload.anchor_text,
+        title=title,
         # 若 anchor 本身已屬於某條分支，代表這是「分支再分支」
         parent_branch_id=anchor_msg.branch_id,
     )
     session.add(branch)
     session.flush()  # 取得 branch.id
 
-    # --- 4. 回填 + 標記 root，一次 commit ---
-    new_msg.branch_id = branch.id
-    session.add(new_msg)
-
+    # --- 3. 標記整棵樹的根 ---
     root_of_tree = root_msg
     if root_msg.parent_id is not None:
         # root_id 若不是樹根，往上找出 parent_id IS NULL 的那一則
@@ -513,10 +512,13 @@ def create_branch(
         session.add(root_of_tree)
 
     session.commit()
+    session.refresh(branch)
 
     return {
         "branch_id": str(branch.id),
-        "root_message_id": str(new_msg.id),
+        "anchor_message_id": str(branch.anchor_message_id),
+        "anchor_text": branch.anchor_text,
+        "root_message_id": None,
     }
 
 

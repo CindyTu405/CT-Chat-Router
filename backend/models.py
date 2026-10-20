@@ -32,8 +32,13 @@ def to_utc_iso(value: Optional[datetime]) -> Optional[str]:
 # parent_branch_id 讓分支可以再分支 (樹狀結構)。
 class Branch(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    root_message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
+    # 這條分支的對話起點；分支剛建立、第一則訊息還沒送出前是 None (P2-9)
+    root_message_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="message.id", index=True
+    )
     anchor_message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
+    # 分支當下的錨點文字快照 (P2-9)：anchor 訊息被編輯/刪除時仍能顯示分支來源
+    anchor_text: Optional[str] = None
     title: Optional[str] = None
     parent_branch_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="branch.id"
@@ -129,10 +134,14 @@ class UpdateTitleRequest(SQLModel):
 
 # ===== Phase 2 (P2-3)：建立分支的請求 =====
 # anchor_message_id: 從哪一則既有的訊息分岔出去
-# content: 新分支的第一則 user 訊息內容
+# anchor_text: 錨點文字快照（用來當分支標題；P2-9 起不再預先建立訊息）
+# content: 保留欄位，建立分支時已不再使用
 class CreateBranchRequest(SQLModel):
     anchor_message_id: uuid.UUID
-    content: str
+    # (P2-9) 建立分支時不再強制產生第一則 user 訊息
+    content: Optional[str] = None
+    # 錨點文字快照，用來當分支標題
+    anchor_text: Optional[str] = None
 
 
 class FreeModelsCache(SQLModel, table=True):
