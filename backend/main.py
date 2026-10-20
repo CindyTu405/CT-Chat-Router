@@ -21,6 +21,7 @@ from models import (
     FreeModelsCache,
     Branch,
     CreateBranchRequest,
+    to_utc_iso,
 )
 # from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
@@ -520,6 +521,46 @@ def create_branch(
         "anchor_text": branch.anchor_text,
         "root_message_id": None,
     }
+
+
+@app.get("/chats/{root_id}/branches")
+def list_branches(root_id: uuid.UUID, session: Session = Depends(get_session)):
+    """
+    (P2-11) 列出「錨定在這棵對話樹內」的所有分支。
+
+    判定方式：從 root_id 出發，沿著 parent_id 往下遞迴展開所有子孫訊息，
+    得到這棵樹的完整 message id 集合；再取出 anchor_message_id 落在集合內的分支。
+    這樣即使 UI 傳來的 root_id 只是樹中間的某一則訊息，也能正確取到該子樹的分支。
+    以 created_at 升冪排序 (分支建立順序，前端可穩定渲染)。
+    """
+    query = text("""
+    WITH RECURSIVE tree AS (
+        SELECT id FROM message WHERE id = :root_id
+        UNION ALL
+        SELECT m.id FROM message m
+        JOIN tree t ON m.parent_id = t.id
+    )
+    SELECT b.id, b.title, b.anchor_message_id, b.anchor_text,
+           b.root_message_id, b.parent_branch_id, b.created_at
+    FROM branch b
+    WHERE b.anchor_message_id IN (SELECT id FROM tree)
+    ORDER BY b.created_at ASC;
+    """)
+
+    rows = session.exec(query, params={"root_id": root_id}).mappings().all()
+
+    return [
+        {
+            "id": str(row["id"]),
+            "title": row["title"],
+            "anchor_message_id": str(row["anchor_message_id"]),
+            "anchor_text": row["anchor_text"],
+            "root_message_id": str(row["root_message_id"]) if row["root_message_id"] else None,
+            "parent_branch_id": str(row["parent_branch_id"]) if row["parent_branch_id"] else None,
+            "created_at": to_utc_iso(row["created_at"]),
+        }
+        for row in rows
+    ]
 
 
 @app.get("/api/free-models")
