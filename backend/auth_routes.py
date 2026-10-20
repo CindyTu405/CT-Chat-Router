@@ -114,6 +114,40 @@ def create_session_token(session: Session, user: User) -> str:
     return token
 
 
+# ===== FastAPI 依賴：取得目前登入的使用者 =====
+
+def get_current_user(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> User:
+    """從 session cookie 解析出目前的使用者；任何無效狀況一律 401。
+
+    流程：讀 cookie -> sha256 -> 查 AuthSession -> 檢查過期（過期就順手刪掉）->
+    查 User -> 回傳。原始 token 不落 DB，所以比對的是 hash。
+    """
+    raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    auth_session = session.exec(
+        select(AuthSession).where(AuthSession.token_hash == hash_token(raw_token))
+    ).first()
+    if auth_session is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # expires_at 是 naive UTC，直接用 naive UTC 比較
+    if auth_session.expires_at <= utcnow_naive():
+        session.delete(auth_session)
+        session.commit()
+        raise HTTPException(status_code=401, detail="Session expired")
+
+    user = session.get(User, auth_session.user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    return user
+
+
 def set_session_cookie(response, token: str) -> None:
     """把原始 token 寫進 httpOnly cookie。"""
     response.set_cookie(
