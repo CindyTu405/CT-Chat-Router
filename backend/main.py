@@ -323,10 +323,10 @@ def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)
     # ★★★ 重點：這裡要選出所有欄位，確保回傳完整 ★★★
     path_query = text("""
     WITH RECURSIVE chat_path AS (
-        SELECT id, role, content, model_used, created_at, parent_id, title
+        SELECT id, role, content, model_used, created_at, parent_id, title, session_id, has_branch, branch_id, anchor_message_id
         FROM message WHERE id = :latest_id
         UNION ALL
-        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title 
+        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title, m.session_id, m.has_branch, m.branch_id, m.anchor_message_id 
         FROM message m
         JOIN chat_path cp ON cp.parent_id = m.id
     )
@@ -407,13 +407,13 @@ def get_chat_tree(root_id: uuid.UUID, session: Session = Depends(get_session)):
     query = text("""
     WITH RECURSIVE chat_tree AS (
         -- 1. 找到樹根
-        SELECT id, role, content, model_used, created_at, parent_id, title 
+        SELECT id, role, content, model_used, created_at, parent_id, title, session_id, has_branch, branch_id, anchor_message_id 
         FROM message WHERE id = :root_id
         
         UNION ALL
         
         -- 2. 往下找出所有子子孫孫 (不論有幾個分支全抓)
-        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title 
+        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title, m.session_id, m.has_branch, m.branch_id, m.anchor_message_id 
         FROM message m
         JOIN chat_tree ct ON m.parent_id = ct.id
     )
