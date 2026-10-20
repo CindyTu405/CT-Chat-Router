@@ -101,3 +101,33 @@ class FreeModelsCache(SQLModel, table=True):
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
+
+
+# ===== Phase 0：OAuth 使用者與登入 session =====
+
+class User(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    # OAuth provider 名稱："google" 或 "github"
+    oauth_provider: str = Field(index=True)
+    # provider 端的唯一使用者識別碼（sub）
+    oauth_sub: str = Field(index=True)
+    email: Optional[str] = None
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: Optional[datetime], _info) -> Optional[str]:
+        return to_utc_iso(value)
+
+
+class AuthSession(SQLModel, table=True):
+    __tablename__ = "auth_session"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    # 只存 token 的 hash，不存原始 token（原始 token 只放在 httpOnly cookie）
+    token_hash: str = Field(index=True)
+    expires_at: datetime
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
