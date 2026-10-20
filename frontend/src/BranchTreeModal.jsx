@@ -23,6 +23,10 @@ const BRANCH_MAX_COLS = 4;       // 一條分支每一列最多放幾則，超�
 const TRUNK_EDGE_COLOR = '#64748b';   // 主幹連線（實線、石板灰）
 const BRANCH_EDGE_COLOR = '#f59e0b';  // 分支連線（虛線、琥珀色）
 
+// 所有「水平」連接點（right / left / right-in / left-out）都必須落在同一個高度，
+// 否則同一條橫向分支邊會從節點右/左緣的不同高度出發，看起來像隨機跳動。
+const HORIZONTAL_HANDLE_TOP = '50%';
+
 // 主幹 = branch_id 為 null 或 undefined（後端用 NULL 表示主幹）
 const isTrunkBranch = (branchId) => branchId === null || branchId === undefined;
 
@@ -68,9 +72,9 @@ const CustomMessageNode = ({ data }) => {
       <Handle id="top" type="target" position={Position.Top} isConnectable={false}
         className="w-1.5 h-1.5 bg-gray-400 border-none" />
       <Handle id="left" type="target" position={Position.Left} isConnectable={false}
-        style={{ top: '35%' }} className="w-1.5 h-1.5 bg-gray-400 border-none" />
+        style={{ top: HORIZONTAL_HANDLE_TOP }} className="w-1.5 h-1.5 bg-gray-400 border-none" />
       <Handle id="right-in" type="target" position={Position.Right} isConnectable={false}
-        style={{ top: '70%' }} className="w-1.5 h-1.5 bg-gray-400 border-none" />
+        style={{ top: HORIZONTAL_HANDLE_TOP }} className="w-1.5 h-1.5 bg-gray-400 border-none" />
 
       {/* 標題與 Icon 區塊 */}
       <div className={`flex items-center gap-2 mb-2 border-b pb-1 ${headerBorder}`}>
@@ -99,9 +103,9 @@ const CustomMessageNode = ({ data }) => {
       <Handle id="bottom" type="source" position={Position.Bottom} isConnectable={false}
         className="w-1.5 h-1.5 bg-gray-400 border-none" />
       <Handle id="right" type="source" position={Position.Right} isConnectable={false}
-        style={{ top: '30%' }} className="w-1.5 h-1.5 bg-gray-400 border-none" />
+        style={{ top: HORIZONTAL_HANDLE_TOP }} className="w-1.5 h-1.5 bg-gray-400 border-none" />
       <Handle id="left-out" type="source" position={Position.Left} isConnectable={false}
-        style={{ top: '70%' }} className="w-1.5 h-1.5 bg-gray-400 border-none" />
+        style={{ top: HORIZONTAL_HANDLE_TOP }} className="w-1.5 h-1.5 bg-gray-400 border-none" />
     </div>
   );
 };
@@ -233,12 +237,12 @@ const getLayoutedElements = (nodes, edges) => {
     const isBranchEdge = branchIds.has(edge.target) || branchIds.has(edge.source);
     const color = isBranchEdge ? BRANCH_EDGE_COLOR : TRUNK_EDGE_COLOR;
 
-    // 依相對位置挑連接點：橫向相鄰走左右、垂直往下走上下
+    // 依相對位置挑連接點：橫向相鄰（分支欄之間）走左右、垂直往下（主幹脊柱 / 同一欄換列）走上下
+    // 只要節點間有明確的水平位移就走水平連接點，避免分支邊從節點底部長出來。
     let handles = { sourceHandle: 'bottom', targetHandle: 'top' };
     if (s && t) {
       const dx = t.x - s.x;
-      const dy = t.y - s.y;
-      if (Math.abs(dy) < 48 && Math.abs(dx) > 48) {
+      if (Math.abs(dx) > 48) {
         handles = dx > 0
           ? { sourceHandle: 'right', targetHandle: 'left' }
           : { sourceHandle: 'left-out', targetHandle: 'right-in' };
