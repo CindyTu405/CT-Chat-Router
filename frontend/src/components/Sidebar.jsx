@@ -39,7 +39,8 @@ function ChatRow({
         )}
         <span className="flex-1 min-w-0">
           {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
-          <span className="block text-sm text-gray-700 group-hover:text-gray-900 truncate transition font-medium">
+          {/* P3b-F2：單行不換行、不用省略號，超出的部分直接裁掉；側邊欄拉寬就能看到更多標題 */}
+          <span className="block text-sm text-gray-700 group-hover:text-gray-900 whitespace-nowrap overflow-hidden transition font-medium">
             {chat.title || chat.content}
           </span>
           <span className="block text-xs text-gray-500 truncate mt-0.5">
@@ -152,11 +153,91 @@ function Sidebar({
   // 列表捲動容器；TimelineRail 以它為基準做捲動定位與 scroll spy
   const scrollRef = useRef(null);
 
+  // P3b-F2：側邊欄寬度可拖曳，以「視窗寬度百分比」儲存（12% ~ 30%），並記在 localStorage。
+  const SIDEBAR_PCT_KEY = 'ctchat.sidebarWidthPct';
+  const SIDEBAR_PCT_MIN = 12;
+  const SIDEBAR_PCT_MAX = 30;
+  const SIDEBAR_PCT_DEFAULT = 20;
+  const clampPct = (p) => Math.min(SIDEBAR_PCT_MAX, Math.max(SIDEBAR_PCT_MIN, p));
+
+  const [sidebarPct, setSidebarPct] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(SIDEBAR_PCT_KEY);
+      const num = parseFloat(raw);
+      if (Number.isFinite(num)) return clampPct(num);
+    } catch {
+      // localStorage 不可用（私密模式等）時退回預設值
+    }
+    return SIDEBAR_PCT_DEFAULT;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  // 拖曳中：pointermove / pointerup 掛在 window 上，放開或卸載時清掉監聽與選取封鎖
+  useEffect(() => {
+    if (!isResizing) return undefined;
+
+    const onMove = (e) => {
+      const pct = (e.clientX / window.innerWidth) * 100;
+      setSidebarPct(clampPct(pct));
+    };
+    const onUp = () => setIsResizing(false);
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+    };
+  }, [isResizing]);
+
+  // 每次寬度變動就寫回 localStorage（拖曳放開後也保存最後的值）
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_PCT_KEY, String(sidebarPct));
+    } catch {
+      // 寫入失敗不影響使用
+    }
+  }, [sidebarPct]);
+
+  const onResizeHandlePointerDown = (e) => {
+    // 只接受主要按鍵（左鍵／單指觸控）
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // move/up 掛在 window 上，拖曳到側邊欄外也持續有效
+    setIsResizing(true);
+  };
+
   return (
     // --- 左側側邊欄 ---
     // 套用指定的更淺灰藍色 #E8F1F5
     // P5b-fix（B2）：加上 overflow-hidden，收起（w-0）時內容不再溢出到主畫面、不攔截觸控
-    <div className={`${sidebarOpen ? 'w-80' : 'w-0'} overflow-hidden bg-[#E8F1F5] border-r border-gray-300 transition-all duration-300 flex flex-col flex-shrink-0 relative`}>
+    // P3b-F2：寬度改用 inline style 的百分比（預設 20%，可拖曳 12%~30%），展開時才套用；
+    // transition 只在收合/展開時生效，拖曳中關掉避免延遲感。
+    <aside
+      style={sidebarOpen ? { width: `${sidebarPct}%`, minWidth: 0 } : undefined}
+      className={`${sidebarOpen ? '' : 'w-0'} overflow-hidden bg-[#E8F1F5] border-r border-gray-300 flex flex-col flex-shrink-0 relative ${isResizing ? '' : 'transition-[width] duration-300'}`}
+    >
+      {/* P3b-F2：右側邊界的細拖曳把手（col-resize），只在展開時可拖 */}
+      {sidebarOpen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖曳調整側邊欄寬度"
+          title="拖曳調整寬度"
+          onPointerDown={onResizeHandlePointerDown}
+          className={`absolute top-0 right-0 z-30 h-full w-1.5 -mr-[3px] cursor-col-resize touch-none select-none group/handle ${isResizing ? 'bg-[#51A8DD]/60' : 'bg-transparent hover:bg-[#51A8DD]/40'}`}
+        />
+      )}
 
       {/* New Chat 按鈕 */}
       <div className="p-4">
@@ -251,7 +332,7 @@ function Sidebar({
             </div>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }
 
