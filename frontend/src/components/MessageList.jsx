@@ -94,9 +94,11 @@ function MessageList({
   onCreateBranch,
   branchList = [],
   onOpenBranch = () => {},
+  // (P3b-F1b) 捲動容器 ref 由 App 持有，載入對話時才能在父層還原閱讀位置
+  scrollContainerRef,
+  skipAutoScrollToken = null,
 }) {
   const messagesEndRef = useRef(null);
-  const scrollContainerRef = useRef(null);
 
   // (P2-4) 選取 AI 回覆後的浮動「建立分支」按鈕狀態
   const [branchSel, setBranchSel] = useState(null); // { messageId, text, x, y } | null
@@ -218,17 +220,24 @@ function MessageList({
   };
 
   // 自動捲動到底部（只有在使用者已經接近底部時才捲，避免打斷往上讀歷史訊息）
+  // (P3b-F1b) 若 App 已經標記要還原閱讀位置／對齊最後一則 user 訊息（restoreToken 遞增），
+  // 就先跳過一次，避免載入對話的瞬間被拉回底部。
+  const lastAutoScrollSkipToken = useRef(0);
   useEffect(() => {
-    const container = scrollContainerRef.current;
+    if (skipAutoScrollToken != null && skipAutoScrollToken !== lastAutoScrollSkipToken.current) {
+      lastAutoScrollSkipToken.current = skipAutoScrollToken;
+      return;
+    }
+    const container = scrollContainerRef?.current;
     if (!container) return;
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
     if (distanceFromBottom > 100) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, skipAutoScrollToken, scrollContainerRef]);
 
   return (
-    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth">
+    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
       {messages.length === 0 ? (
         // --- 空狀態 (Empty State) ---
         <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-5">
@@ -258,6 +267,8 @@ function MessageList({
           {messages.map((msg, index) => (
             <div 
               key={index} 
+              // (P3b-F1b) scrollToMessage 靠這個屬性定位訊息；樂觀訊息還沒有 id 就不掛
+              {...(msg.id ? { 'data-message-id': msg.id } : {})}
               className={`flex gap-4 max-w-4xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
             >
               {/* 頭像 */}

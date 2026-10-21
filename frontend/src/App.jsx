@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import BranchTreeModal from './BranchTreeModal';
 import Sidebar from './components/Sidebar';
 import ChatHeader from './components/ChatHeader';
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
 import BranchPanel from './components/BranchPanel';
+import { scrollToMessage } from './scrollUtils';
 
 // const API_URL = "http://localhost:8000"; // 本機開發用
 // const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
@@ -48,6 +49,16 @@ function App() {
   // 只放後端回來的原始資料，畫面靠 anchor_message_id + anchor_text 在訊息裡畫重點
   const [branchList, setBranchList] = useState([]);
 
+  // ★★★ (P3b-F1b) 每個對話的閱讀位置（conversation id → scrollTop）★★★
+  // 只放 React state，重新整理頁面就清空；切換對話前存、載入後還原。
+  const [readingPositions, setReadingPositions] = useState({});
+  // 捲動容器的 ref 由 App 持有，MessageList 用同一個 ref 掛在容器的 div 上
+  const scrollContainerRef = useRef(null);
+  // 載入對話後要做一次「還原／對齊錨點」，pendingRestore 描述要捲到哪裡；
+  // restoreToken 每次載入遞增，讓 MessageList 知道要跳過一次自動捲到底部。
+  const [pendingRestore, setPendingRestore] = useState(null); // { convId, scrollTop|null, anchorId|null }
+  const [restoreToken, setRestoreToken] = useState(0);
+
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = useCallback( async () => {
     try {
@@ -90,11 +101,32 @@ function App() {
     }
   }, []);
 
-  const loadChat = async (rootId) => {
+  const loadChat = async (rootId, positionKey = rootId) => {
+    // (P3b-F1b) 切換對話前，先把目前對話的捲動位置記下來（key 用這串對話的 root id）
+    const currentConvId = messages[0]?.id;
+    const container = scrollContainerRef.current;
+    if (currentConvId && container && currentConvId !== rootId) {
+      const currentTop = container.scrollTop;
+      setReadingPositions(prev => ({ ...prev, [currentConvId]: currentTop }));
+    }
+
     try {
       setIsLoading(true);
       const res = await fetch(`${API_URL}/chats/${rootId}/history`);
       const data = await res.json();
+
+      // (P3b-F1b) 決定載入後要捲到哪：有存過的閱讀位置就還原，
+      // 沒有的話（新開的對話 / 重新整理頁面後第一次載入）對齊最後一則 user 訊息
+      const list = Array.isArray(data) ? data : [];
+      const savedTop = readingPositions[positionKey];
+      const lastUserId = [...list].reverse().find(m => m.role === 'user')?.id || null;
+      setPendingRestore({
+        convId: positionKey,
+        scrollTop: typeof savedTop === 'number' ? savedTop : null,
+        anchorId: typeof savedTop === 'number' ? null : lastUserId,
+      });
+      setRestoreToken(t => t + 1);
+
       setMessages(data); // 把舊對話填入畫面
 
       // (P2-12) 順便載入分支清單，讓已存在的錨點文字立刻亮起來
@@ -108,6 +140,31 @@ function App() {
       setIsLoading(false);
     }
   };
+
+  // (P3b-F1b) 訊息渲染完成後才做還原／對齊，全部用瞬間定位（不做平滑動畫）。
+  // 用 requestAnimationFrame 等版面穩定（Markdown、程式碼高亮會撐高高度）。
+  useEffect(() => {
+    if (!pendingRestore) return;
+    const target = pendingRestore;
+    let frame2 = null;
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        const container = scrollContainerRef.current;
+        if (target.scrollTop != null) {
+          if (container) container.scrollTop = target.scrollTop;
+        } else if (target.anchorId) {
+          scrollToMessage(target.anchorId, 'auto');
+        } else if (container) {
+          container.scrollTop = 0;
+        }
+        setPendingRestore(null);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame1);
+      if (frame2) cancelAnimationFrame(frame2);
+    };
+  }, [pendingRestore]);
 
   // 3. 開啟新對話
   const startNewChat = () => {
@@ -522,6 +579,8 @@ function App() {
           onCreateBranch={handleCreateBranch}
           branchList={branchList}
           onOpenBranch={openBranchFromHighlight}
+          scrollContainerRef={scrollContainerRef}
+          skipAutoScrollToken={restoreToken}
         />
 
         <ChatInput
@@ -556,8 +615,9 @@ function App() {
           // 當使用者在樹狀圖上點擊某個節點時：
           // 1. 記憶這個選擇 (把 currentTreeRootId 對應到被選的 nodeId)
           setLastViewedNodes(prev => ({ ...prev, [currentTreeRootId]: nodeId }));
-          // 2. 載入這個節點的對話時間線
-          loadChat(nodeId);
+          // 2. 載入這個節點的對話時間線（(P3b-F1b) 以節點 id 當閱讀位置的 key）
+          setCurrentTreeRootId(nodeId);
+          loadChat(nodeId, nodeId);
         }}
       />
     </div>
