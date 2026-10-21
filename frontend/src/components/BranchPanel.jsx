@@ -29,14 +29,35 @@ function BranchPanel({
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // 面板寬度（可拖曳調整）：280 ~ 640px
-  const MIN_PANEL_WIDTH = 280;
-  const MAX_PANEL_WIDTH = 640;
-  const [panelWidth, setPanelWidth] = useState(380);
+  // 面板寬度（可拖曳調整）：佔視窗寬度 20% ~ 50%，以百分比儲存並持久化
+  const MIN_PANEL_PERCENT = 20;
+  const MAX_PANEL_PERCENT = 50;
+  const DEFAULT_PANEL_PERCENT = 25;
+  const PANEL_WIDTH_STORAGE_KEY = 'ct-chat:branchPanelWidthPercent';
+
+  const clampPanelPercent = (percent) =>
+    Math.min(MAX_PANEL_PERCENT, Math.max(MIN_PANEL_PERCENT, percent));
+
+  // 從 localStorage 還原（掛載時讀取一次），無效值則回退預設
+  const [panelPercent, setPanelPercent] = useState(() => {
+    try {
+      const stored = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
+      if (Number.isFinite(stored) && stored > 0) return clampPanelPercent(stored);
+    } catch {
+      // localStorage 不可用時忽略
+    }
+    return DEFAULT_PANEL_PERCENT;
+  });
   const [isResizing, setIsResizing] = useState(false);
 
-  const clampPanelWidth = (width) =>
-    Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, width));
+  // 寬度變動時寫回 localStorage
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(panelPercent));
+    } catch {
+      // localStorage 不可用時忽略
+    }
+  }, [panelPercent]);
 
   const activeBranch = branches.find((b) => b.id === activeBranchId) || null;
 
@@ -49,9 +70,11 @@ function BranchPanel({
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'col-resize';
 
-    // 面板貼齊視窗右側，所以寬度 = 視窗寬 - 指標 x
+    // 面板貼齊視窗右側，寬度換算成視窗寬度的百分比
     const handlePointerMove = (e) => {
-      setPanelWidth(clampPanelWidth(window.innerWidth - e.clientX));
+      const viewportWidth = window.innerWidth || 1;
+      const percent = ((viewportWidth - e.clientX) / viewportWidth) * 100;
+      setPanelPercent(clampPanelPercent(percent));
     };
     const handlePointerUp = () => {
       setIsResizing(false);
@@ -70,10 +93,10 @@ function BranchPanel({
     };
   }, [isResizing]);
 
-  // 視窗縮小時把寬度拉回可用範圍內
+  // 視窗大小改變時把百分比拉回可用範圍內
   useEffect(() => {
     const handleWindowResize = () => {
-      setPanelWidth((width) => clampPanelWidth(width));
+      setPanelPercent((percent) => clampPanelPercent(percent));
     };
     window.addEventListener('resize', handleWindowResize);
     return () => window.removeEventListener('resize', handleWindowResize);
@@ -103,7 +126,7 @@ function BranchPanel({
 
   return (
     <aside
-      style={{ width: `${panelWidth}px` }}
+      style={{ width: `${panelPercent}%` }}
       className="relative hidden md:flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)]"
     >
       {/* --- 左側拖曳把手：調整面板寬度 --- */}
