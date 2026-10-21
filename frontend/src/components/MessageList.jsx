@@ -96,6 +96,7 @@ function MessageList({
   onOpenBranch = () => {},
 }) {
   const messagesEndRef = useRef(null);
+  const scrollContainerRef = useRef(null);
 
   // (P2-4) 選取 AI 回覆後的浮動「建立分支」按鈕狀態
   const [branchSel, setBranchSel] = useState(null); // { messageId, text, x, y } | null
@@ -216,13 +217,18 @@ function MessageList({
     );
   };
 
-  // 自動捲動到底部
+  // 自動捲動到底部（只有在使用者已經接近底部時才捲，避免打斷往上讀歷史訊息）
   useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom > 100) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth">
+    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth">
       {messages.length === 0 ? (
         // --- 空狀態 (Empty State) ---
         <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-5">
