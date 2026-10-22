@@ -595,6 +595,7 @@ function App() {
       
       <Sidebar
         sidebarOpen={sidebarOpen}
+        activeChatId={messages[0]?.id ?? null}
         historyList={historyList}
         sortBy={sortBy}
         setSortBy={setSortBy}

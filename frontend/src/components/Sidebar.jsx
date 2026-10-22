@@ -7,6 +7,7 @@ import { formatDateTime, groupByTimeRange } from '../dateUtils';
 // E4 修正：不再把 <div onClick> 巢狀在 <button> 內，操作項目改為真正的 <button>，
 // 可以用 Tab 聚焦、Enter／空白鍵觸發。
 function ChatRow({
+  activeChatId,
   chat,
   sortBy,
   lastViewedNode,
@@ -48,12 +49,16 @@ function ChatRow({
   const menuItemClass =
     'w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left text-gray-700 hover:bg-gray-100 focus:outline-none focus-visible:bg-gray-100 cursor-pointer whitespace-nowrap';
 
+  // 底色 hover 放在外層 group：滑到 ⋯ 按鈕時（⋯ 不在按鈕內）底色仍保持
+  // 目前開啟中的對話（isActive）保持同樣底色，點進去後不會因滑鼠離開而消失
+  const isActive = chat.id === activeChatId;
+
   return (
-    <div className="group relative">
+    <div className={`group relative rounded-xl transition-all ${isActive ? 'bg-white/80 shadow-sm' : 'hover:bg-white/80 hover:shadow-sm'}`}>
       <button
         type="button"
         onClick={() => onLoadChat(lastViewedNode || chat.id)}
-        className="w-full text-left p-3 pr-2 rounded-xl hover:bg-white/80 hover:shadow-sm cursor-pointer transition-all flex items-center gap-3"
+        className="w-full text-left p-3 pr-2 rounded-xl cursor-pointer transition-all flex items-center gap-3"
       >
         {/* ★★★ 判斷是否有分支來決定圖示（純顯示用，操作交給右側選單）★★★ */}
         {chat.has_branch ? (
@@ -83,7 +88,7 @@ function ChatRow({
           50，才會蓋過 sticky 的分組標題（h3 z-10）。未展開時不開新的堆疊層級，避免影響其他列的滑過效果。 */}
       <div
         ref={menuRef}
-        className={`absolute right-2 top-1/2 -translate-y-1/2 ${menuOpen ? 'z-50 opacity-100' : 'z-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'} transition-opacity`}
+        className={`absolute right-2 top-1/2 -translate-y-1/2 ${menuOpen ? 'z-50 opacity-100' : 'z-0 opacity-0 group-hover:opacity-100'} transition-opacity`}
       >
         <button
           type="button"
@@ -174,6 +179,7 @@ function ChatRenameRow({
 // 只做渲染與局部互動，狀態與 callback 由 App 透過 props 傳入。
 function Sidebar({
   sidebarOpen,
+  activeChatId,
   historyList,
   sortBy,
   setSortBy,
@@ -333,6 +339,7 @@ function Sidebar({
                   ) : (
                     <ChatRow
                       key={chat.id}
+                      activeChatId={activeChatId}
                       chat={chat}
                       sortBy={sortBy}
                       lastViewedNode={lastViewedNodes[chat.id]}
