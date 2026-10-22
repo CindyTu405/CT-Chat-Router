@@ -53,7 +53,7 @@ function ChatRow({
       <button
         type="button"
         onClick={() => onLoadChat(lastViewedNode || chat.id)}
-        className="w-full text-left p-3 pr-12 rounded-xl hover:bg-white/80 hover:shadow-sm cursor-pointer transition-all flex items-center gap-3"
+        className="w-full text-left p-3 pr-10 rounded-xl hover:bg-white/80 hover:shadow-sm cursor-pointer transition-all flex items-center gap-3"
       >
         {/* ★★★ 判斷是否有分支來決定圖示（純顯示用，操作交給右側選單）★★★ */}
         {chat.has_branch ? (
@@ -64,7 +64,7 @@ function ChatRow({
         ) : (
           <MessageSquare className="w-5 h-5 text-gray-500 group-hover:text-[#7DB9DE] transition flex-shrink-0" aria-hidden="true" />
         )}
-        <span className="flex-1 min-w-0">
+        <span className="flex-1 min-w-0 w-full">
           {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
           {/* P3b-F2：單行不換行、不用省略號，超出的部分直接裁掉；側邊欄拉寬就能看到更多標題 */}
           <span className="block text-sm text-gray-700 group-hover:text-gray-900 whitespace-nowrap overflow-hidden transition font-medium">
