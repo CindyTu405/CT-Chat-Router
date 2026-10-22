@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>串流生命週期教學（Bug A）— CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #5a6474;
+    --accent: #2563eb; --accent-soft: #e8f0fe;
+    --code-bg: #1e293b; --code-ink: #e2e8f0;
+    --tip: #0f766e; --tip-bg: #ecfdf5;
+    --warn: #b45309; --warn-bg: #fffbeb; --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero { background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff; border-radius: 16px; padding: 36px 32px; margin-bottom: 28px; }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge { display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px; }
+  section.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 26px 28px; margin-bottom: 22px; }
+  section.card h2 { margin: 0 0 12px; font-size: 22px; color: var(--accent); }
+  section.card h3 { margin: 22px 0 8px; font-size: 17px; }
+  code { background: var(--accent-soft); color: #1e40af; padding: 1px 6px; border-radius: 6px; font-size: 14px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); color: var(--code-ink); padding: 16px 18px; border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .callout { border-radius: 10px; padding: 14px 18px; margin: 16px 0; border-left: 4px solid; }
+  .tip { background: var(--tip-bg); border-color: var(--tip); color: #134e4a; }
+  .warn { background: var(--warn-bg); border-color: var(--warn); color: #78350f; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0; font-size: 14px; }
+  .box { background: var(--accent-soft); border: 1px solid #bfd3f7; border-radius: 8px; padding: 8px 12px; }
+  .box.hot { background: #fee2e2; border-color: #fca5a5; }
+  .box.ok { background: #dcfce7; border-color: #86efac; }
+  .arrow { color: var(--muted); }
+  table.cmp { width: 100%; border-collapse: collapse; font-size: 15px; }
+  table.cmp th, table.cmp td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  table.cmp th { background: var(--accent-soft); }
+  ul.steps { padding-left: 20px; } ul.steps li { margin: 6px 0; }
+  .todo { font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="badge">後端 + 前端 · 串流生命週期 · Bug A</span>
+  <h1>串流生命週期：為什麼切走再切回會卡住</h1>
+  <p>AI 回覆是「邊產生邊傳」的。這篇解釋它為什麼會因為切換對話而中斷，以及我們打算怎麼改。<strong>目前只有設計與教學，程式碼尚未修改。</strong></p>
+</header>
+
+<section class="card">
+  <h2>0. 現象與根因摘要</h2>
+  <ul class="steps">
+    <li><strong>現象</strong>：送出訊息後切到別的對話，再切回來，那則 AI 回覆一直顯示 Thinking...，重新整理也一樣。</li>
+    <li><strong>根因</strong>：AI 回覆的內容只在「串流全部跑完」後才寫進資料庫。切換對話時，前端把連線切斷，後端的串流也跟著停止，於是資料庫裡留下一則內容是空字串的 AI 訊息。</li>
+    <li><strong>所以</strong>：不是前端顯示有問題，而是「資料還沒存下來」。要修的是後端生成與連線的關係。</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>1. 串流（Streaming）是什麼？</h2>
+  <p>一般的 HTTP 請求是「一問一答」：瀏覽器送出請求，伺服器整份準備好，一次回傳。AI 回覆可能要生成十幾秒，若等全部完成才回傳，使用者只會看到空白。</p>
+  <p><strong>串流</strong>的做法是：伺服器一邊生成、一邊把小段文字送出去，瀏覽器一邊收、一邊顯示。連線在整個過程中保持開啟。</p>
+  <div class="flow">
+    <span class="box">瀏覽器 POST /chat</span><span class="arrow">→</span>
+    <span class="box">後端開始生成</span><span class="arrow">→</span>
+    <span class="box">chunk 1</span><span class="arrow">→</span>
+    <span class="box">chunk 2</span><span class="arrow">→</span>
+    <span class="box">…</span><span class="arrow">→</span>
+    <span class="box ok">連線結束</span>
+  </div>
+  <div class="callout tip"><strong>關鍵觀念</strong><br>
+  這條連線是「傳輸通道」，不是「生成工作」。生成的 AI 工作在後端執行，連線只負責把結果送到瀏覽器。把這兩件事分開，就是這次修法的核心。</div>
+</section>
+
+<section class="card">
+  <h2>2. 目前的程式碼：兩條斷線路徑</h2>
+  <p>切換對話時，同時有兩個地方會把串流停掉：</p>
+
+  <h3>路徑 A：前端主動中止（frontend/src/App.jsx）</h3>
+  <p><code>loadChat</code> 切換對話時會呼叫 <code>streamAbortRef.current.abort()</code>。<code>abort()</code> 會取消瀏覽器這一端的 <code>fetch</code>，連線被關閉。</p>
+
+  <h3>路徑 B：後端收到斷線（backend/main.py）</h3>
+  <p>後端的 <code>stream_generator</code> 是一個 Python 生成器（generator）：它一邊 <code>yield</code> 內容給 StreamingResponse，一邊累積到 <code>full_response</code>。連線斷掉時，FastAPI 會停止迭代這個生成器，後面的存檔程式碼就不會執行。</p>
+
+<pre><code># backend/main.py（簡化）
+async def stream_generator():
+    full_response = ""
+    async for chunk in stream:      # 連線斷掉 → 這個迴圈會被中止
+        full_response += chunk
+        yield chunk
+    # 存檔只在迴圈「正常跑完」後才會執行
+    ai_msg.content = full_response
+    session.commit()</code></pre>
+
+  <div class="flow">
+    <span class="box">切換對話</span><span class="arrow">→</span>
+    <span class="box hot">前端 abort()</span><span class="arrow">→</span>
+    <span class="box hot">連線關閉</span><span class="arrow">→</span>
+    <span class="box hot">後端生成器停止</span><span class="arrow">→</span>
+    <span class="box hot">存檔程式碼沒執行</span><span class="arrow">→</span>
+    <span class="box hot">DB 內容 = ""</span>
+  </div>
+
+  <div class="callout warn"><strong>為什麼切回也救不了</strong><br>
+  資料庫裡那則 AI 訊息的內容是空字串。切回時前端去讀 history，拿到的就是空的，所以一直顯示 Thinking...。重新整理也只是再讀一次同樣的空字串。</div>
+</section>
+
+<section class="card">
+  <h2>3. 核心概念：生產與傳輸分離</h2>
+  <p>目前的設計是「<strong>一條連線 = 一次生成</strong>」，連線斷了生成就跟著結束。我們要改成：</p>
+  <table class="cmp">
+    <tr><th></th><th>目前</th><th>改成</th></tr>
+    <tr><td>生成在哪執行</td><td>綁在 HTTP 請求的生成器裡</td><td>獨立的背景任務（asyncio task）</td></tr>
+    <tr><td>連線斷掉</td><td>生成跟著停止</td><td>生成繼續，只是沒人在收</td></tr>
+    <tr><td>結果存在哪</td><td>生成完才寫入 DB</td><td>邊生成邊寫入記憶體緩衝；完成時寫入 DB</td></tr>
+    <tr><td>切回對話</td><td>讀 DB，拿到空字串</td><td>讀緩衝，拿到目前為止的內容；若還在生成就繼續等</td></tr>
+  </table>
+
+  <h3>什麼是 asyncio task？</h3>
+  <p>Python 的 <code>asyncio.create_task(coro)</code> 會把一個協程排進事件迴圈，讓它在背景獨立執行。它不像生成器那樣「綁在某個請求上」，請求結束或斷線都不會自動取消它（除非我們主動取消）。</p>
+<pre><code>task = asyncio.create_task(run_generation(ai_msg_id, ...))
+# 這裡可以立刻回傳，task 會在背景繼續跑</code></pre>
+</section>
+
+<section class="card">
+  <h2>4. 方案設計</h2>
+
+  <h3>4-1. 後端：生成任務 + 記憶體緩衝</h3>
+  <ul class="steps">
+    <li>建立一個 registry（字典），key 是 AI 訊息的 id，value 是 <code>{ text, done, error }</code>。</li>
+    <li><code>/chat</code> 送出時建立 task：task 把每個 chunk 追加到 <code>text</code>；完成後設 <code>done = True</code>，並把最終內容寫入 DB。</li>
+    <li>錯誤時也要寫入（例如內容後面附上「生成中斷」），避免 DB 留空字串又沒有說明。</li>
+    <li><code>/chat</code> 本身仍然以串流回應，從 registry 讀取並送給瀏覽器；斷線時只結束「這次的讀取」，不取消 task。</li>
+  </ul>
+
+  <h3>4-2. 後端：新增一個可續讀的端點</h3>
+  <pre><code>GET /messages/{id}/stream?offset=N
+→ 回傳 registry 裡從第 N 個字元開始的內容
+→ 若 done = false，就一直等到有新內容或完成（或逾時）</code></pre>
+  <p>前端記住自己已經收到幾個字元（offset），切回時從那個位置續讀，不會重複或漏掉。</p>
+
+  <h3>4-3. 前端：切換時不 abort</h3>
+  <ul class="steps">
+    <li>切換對話時<strong>不呼叫 abort()</strong>，只是停止「畫面更新」（現在已有的 <code>activeRootIdRef</code> 檢查就是做這件事）。</li>
+    <li>切回來時，如果最後一則 AI 訊息還在生成（registry 裡 <code>done = false</code>），就用 <code>offset</code> 續讀，直到完成。</li>
+    <li>如果已完成，直接讀 history 即可。</li>
+  </ul>
+
+  <h3>4-4. 更簡單的替代方案（若不想做串流續讀）</h3>
+  <p>切回時每秒輪詢一次 <code>GET /messages/{id}</code>，直到 <code>done</code> 為止。實作量比續讀少，代價是內容更新會有 1 秒延遲，而且每秒一次請求。</p>
+</section>
+
+<section class="card">
+  <h2>5. 取捨與風險</h2>
+  <table class="cmp">
+    <tr><th>項目</th><th>說明</th></tr>
+    <tr><td>記憶體緩衝會遺失</td><td>後端重啟時，正在生成中的內容會消失。DB 仍會保留「完成前已寫入的最後狀態」，需要決定是否定期寫入 DB。</td></tr>
+    <tr><td>只能單一 worker</td><td>registry 在程序記憶體中，多個 uvicorn worker 之間不共享。目前 docker-compose 是單一程序（--reload），可以接受；日後水平擴展時要改用 Redis 或資料庫。</td></tr>
+    <tr><td>背景任務的錯誤</td><td>task 內的例外不會自動傳給請求，必須在 task 內自己捕捉並寫入 registry 與 DB。</td></tr>
+    <tr><td>使用者真的想停止</td><td>目前取消 AbortController 等於「停止」。改成不取消後，需要另外提供「停止生成」按鈕（對應 PLAN 中被取消的 S3）。</td></tr>
+    <tr><td>資源消耗</td><td>切走的對話仍會消耗 API 額度直到生成完成。</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>6. 需要你決定的問題</h2>
+  <ul class="steps">
+    <li><strong>A. 切走時要不要繼續生成？</strong>（你選了「繼續」，這裡只是確認）</li>
+    <li><strong>B. 續讀（4-2）還是輪詢（4-4）？</strong>續讀較即時、較複雜；輪詢簡單、有 1 秒延遲。</li>
+    <li><strong>C. 「停止生成」按鈕要不要做？</strong>目前沒有這個功能，修完後需要一個明確的停止方式。</li>
+    <li><strong>D. 後端重啟時正在生成的內容：</strong>接受遺失，或每 N 個 chunk 寫一次 DB？</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>7. 實作步驟（確認方案後）</h2>
+  <ol class="steps">
+    <li>後端：建立 registry 與 <code>run_generation</code> task，改寫 <code>/chat</code>（commit: <code>feat: (P3b-A1)</code>）。</li>
+    <li>後端：新增 <code>GET /messages/{id}/stream</code>（或 <code>/messages/{id}</code> 輪詢）（<code>feat: (P3b-A2)</code>）。</li>
+    <li>前端：切換時不 abort，切回時續讀或輪詢（<code>fix: (P3b-A3)</code>）。</li>
+    <li>驗證：送出 → 切走 → 等 10 秒 → 切回，內容應完整；重新整理後內容仍在。</li>
+  </ol>
+  <div class="todo">每一步一個 commit，驗證通過才進下一步。</div>
+</section>
+
+</div>
+</body>
+</html>
