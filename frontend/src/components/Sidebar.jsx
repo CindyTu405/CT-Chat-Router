@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, ArrowUpDown, Check, X, Trash2, Edit2, MessageSquare, Settings } from 'lucide-react';
+import { Plus, ArrowUpDown, Check, X, Trash2, Edit2, MessageSquare, Settings, MoreVertical } from 'lucide-react';
 import { TbBinaryTree2 } from 'react-icons/tb';
 import { formatDateTime, groupByTimeRange } from '../dateUtils';
-import TimelineRail from './TimelineRail';
 
-// 一列對話：左側載入按鈕 + 右側獨立操作按鈕（分支圖／改名／刪除）
+// 一列對話：左側載入按鈕 + 右側單一三點選單（分支圖／改名／刪除）
 // E4 修正：不再把 <div onClick> 巢狀在 <button> 內，操作項目改為真正的 <button>，
 // 可以用 Tab 聚焦、Enter／空白鍵觸發。
 function ChatRow({
@@ -21,14 +20,42 @@ function ChatRow({
     ? chat.last_activity
     : chat.created_at;
 
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  // 點擊外部或按 Escape 關閉選單
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
+
+  const runAction = (e, fn) => {
+    setMenuOpen(false);
+    fn(e);
+  };
+
+  const menuItemClass =
+    'w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left text-gray-700 hover:bg-gray-100 focus:outline-none focus-visible:bg-gray-100 cursor-pointer whitespace-nowrap';
+
   return (
     <div className="group relative">
       <button
         type="button"
         onClick={() => onLoadChat(lastViewedNode || chat.id)}
-        className="w-full text-left p-3 pr-24 rounded-xl hover:bg-white/80 hover:shadow-sm cursor-pointer transition-all flex items-center gap-3"
+        className="w-full text-left p-3 pr-12 rounded-xl hover:bg-white/80 hover:shadow-sm cursor-pointer transition-all flex items-center gap-3"
       >
-        {/* ★★★ 判斷是否有分支來決定圖示（純顯示用，操作交給右側按鈕）★★★ */}
+        {/* ★★★ 判斷是否有分支來決定圖示（純顯示用，操作交給右側選單）★★★ */}
         {chat.has_branch ? (
           <TbBinaryTree2
             className="w-4 h-4 text-[#228DCD] group-hover:text-[#7DB9DE] transition flex-shrink-0"
@@ -51,37 +78,62 @@ function ChatRow({
         </span>
       </button>
 
-      {/* ★★★ 操作按鈕列：預設隱藏，滑過或聚焦時浮現 ★★★ */}
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity bg-white/90 rounded-md p-1 shadow-sm border border-gray-200">
-        {chat.has_branch && (
-          <button
-            type="button"
-            onClick={(e) => onOpenTreeModal(e, chat.id)}
-            className="p-1.5 text-gray-500 hover:text-[#7DB9DE] hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7DB9DE] rounded cursor-pointer"
-            title="查看對話分支圖"
-            aria-label={`查看「${chat.title || chat.content}」的對話分支圖`}
+      {/* ★★★ 三點選單：預設隱藏，滑過或聚焦時浮現；展開時保持可見 ★★★ */}
+      <div
+        ref={menuRef}
+        className={`absolute right-2 top-1/2 -translate-y-1/2 ${menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'} transition-opacity`}
+      >
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          className="p-1.5 text-gray-500 hover:text-[#7DB9DE] hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7DB9DE] rounded-md cursor-pointer bg-white/90 shadow-sm border border-gray-200"
+          title="更多操作"
+          aria-label={`「${chat.title || chat.content}」的更多操作`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+        >
+          <MoreVertical className="w-4 h-4" />
+        </button>
+
+        {menuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 top-full mt-1 z-40 min-w-[8rem] bg-white border border-gray-200 rounded-lg shadow-md py-1"
           >
-            <TbBinaryTree2 className="w-3.5 h-3.5" />
-          </button>
+            {chat.has_branch && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => runAction(e, (ev) => onOpenTreeModal(ev, chat.id))}
+                className={menuItemClass}
+              >
+                <TbBinaryTree2 className="w-3.5 h-3.5 text-[#228DCD]" />
+                分支圖
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(e) => runAction(e, (ev) => onStartRenaming(ev, chat))}
+              className={menuItemClass}
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              重新命名
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(e) => runAction(e, (ev) => onDeleteChat(ev, chat.id))}
+              className={`${menuItemClass} text-red-500 hover:text-red-600`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              刪除對話
+            </button>
+          </div>
         )}
-        <button
-          type="button"
-          onClick={(e) => onStartRenaming(e, chat)}
-          className="p-1.5 text-gray-500 hover:text-[#7DB9DE] hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7DB9DE] rounded cursor-pointer"
-          title="重新命名"
-          aria-label={`重新命名「${chat.title || chat.content}」`}
-        >
-          <Edit2 className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => onDeleteChat(e, chat.id)}
-          className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7DB9DE] rounded cursor-pointer"
-          title="刪除對話"
-          aria-label={`刪除「${chat.title || chat.content}」`}
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
       </div>
     </div>
   );
@@ -116,7 +168,7 @@ function ChatRenameRow({
   );
 }
 
-// 左側側邊欄：New Chat 按鈕、歷史列表（時間軸分組 + 排序／改名／刪除／分支圖入口）、底部設定
+// 左側側邊欄：New Chat 按鈕、歷史列表（時間軸分組 + 排序／三點選單）、底部設定
 // 只做渲染與局部互動，狀態與 callback 由 App 透過 props 傳入。
 function Sidebar({
   sidebarOpen,
@@ -140,18 +192,6 @@ function Sidebar({
     () => groupByTimeRange(historyList, sortBy),
     [historyList, sortBy]
   );
-
-  // P5b：以視窗寬度 768px 區分 PC / 手機（與 P1/P3 的斷點一致）。
-  // PC 顯示右側獨立導航列；手機改用捲動時浮現的 Google 相簿式 scrubber，避免壓縮列表空間。
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  // 列表捲動容器；TimelineRail 以它為基準做捲動定位與 scroll spy
-  const scrollRef = useRef(null);
 
   // P3b-F2：側邊欄寬度可拖曳，以「視窗寬度百分比」儲存（12% ~ 30%），並記在 localStorage。
   const SIDEBAR_PCT_KEY = 'ctchat.sidebarWidthPct';
@@ -265,22 +305,20 @@ function Sidebar({
         </button>
       </div>
 
-      {/* 列表區域：依時間軸分組，群組標題 sticky；右側疊加時間軸導航（P5b）
+      {/* 列表區域：依時間軸分組，群組標題 sticky
           E5 修正：scrollbar-thin / scrollbar-thumb-gray-300 是 v3 外掛 class，Tailwind v4 無效，
           改寫成等效的原生屬性寫法（Firefox 用 scrollbar-width/color，WebKit 用偽元素變體）。 */}
       <div className="flex-1 min-h-0 relative">
         <div
-          ref={scrollRef}
           className="h-full overflow-y-auto px-2 pb-2 [scrollbar-width:thin] [scrollbar-color:#d1d5db_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300"
         >
           {timeGroups.map((group) => (
-            <section key={group.key} data-timeline-group={group.key} className="mb-1">
+            <section key={group.key} className="mb-1">
               {/* -mx-2 讓不透明背景蓋住列表容器的左右 padding，避免捲動時項目從縫隙穿出 */}
               <h3 className="sticky top-0 z-10 -mx-2 bg-[#E8F1F5] px-2 py-1.5 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
                 {group.label}
               </h3>
-              {/* PC 版預留右側導航列通道（pr-12）；手機版 scrubber 是浮動的，不佔空間 */}
-              <div className={`space-y-1 ${isMobile ? '' : 'pr-12'}`}>
+              <div className="space-y-1">
                 {group.items.map((chat) => (
                   renamingId === chat.id ? (
                     <ChatRenameRow
@@ -307,17 +345,6 @@ function Sidebar({
             </section>
           ))}
         </div>
-
-        {/* P5b：PC 右側獨立導航列 / 手機版浮動 scrubber */}
-        {/* P5b-fix（B2）：側邊欄收起時不渲染 TimelineRail，卸載即重置
-            visible／scrubbing 狀態與淡出計時器，避免標籤殘留並攔截主畫面觸控。 */}
-        {sidebarOpen && (
-          <TimelineRail
-            groups={timeGroups}
-            scrollRef={scrollRef}
-            isMobile={isMobile}
-          />
-        )}
       </div>
 
       {/* 底部設定區 */}
