@@ -191,4 +191,37 @@ created_at: datetime
 - 重試若發現「該 user 已有 AI 子訊息」→ 不重複建，改用既有 AI 重跑串流（或回傳既有內容）。
 - 或用 client 送 `request_id` 去重。
 
-## 主題 4：上下文開關與 /chat context 組裝（待討論）
+## 主題 4：上下文開關與 /chat context 組裝（狀態：待確認）
+
+### 4.1 請求 schema（ChatRequest 擴充）
+- `include_main: bool = False`（分支視圖：是否納入主對話）
+- `context_branch_ids: list[uuid] = []`（額外納入的分支 id 清單）
+
+### 4.2 組裝方式
+- **基礎 history**：沿用現有 `get_conversation_history(parent_id)` 的線性祖先鏈（主對話＝主幹鏈；分支＝該分支鏈＋錨點祖先）。
+- **額外線程**：對每個 `context_branch_ids` 取該分支的線性鏈；`include_main` 再取主幹鏈。
+- **注入位置與格式**：額外線程用分隔標記包成「額外參考上下文」區塊、標明來源標題，附在基礎 history 之前（作為參考材料）；基礎 history 保持不變。
+- **巢狀分支**：納入某分支＝只納入其自身線性鏈；子分支（若未來開放）不自動納入。
+
+### 4.3 token 截斷策略
+- 估算：約 `chars / 4`（或接 tokenizer 更準）。
+- 優先：**基礎 history 完整保留**；額外線程先截。
+- 每個額外線程設上限（保留**尾部**較新的訊息）；總額外量超過剩餘預算 → 依選取順序丟最舊的。
+- 預算 = 模型 context window − 輸出保留額。
+
+### 4.4 範例 1：主對話加選分支 A
+- 請求：`parent_id`=主幹最後一則、`include_main=false`、`context_branch_ids=[A.id]`
+- 組裝：主幹鏈（基礎）＋ A 鏈（標記「額外分支：A.title」）
+
+### 4.5 範例 2：分支加選主對話
+- 請求：`branch_id`=B、`parent_id`=B 最後一則、`include_main=true`、`context_branch_ids=[]`
+- 組裝：B 鏈＋錨點祖先（基礎）＋主幹鏈（標記「主對話」）
+
+### 4.6 邊界案例
+| 情境 | 處理 |
+|---|---|
+| 選的分支已刪除／幽靈 | 忽略該 id（前端先過濾） |
+| 選的分支無訊息 | 略過 |
+| 勾選過多爆預算 | 額外線程截斷／丟最舊 |
+| 主對話自身很長 | 主幹鏈被納入時也受截斷 |
+| 重複勾選同分支 | 去重 |
