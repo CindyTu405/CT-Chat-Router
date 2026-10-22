@@ -66,8 +66,8 @@ function ChatRow({
         )}
         <span className="flex-1 min-w-0 w-full">
           {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
-          {/* P3b-F2：單行不換行、不用省略號，超出的部分直接裁掉；側邊欄拉寬就能看到更多標題 */}
-          <span className="block text-sm text-gray-700 group-hover:text-gray-900 whitespace-nowrap overflow-hidden transition font-medium">
+          {/* P3b-F2：單行不換行、不用省略號。P3b-BugB：右端最後 2.5rem 用遮罩由左至右漸層透明，避開 ⋯ 按鈕 */}
+          <span className="block text-sm text-gray-700 group-hover:text-gray-900 whitespace-nowrap overflow-hidden transition font-medium [mask-image:linear-gradient(to_right,#000_calc(100%-2.5rem),transparent_100%)] [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%-2.5rem),transparent_100%)]">
             {chat.title || chat.content}
           </span>
           <span className="block text-xs text-gray-500 truncate mt-0.5">
