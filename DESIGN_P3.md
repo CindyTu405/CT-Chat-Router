@@ -35,7 +35,7 @@
 - 因 offset 對 source，跨粗體／列表／連結／多段落都能用同一對 start/end 定位，不需特判。
 - **吸附規則**：start/end 若落在「語法字元」上（如 `**`、`[`、`` ` ``），把 start 向後、end 向前收斂到最近的合法文字字元邊界。
 - **程式碼區塊**：允許開分支，但**不做 inline 高亮**；改為「對話底部標題入口」（用主題 2 的 `attach_root_id`）。
-- **巢狀／重疊選取**（新選取範圍已含既有分支文字）：允許，這是「分支再分支」（`parent_branch_id` 已支援）。渲染成**巢狀 `<mark>`**（先包外層、再包內層）；內層 `onClick` 用 `stopPropagation()` 防連動；**完全重疊**時不重複建分支，直接開既有那條。
+- **重疊選取**（新選取範圍與既有高亮文字重疊）：**一層分支、不做巢狀高亮**。新分支降級為「底部標題入口」，既有高亮保持 inline；**完全重疊**時直接開既有分支（不重複建）。
 
 ### 1.5 anchor_text 校驗
 - 建立時存 `anchor_text = source[start:end]`（快照）。
@@ -68,10 +68,10 @@ onMouseUp(e, msg):
   text = msg.content.slice(start, end)
   showFloatingButton({msgId, start, end, text})
 
-# 高亮（AST 層，先外後內）
+# 高亮（AST 層）
 highlight(content, anchors):
   hast = parseMarkdown(content)          # 帶 position
-  for a in anchors sorted by (range desc, start asc):   # 外層先、內層後
+  for a in anchors sorted by start desc:   # 互不重疊，由右到左
     if content.slice(a.start, a.end) != a.text: mark(a, invalid); continue
     for tn in textNodes(hast):
       if overlap(tn.pos, a):
@@ -92,9 +92,9 @@ exportMd(content, anchors):
 | 選取跨粗體／連結／列表 | start/end 對 source 定位，正常 |
 | 選取含語法字元（`**` 等） | 吸附到最近合法文字邊界 |
 | 選取與 code block 交集 | 允許，但改「底部標題入口」（不 inline 高亮） |
-| 巢狀／重疊既有分支 | 巢狀 mark + stopPropagation；完全重疊 → 開既有分支 |
+| 重疊既有高亮 | 新分支降級「底部入口」（不巢狀）；完全重疊 → 開既有分支 |
 | 訊息事後被編輯 | anchor_text 校驗失敗 → fallback 底部標題入口 |
-| 同一則訊息多個錨點 | 各自 offset，依範圍外→內替換 |
+| 同一則訊息多個錨點 | 各自 offset，互不重疊，依 start 由大到小替換 |
 | 空選取／僅空白 | 不開分支 |
 | 舊資料無 offset | precise=false，退階純文字比對 |
 
@@ -225,3 +225,37 @@ created_at: datetime
 | 勾選過多爆預算 | 額外線程截斷／丟最舊 |
 | 主對話自身很長 | 主幹鏈被納入時也受截斷 |
 | 重複勾選同分支 | 去重 |
+
+---
+
+## 主題 5：分支入口管理與 wiki 語義（狀態：已定稿）
+
+### 5.1 一層分支（簡化）
+- **只做一層分支**：只在主對話選文字開分支，分支內不再開分支。
+- `parent_branch_id` 欄位保留但不設值（未來要再開巢狀時用）。
+
+### 5.2 wiki 連結語義
+- inline 高亮就是一個 wiki 連結：`[[分支標題|顯示文字]]`。
+- **顯示文字** = 選取的文字（anchor_text），即 UI 上高亮的那段。
+- **連結檔案名字** = 分支標題（branch title）＝匯出的檔案名。
+- UI 上 inline 高亮只顯示「顯示文字」，不顯示檔案名。
+- **標題編輯只在右側邊欄**（分支面板）進行，避免從文章裡的連結改檔名造成混淆。
+
+### 5.3 inline 高亮右鍵選單
+| 項目 | 行為 |
+|---|---|
+| 修改高亮範圍 | 重新選文字 → 更新 anchor_start/end/text |
+| 移到底部 | 轉成底部入口（清空 anchor，設 attach_root_id） |
+| 複製文字 | 複製 anchor_text |
+| 刪除分支串 | 刪除該分支全部訊息 |
+
+### 5.4 底部入口右鍵選單
+| 項目 | 行為 |
+|---|---|
+| 選取文章文字 → 作為新入口 | 選文字升為 inline；**選到已有高亮 → 駁回** |
+| 複製文字 | 複製入口文字 |
+| 刪除分支串 | 刪除該分支全部訊息 |
+
+### 5.5 對應後端操作
+- `PATCH /branches/{id}`：改標題、改錨點範圍、inline↔底部轉換。
+- `DELETE /branches/{id}`：刪整條分支串。
