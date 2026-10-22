@@ -58,6 +58,11 @@ function App() {
   // restoreToken 每次載入遞增，讓 MessageList 知道要跳過一次自動捲到底部。
   const [pendingRestore, setPendingRestore] = useState(null); // { convId, scrollTop|null, anchorId|null }
   const [restoreToken, setRestoreToken] = useState(0);
+  // ★★★ (P3b) 目前畫面上是哪一串對話（root id），null 代表全新對話 ★★★
+  // 串流回來時要比對這個值，避免把上一個對話的回覆寫進剛切換過來的對話。
+  const activeRootIdRef = useRef(null);
+  // 目前進行中的串流，切換對話時直接中止
+  const streamAbortRef = useRef(null);
 
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = useCallback( async () => {
@@ -112,6 +117,15 @@ function App() {
 
     try {
       setIsLoading(true);
+      // (P3b) 立刻把「目前顯示的對話」切到新的 root id，並中止正在跑的串流，
+      // 讓舊對話的後續 chunk 不會再被寫進畫面。
+      activeRootIdRef.current = rootId;
+      if (streamAbortRef.current) {
+        try { streamAbortRef.current.abort(); } catch { /* ignore */ }
+        streamAbortRef.current = null;
+        // 舊串流已經被腰斬，解除它的 loading，否則新對話會卡住不能送出
+        setIsLoading(false);
+      }
       const res = await fetch(`${API_URL}/chats/${rootId}/history`);
       const data = await res.json();
 
@@ -168,6 +182,13 @@ function App() {
 
   // 3. 開啟新對話
   const startNewChat = () => {
+    // (P3b) 新對話沒有 root id，同時中止上一個對話還在跑的串流
+    activeRootIdRef.current = null;
+    if (streamAbortRef.current) {
+      try { streamAbortRef.current.abort(); } catch { /* ignore */ }
+      streamAbortRef.current = null;
+      setIsLoading(false); // 同上：舊串流已中止，別讓新對話卡在 loading
+    }
     setMessages([]); // 清空畫面
     // setInput("");
     // 在手機版自動收起側邊欄
@@ -207,10 +228,22 @@ function App() {
 
     fetchHistory();
 
+    // ★★★ (P3b) 記下這則訊息是發給哪一串對話的 ★★★
+    // 新對話（畫面空）→ null；現有對話 → 用第一則訊息的 id 當 root id。
+    // 串流期間使用者若切換對話，activeRootIdRef 會變，這裡的快照就不會再相符。
+    const sendConvId = messages[0]?.id ?? null;
+    activeRootIdRef.current = sendConvId;
+    if (streamAbortRef.current) {
+      try { streamAbortRef.current.abort(); } catch { /* ignore */ }
+    }
+    const abortController = new AbortController();
+    streamAbortRef.current = abortController;
+
     try {
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           message: userMessageContent,
           model: model,
@@ -233,14 +266,27 @@ function App() {
       const newMsgId = response.headers.get("X-Message-Id");
 
       while (true) {
+        // ★★★ (P3b) 使用者已切換到別的對話 → 停止套用，別把內容寫進別人的對話 ★★★
+        if (activeRootIdRef.current !== sendConvId) {
+          try { await reader.cancel(); } catch { /* ignore */ }
+          break;
+        }
         const { done, value } = await reader.read();
         if (done) break;
-        
+
+        // 讀取是非同步的，回來後再確認一次畫面上還是同一串對話
+        if (activeRootIdRef.current !== sendConvId) {
+          try { await reader.cancel(); } catch { /* ignore */ }
+          break;
+        }
+
         const chunk = decoder.decode(value, { stream: true });
         aiResponseText += chunk;
 
         // 即時更新最後一則 (AI)
         setMessages(prev => {
+          // 防呆 0：(P3b) 對話已被切換就走人，避免污染新對話
+          if (activeRootIdRef.current !== sendConvId) return prev;
           // 防呆 1：如果畫面已經被清空，直接放棄更新
           if (prev.length === 0) return prev; 
           
@@ -257,10 +303,19 @@ function App() {
       } // ★ 修正 2：補上 while 迴圈的右大括號！
 
     } catch (error) {
-      console.error("Error:", error);
-      setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 連線錯誤，請檢查後端是否啟動。" }]);
+      // (P3b) 切換對話造成的 abort 不是錯誤，也不要再往畫面塞訊息
+      if (error?.name === 'AbortError' || activeRootIdRef.current !== sendConvId) {
+        // 已被切換的對話：靜默結束
+      } else {
+        console.error("Error:", error);
+        setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 連線錯誤，請檢查後端是否啟動。" }]);
+      }
     } finally {
-      setIsLoading(false);
+      // 只有還是「自己這條」串流時才清掉 loading，否則新對話自己的送出流程會被誤解除
+      if (streamAbortRef.current === abortController) {
+        streamAbortRef.current = null;
+        setIsLoading(false);
+      }
     }
   };
 
