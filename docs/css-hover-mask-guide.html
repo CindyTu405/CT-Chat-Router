@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CSS 漸層遮罩與 hover 狀態 教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #5a6474;
+    --accent: #2563eb; --accent-soft: #e8f0fe;
+    --code-bg: #1e293b; --code-ink: #e2e8f0;
+    --tip: #0f766e; --tip-bg: #ecfdf5;
+    --warn: #b45309; --warn-bg: #fffbeb; --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero { background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff; border-radius: 16px; padding: 36px 32px; margin-bottom: 28px; }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge { display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px; }
+  section.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 26px 28px; margin-bottom: 22px; }
+  section.card h2 { margin: 0 0 12px; font-size: 22px; color: var(--accent); }
+  section.card h3 { margin: 22px 0 8px; font-size: 17px; }
+  code { background: var(--accent-soft); color: #1e40af; padding: 1px 6px; border-radius: 6px; font-size: 14px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); color: var(--code-ink); padding: 16px 18px; border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .callout { border-radius: 10px; padding: 14px 18px; margin: 16px 0; border-left: 4px solid; }
+  .tip { background: var(--tip-bg); border-color: var(--tip); color: #134e4a; }
+  .warn { background: var(--warn-bg); border-color: var(--warn); color: #78350f; }
+  .demo { display: flex; flex-direction: column; gap: 14px; margin: 16px 0; }
+  .demo-label { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  /* 示範用的「對話列」，樣式與 Sidebar 相同概念 */
+  .row { position: relative; border-radius: 12px; background: #e8f1f5; transition: background .2s, box-shadow .2s; }
+  .row:hover, .row.is-active { background: rgba(255,255,255,.85); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .row-title { display: block; padding: 12px 56px 12px 14px; white-space: nowrap; overflow: hidden; font-weight: 500; }
+  .row-title.fade { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3rem), transparent 100%); mask-image: linear-gradient(to right, #000 calc(100% - 3rem), transparent 100%); }
+  .more { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; border-radius: 8px; background: #fff; border: 1px solid var(--border); display: grid; place-items: center; color: var(--muted); opacity: 0; transition: opacity .15s; }
+  .row:hover .more { opacity: 1; }
+  .clip { width: 260px; border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; }
+  .clip .row { background: #fff; }
+  .clip .row-title { padding-right: 56px; }
+  ul.steps { padding-left: 20px; }
+  ul.steps li { margin: 6px 0; }
+  table.cmp { width: 100%; border-collapse: collapse; font-size: 15px; }
+  table.cmp th, table.cmp td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  table.cmp th { background: var(--accent-soft); }
+  .sidebar-w { width: 100%; max-width: 360px; background: #e8f1f5; padding: 12px; border-radius: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="badge">前端 CSS · P3b-F2 / BugB / 側欄 hover</span>
+  <h1>CSS 漸層遮罩與 hover 狀態</h1>
+  <p>為什麼標題要「淡出」而不是「裁切」？為什麼 ⋯ 按鈕一滑過去，對話列的底色就消失？兩個問題背後的 CSS 觀念都在這篇。</p>
+</header>
+
+<section class="card">
+  <h2>0. 先看結果</h2>
+  <p>側欄的每一列有三個元素：左邊的圖示、中間的標題、右邊的 ⋯ 按鈕。這次要解決三件事：</p>
+  <ul class="steps">
+    <li>標題太長時，右端不要被生硬切掉，也不要蓋到 ⋯ 按鈕。</li>
+    <li>⋯ 按鈕只有在滑鼠 hover 到這一列時才出現。</li>
+    <li>滑鼠移到 ⋯ 上時，這一列的底色不能消失；點進去的那一列，底色要保持。</li>
+  </ul>
+  <p>下面的示範都是獨立的 HTML，可以直接在瀏覽器裡滑鼠移上去看效果。</p>
+
+  <div class="demo">
+    <div>
+      <div class="demo-label">示範 A：硬切（舊做法）— 標題直接被裁掉，右端的字會「斷在半空中」</div>
+      <div class="sidebar-w">
+        <div class="row"><span class="row-title" style="width:100%">這是一個非常非常長的對話標題用來測試右端裁切的效果</span><span class="more">⋯</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="demo-label">示範 B：漸層遮罩（新做法）— 右端 3rem 逐漸變透明，文字不會斷在半空中</div>
+      <div class="sidebar-w">
+        <div class="row"><span class="row-title fade" style="width:100%">這是一個非常非常長的對話標題用來測試右端裁切的效果</span><span class="more">⋯</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="demo-label">示範 C：hover 與 active（把滑鼠移到列上，或看「目前開啟中」那列）</div>
+      <div class="sidebar-w">
+        <div class="row"><span class="row-title fade">沒有 hover 的一般列</span><span class="more">⋯</span></div>
+        <div class="row is-active" style="margin-top:8px"><span class="row-title fade">目前開啟中的對話（is-active）</span><span class="more" style="opacity:1">⋯</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>1. 文字溢出：overflow 三兄弟</h2>
+  <p>單行文字太長時，瀏覽器預設會讓文字超出容器。要控制它，通常會搭配三個屬性：</p>
+  <pre><code>white-space: nowrap;     /* 不換行，維持單行 */
+overflow: hidden;        /* 超出容器的部分不顯示 */
+text-overflow: ellipsis; /* 被裁掉的地方補上 … （我們這次沒用）*/</code></pre>
+  <p>前兩個組合起來就是「硬切」：文字到邊界就停。<code>text-overflow: ellipsis</code> 會補上省略號，但我們要的是「不要省略號」，所以只用前兩個。</p>
+
+  <h3>為什麼硬切不夠好？</h3>
+  <p>硬切的問題是邊界很生硬。標題的最後一個字可能剛好切一半，看起來像 bug。而且如果右邊還有 ⋯ 按鈕，文字可能直接鑽到按鈕底下。</p>
+
+  <h3>解法：mask-image 漸層遮罩</h3>
+  <p><code>mask-image</code> 是「遮罩」：用一張圖（這裡是漸層）決定元素每個位置要顯示多少。黑色＝完全顯示，透明＝完全隱藏，中間的灰階＝半透明。</p>
+  <pre><code>mask-image: linear-gradient(
+  to right,
+  #000 calc(100% - 3rem),   /* 從左到右，到倒數 3rem 之前都完全顯示 */
+  transparent 100%          /* 最右邊完全透明 */
+);</code></pre>
+  <p>這一行的意思是：「最後 3rem 的寬度內，從不透明漸變成透明」。文字不會被硬切，而是慢慢淡出。</p>
+
+  <div class="callout tip"><strong>為什麼用 <code>calc(100% - 3rem)</code>？</strong><br>
+  <code>100%</code> 是元素的整個寬度；<code>3rem</code> 是固定長度（相對於根字體大小）。兩者相減就是「右邊留 3rem 的漸層區」。這樣不管側欄寬度怎麼拖，漸層長度都固定，不會因為寬度變化而失真。</div>
+
+  <h3>為什麼要寫兩行（-webkit- 前綴）？</h3>
+  <p>較舊的 Safari／Chrome 仍需要 <code>-webkit-mask-image</code>。現在我們同時寫兩行，相容性比較好。</p>
+
+  <h3>調整漸層長度（這次的踩坑）</h3>
+  <p>第一次我用 <code>2.5rem</code>，發現漸層還是沒有蓋到 ⋯ 按鈕右側，所以改成 <code>3rem</code>。<strong>漸層長度必須 ≥ 按鈕所在區域的寬度</strong>，而且它的右邊界要和文字的右邊界對齊。這次同時把按鈕的 <code>pr-10</code> 改成 <code>pr-2</code>，讓文字可以延伸到按鈕右側，漸層才有意義。</p>
+
+  <div class="callout warn"><strong>常見誤解</strong><br>
+  以為「文字被遮住」是 <code>padding-right</code> 的功勞。其實 <code>padding-right</code> 只是讓文字<em>不要</em>進入那段空間；如果你要文字「延伸進去並淡出」，就要把 padding 縮小，再用遮罩處理右端。</div>
+</section>
+
+<section class="card">
+  <h2>2. hover 的範圍：為什麼滑到 ⋯ 底色會消失？</h2>
+  <p>原本的結構是這樣：</p>
+  <pre><code>&lt;div class="group relative"&gt;
+  &lt;button class="... hover:bg-white/80"&gt;   &lt;!-- 底色綁在這裡 --&gt;
+    圖示 + 標題
+  &lt;/button&gt;
+  &lt;div class="absolute ..."&gt;                  &lt;!-- ⋯ 按鈕，不在 button 裡面 --&gt;
+    &lt;button&gt;⋯&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+  <p>關鍵：<strong>⋯ 不是 button 的子元素</strong>。滑鼠移到 ⋯ 上，就等於離開了 button，所以 <code>button:hover</code> 就失效，底色跟著消失。</p>
+
+  <h3>解法：把 hover 底色放到共同的父層</h3>
+  <p>⋯ 和 button 共同的父層是外層的 <code>div.group</code>。只要滑鼠在這個 div 裡面（包含 ⋯），它的 hover 就成立。</p>
+  <pre><code>&lt;div class="group relative rounded-xl hover:bg-white/80"&gt;   &lt;!-- 底色移到這裡 --&gt;
+  &lt;button class="... cursor-pointer"&gt;
+    圖示 + 標題
+  &lt;/button&gt;
+  &lt;div class="absolute ... group-hover:opacity-100"&gt;
+    &lt;button&gt;⋯&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+  <div class="callout tip"><strong>原則</strong><br>
+  hover 的範圍 = 元素自己 + 所有子元素。想讓「列」的 hover 包含整列（包含按鈕），就把 hover 掛在包住整列的最外層元素上，而不是其中一個子元素上。</div>
+
+  <h3>group 與 group-hover：控制子元素的顯示</h3>
+  <p>Tailwind 的 <code>group</code> 會把父元素標記為「群組」，子元素就能用 <code>group-hover:</code> 響應父元素的 hover。這裡 ⋯ 按鈕預設 <code>opacity-0</code>，hover 到列時才變成 <code>opacity-100</code>。</p>
+  <pre><code>class="opacity-0 group-hover:opacity-100 transition-opacity"</code></pre>
+  <p>為什麼用 <code>opacity</code> 而不是 <code>display: none</code>？因為 opacity 可以搭配 <code>transition</code> 做淡入淡出；而且按鈕仍在版面中，不會讓標題寬度跳動。</p>
+
+  <h3>為什麼去掉 group-focus-within？</h3>
+  <p>我們原本有 <code>group-focus-within:opacity-100</code>，意思是「列裡面有元素拿到焦點，⋯ 就顯示」。問題是：點進對話時，按鈕會拿到焦點，⋯ 就一直顯示，不符合「只有 hover 才出現」的需求。所以這次把 focus 條件拿掉。</p>
+  <div class="callout warn"><strong>無障礙注意</strong><br>
+  拿掉 focus 顯示後，鍵盤使用者按 Tab 到 ⋯ 時看不到它。如果之後要照顧鍵盤使用者，可以只在「鍵盤焦點」時顯示（<code>:focus-visible</code>），而不是任何焦點。</div>
+</section>
+
+<section class="card">
+  <h2>3. 「目前開啟中」的狀態：不能只靠 hover</h2>
+  <p>hover 是暫時的：滑鼠一離開就消失。但使用者點進一個對話後，希望這一列「被選中」的底色留著。這是<strong>狀態（state）</strong>的問題，不是 CSS hover 能解的。</p>
+
+  <h3>做法：用 JavaScript 比對 id，套用 class</h3>
+  <pre><code>// Sidebar.jsx（父元件）
+&lt;ChatRow activeChatId={messages[0]?.id ?? null} ... /&gt;
+
+// ChatRow（子元件）
+const isActive = chat.id === activeChatId;
+&lt;div className={`group relative rounded-xl transition-all ${
+  isActive ? 'bg-white/80 shadow-sm'
+           : 'hover:bg-white/80 hover:shadow-sm'
+}`}&gt;</code></pre>
+
+  <div class="callout tip"><strong>三個重點</strong>
+  <ul class="steps">
+    <li><strong>狀態放在父層</strong>：「哪一個對話開啟中」是 App 的事，由 App 傳下去（props）。</li>
+    <li><strong>子元件只負責顯示</strong>：ChatRow 不需要知道其他列的狀態，只要比對「我是不是 active」。</li>
+    <li><strong>active 與 hover 互斥</strong>：active 時不再套 hover 樣式，避免兩者疊加難以分辨。</li>
+  </ul></div>
+
+  <h3>為什麼用 <code>messages[0]?.id</code>？</h3>
+  <p>目前的對話 id 是「根節點（root）」的 id，也就是 <code>messages</code> 陣列的第一則訊息。側欄每一列的 <code>chat.id</code> 也是根節點 id，所以兩者可以直接比對。</p>
+  <p><code>?.</code> 是「可選串接」：如果 <code>messages</code> 是空的（新對話），<code>messages[0]</code> 是 <code>undefined</code>，整個運算式變成 <code>undefined</code>，不會報錯；<code>?? null</code> 再把它轉成 <code>null</code>。</p>
+
+  <h3>動態 class：三元運算子</h3>
+  <p>模板字串裡的 <code>${isActive ? A : B}</code> 會依條件選擇一組 class。這是 React 裡最常見的「依狀態換樣式」寫法。</p>
+</section>
+
+<section class="card">
+  <h2>4. 三種狀態的對照</h2>
+  <table class="cmp">
+    <tr><th>情境</th><th>底色</th><th>⋯ 按鈕</th><th>實作</th></tr>
+    <tr><td>一般（沒 hover、沒開啟）</td><td>無</td><td>隱藏</td><td>預設 <code>opacity-0</code></td></tr>
+    <tr><td>滑鼠在列上（含 ⋯）</td><td>hover 底色</td><td>顯示</td><td>外層 <code>hover:bg-*</code> + <code>group-hover:opacity-100</code></td></tr>
+    <tr><td>目前開啟中（沒 hover）</td><td>active 底色</td><td>隱藏</td><td><code>isActive</code> 比對 id</td></tr>
+    <tr><td>開啟中 + 滑鼠在上</td><td>active 底色</td><td>顯示</td><td>active 固定底色，⋯ 由 hover 控制</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>5. 練習（自己試試）</h2>
+  <ul class="steps">
+    <li>把示範 B 的 <code>3rem</code> 改成 <code>1rem</code>，觀察漸層變短後文字的淡出效果。</li>
+    <li>把 <code>.row:hover</code> 拿掉，只保留 <code>.row.is-active</code>，觀察 hover 時底色是否消失。</li>
+    <li>把 <code>.more</code> 的 <code>transition</code> 拿掉，觀察 ⋯ 按鈕出現時是否變得生硬。</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>6. 本次修改的 commit</h2>
+  <ul class="steps">
+    <li><code>c96b0e5</code> fix: (P3b-BugB) widen sidebar title fade to clear ⋯ button</li>
+    <li><code>9ab32d3</code> fix: (P3b) sidebar row hover stays on ⋯ and active row keeps highlight</li>
+    <li>相關檔案：<code>frontend/src/components/Sidebar.jsx</code>、<code>frontend/src/App.jsx</code></li>
+  </ul>
+</section>
+
+</div>
+</body>
+</html>
