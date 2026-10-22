@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { Bot, User, Sparkles, GitBranch } from 'lucide-react';
+import { Bot, User, Sparkles, GitBranch, ArrowDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -99,6 +99,10 @@ function MessageList({
   skipAutoScrollToken = null,
 }) {
   const messagesEndRef = useRef(null);
+  const internalContainerRef = useRef(null);
+  // (P3b-F1a-fix) 使用者是否「貼在底部」：由 onScroll 維護，而不是每次內容變動後才量一次
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const isAtBottomRef = useRef(true);
 
   // (P2-4) 選取 AI 回覆後的浮動「建立分支」按鈕狀態
   const [branchSel, setBranchSel] = useState(null); // { messageId, text, x, y } | null
@@ -220,24 +224,52 @@ function MessageList({
   };
 
   // 自動捲動到底部（只有在使用者已經接近底部時才捲，避免打斷往上讀歷史訊息）
+  // (P3b-F1a-fix) 「是否在底部」改由 onScroll 持續維護（isAtBottom），
+  //   並且一律「瞬間」貼底，避免 smooth 動畫在快速串流時永遠追不上。
   // (P3b-F1b) 若 App 已經標記要還原閱讀位置／對齊最後一則 user 訊息（restoreToken 遞增），
   // 就先跳過一次，避免載入對話的瞬間被拉回底部。
   const lastAutoScrollSkipToken = useRef(0);
+
+  const getContainer = () => scrollContainerRef?.current || internalContainerRef?.current;
+
+  // 瞬間捲到底（不觸發 smooth），並同步狀態
+  const scrollToBottomNow = () => {
+    const container = getContainer();
+    if (container) container.scrollTop = container.scrollHeight;
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+  };
+
+  const handleScroll = () => {
+    const container = getContainer();
+    if (!container) return;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const atBottom = distanceFromBottom <= 100;
+    isAtBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
+  };
+
   useEffect(() => {
     if (skipAutoScrollToken != null && skipAutoScrollToken !== lastAutoScrollSkipToken.current) {
       lastAutoScrollSkipToken.current = skipAutoScrollToken;
       return;
     }
-    const container = scrollContainerRef?.current;
-    if (!container) return;
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    if (distanceFromBottom > 100) return;
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!isAtBottomRef.current) return;
+    scrollToBottomNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, skipAutoScrollToken, scrollContainerRef]);
 
   return (
-    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+    <div
+      ref={(node) => {
+        internalContainerRef.current = node;
+        if (typeof scrollContainerRef === 'function') scrollContainerRef(node);
+        else if (scrollContainerRef) scrollContainerRef.current = node;
+      }}
+      onScroll={handleScroll}
+      className="relative flex flex-col flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-6"
+    >
       {messages.length === 0 ? (
         // --- 空狀態 (Empty State) ---
         <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-5">
@@ -326,6 +358,18 @@ function MessageList({
           {/* 自動捲動定位點 */}
           <div ref={messagesEndRef} />
         </>
+      )}
+
+      {/* ★★★ (P3b-F1a-fix) 懸浮「回到底部」按鈕：只有不在底部且有訊息時才出現 ★★★ */}
+      {!isAtBottom && messages.length > 0 && (
+        <button
+          onClick={scrollToBottomNow}
+          title="回到底部"
+          aria-label="回到底部"
+          className="sticky bottom-2 left-full -ml-14 z-30 flex items-center justify-center w-10 h-10 text-[#51A8DD] bg-white border border-[#7DB9DE] hover:bg-[#51A8DD] hover:text-white rounded-full shadow-lg transition-colors cursor-pointer"
+        >
+          <ArrowDown className="w-5 h-5" />
+        </button>
       )}
 
       {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕 ★★★ */}
