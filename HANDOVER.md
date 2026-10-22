@@ -1,6 +1,6 @@
 # HANDOVER.md — 交接文件（2026-10-22）
 
-> 給下一個對話（切到 MiniMax M3）的交接。開始前依序讀：`ct-chat-router` skill → `PLAN_v2.md` → `DESIGN_P3.md` → 本文件。
+> 給下一個對話的交接。開始前依序讀：`ct-chat-router` skill → `PLAN_v2.md` → `DESIGN_P3.md` → 本文件。
 
 ## 專案
 
