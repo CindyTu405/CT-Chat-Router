@@ -268,7 +268,7 @@ function MessageList({
         else if (scrollContainerRef) scrollContainerRef.current = node;
       }}
       onScroll={handleScroll}
-      className="relative flex flex-col flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-6"
+      className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6"
     >
       {messages.length === 0 ? (
         // --- 空狀態 (Empty State) ---
@@ -366,7 +366,7 @@ function MessageList({
           onClick={scrollToBottomNow}
           title="回到底部"
           aria-label="回到底部"
-          className="sticky bottom-2 left-full -ml-14 z-30 flex items-center justify-center w-10 h-10 text-[#51A8DD] bg-white border border-[#7DB9DE] hover:bg-[#51A8DD] hover:text-white rounded-full shadow-lg transition-colors cursor-pointer"
+          className="fixed bottom-24 right-8 z-30 flex items-center justify-center w-10 h-10 text-[#51A8DD] bg-white border border-[#7DB9DE] hover:bg-[#51A8DD] hover:text-white rounded-full shadow-lg transition-colors cursor-pointer"
         >
           <ArrowDown className="w-5 h-5" />
         </button>
