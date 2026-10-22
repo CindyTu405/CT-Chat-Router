@@ -79,9 +79,11 @@ function ChatRow({
       </button>
 
       {/* ★★★ 三點選單：預設隱藏，滑過或聚焦時浮現；展開時保持可見 ★★★ */}
+      {/* P3b-F2-fix2：外層容器本身是 absolute（已建立定位），選單展開時把它的 z-index 拉到
+          50，才會蓋過 sticky 的分組標題（h3 z-10）。未展開時不開新的堆疊層級，避免影響其他列的滑過效果。 */}
       <div
         ref={menuRef}
-        className={`absolute right-2 top-1/2 -translate-y-1/2 ${menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'} transition-opacity`}
+        className={`absolute right-2 top-1/2 -translate-y-1/2 ${menuOpen ? 'z-50 opacity-100' : 'z-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'} transition-opacity`}
       >
         <button
           type="button"
@@ -101,7 +103,7 @@ function ChatRow({
         {menuOpen && (
           <div
             role="menu"
-            className="absolute right-0 top-full mt-1 z-40 min-w-[8rem] bg-white border border-gray-200 rounded-lg shadow-md py-1"
+            className="absolute right-0 top-full mt-1 z-50 min-w-[8rem] bg-white border border-gray-200 rounded-lg shadow-md py-1"
           >
             {chat.has_branch && (
               <button
