@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
+import asyncio
+from types import SimpleNamespace
 from sqlmodel import Session, select, text
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -11,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 # 自訂模組
-from database import get_session
+from database import get_session, engine
 from auth_routes import router as auth_router
 from models import (
     Message,
@@ -28,6 +30,38 @@ from gemini_llm import gemini_chat_stream
 from openrouter_llm import openrouter_chat_stream
 from scraper import get_free_models
 
+
+
+# (P3b-A1) 進行中 / 已完成的 AI 回覆緩衝。key = AI 訊息 id（str），value = {"text", "done"}。
+# 生成在獨立的 asyncio task 裡跑，不綁 HTTP 連線；切走對話或斷線不會停止生成。
+# 注意：只存在程序記憶體，後端重啟即遺失（D：接受遺失）。
+GENERATIONS: dict[str, dict] = {}
+
+
+async def run_generation(ai_msg_id: str, message: str, history: list, model: str):
+    """背景執行一次 AI 生成：邊收 chunk 邊寫入緩衝，完成後寫回 DB。"""
+    buf = GENERATIONS[ai_msg_id]
+    try:
+        if model.startswith("gemini"):
+            stream = gemini_chat_stream(message, history, model)
+        else:
+            stream = openrouter_chat_stream(message, history, model)
+        async for chunk in stream:
+            buf["text"] += chunk
+    except Exception as e:
+        buf["text"] += f"\n\n⚠️ 生成中斷：{e}"
+    finally:
+        buf["done"] = True
+        # 用獨立 session 寫回，避免依賴請求的 session 生命週期
+        with Session(engine) as db_session:
+            msg = db_session.get(Message, uuid.UUID(ai_msg_id))
+            if msg:
+                msg.content = buf["text"]
+                db_session.add(msg)
+                db_session.commit()
+        # 寫入完成後保留緩衝一小段時間，讓正在續讀的前端能讀到 done
+        await asyncio.sleep(60)
+        GENERATIONS.pop(ai_msg_id, None)
 
 
 # 1. Lifespan (生命週期管理器)
@@ -217,42 +251,66 @@ async def chat_endpoint(payload: ChatRequest, request: Request, session: Session
     session.commit()
     session.refresh(ai_msg) # 拿到真正的 UUID 了！
 
-    # 定義串流產生器
+    # (P3b-A1) 生成交給背景 task；連線只負責讀緩衝。
+    ai_id = str(ai_msg.id)
+    GENERATIONS[ai_id] = {"text": "", "done": False}
+    # 背景 task 不能拿請求 session 的 ORM 物件（commit 後會過期），先轉成純資料
+    history_plain = [SimpleNamespace(role=m.role, content=m.content) for m in history]
+    asyncio.create_task(run_generation(ai_id, payload.message, history_plain, payload.model))
+
     async def stream_generator():
-        full_response = ""
-        
-        # 交通警察邏輯
-        # 注意：這裡使用的 history 變數，就是最上面撈出來的那個
-        if payload.model.startswith("gemini"):
-            stream = gemini_chat_stream(payload.message, history, payload.model)
-        else:
-            stream = openrouter_chat_stream(payload.message, history, payload.model)
-
-        # 開始串流
-        async for chunk in stream:
-            full_response += chunk
-            yield chunk
-
-        # 3. 串流結束後，更新內容 (Update)
-        # 這裡直接用原本的 session 進行更新
-        try:
-            ai_msg.content = full_response
-            session.add(ai_msg)
-            session.commit()
-            # print(f"✅ AI 訊息已更新內容，ID: {ai_msg.id}")
-        except Exception as e:
-            print(f"❌ 存檔失敗: {e}")
+        # 用續讀端點的同一套邏輯：從 0 開始讀到 done
+        async for piece in _read_buffer(ai_id, 0):
+            yield piece
 
     # 4. 回傳 Response，這時候 headers 裡已經有真正的 ID 了！
     return StreamingResponse(
-        stream_generator(), 
+        stream_generator(),
         media_type="text/plain",
-        headers={"X-Message-Id": str(ai_msg.id),
+        headers={"X-Message-Id": ai_id,
                 "X-Accel-Buffering": "no",      # ★ 叫 Nginx 絕對不要緩衝
                 "Cache-Control": "no-cache",    # ★ 不要快取
                 "Connection": "keep-alive"      # ★ 保持連線開啟
                 }
     )
+
+
+async def _read_buffer(ai_id: str, offset: int):
+    """(P3b-A2) 從緩衝的 offset 位置開始吐新文字，直到 done。緩衝不存在則結束。
+    offset 以「字元」計，與前端 aiResponseText.length 對齊。"""
+    while True:
+        buf = GENERATIONS.get(ai_id)
+        if buf is None:
+            return
+        text = buf["text"]
+        if len(text) > offset:
+            yield text[offset:]
+            offset = len(text)
+        if buf["done"]:
+            return
+        await asyncio.sleep(0.1)
+
+
+@app.get("/messages/{message_id}/stream")
+async def stream_message(message_id: str, offset: int = 0, session: Session = Depends(get_session)):
+    """(P3b-A2) 續讀一則 AI 回覆：回傳從 offset 之後的新文字。
+    - 生成中：會持續等待直到完成（切回對話時用來接續顯示）。
+    - 已完成（緩衝已清掉）：直接從 DB 回傳 offset 之後的內容。
+    - 找不到：404。"""
+    try:
+        uuid.UUID(message_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="not found")
+
+    if message_id in GENERATIONS:
+        return StreamingResponse(_read_buffer(message_id, max(offset, 0)), media_type="text/plain",
+                                 headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    msg = session.get(Message, uuid.UUID(message_id))
+    if not msg or msg.role != "assistant":
+        raise HTTPException(status_code=404, detail="not found")
+    return StreamingResponse(iter([msg.content[max(offset, 0):]]), media_type="text/plain",
+                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 @app.get("/chats/roots", response_model=list[MessageWithActivity])
 def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session = Depends(get_session)):
