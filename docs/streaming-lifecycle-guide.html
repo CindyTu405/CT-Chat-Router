@@ -48,7 +48,7 @@
 <header class="hero">
   <span class="badge">後端 + 前端 · 串流生命週期 · Bug A</span>
   <h1>串流生命週期：為什麼切走再切回會卡住</h1>
-  <p>AI 回覆是「邊產生邊傳」的。這篇解釋它為什麼會因為切換對話而中斷，以及我們打算怎麼改。<strong>目前只有設計與教學，程式碼尚未修改。</strong></p>
+  <p>AI 回覆是「邊產生邊傳」的。這篇解釋它為什麼會因為切換對話而中斷，以及我們怎麼改。<strong>A1–A3 已實作並通過瀏覽器驗證。</strong></p>
 </header>
 
 <section class="card">
@@ -167,24 +167,51 @@ async def stream_generator():
 </section>
 
 <section class="card">
-  <h2>6. 需要你決定的問題</h2>
+  <h2>6. 已決定的問題</h2>
+  <table class="cmp">
+    <tr><th>問題</th><th>決定</th><th>理由</th></tr>
+    <tr><td>A. 切走時要不要繼續生成？</td><td>繼續</td><td>使用者切換對話不應該中斷正在進行的回覆。</td></tr>
+    <tr><td>B. 續讀還是輪詢？</td><td>續讀</td><td>切回時能即時接續顯示，不需要每秒發請求。</td></tr>
+    <tr><td>C. 要不要做「停止生成」按鈕？</td><td>不做</td><td>OpenRouter 送出後會跑完，中斷不會省下費用，所以停止沒有實際效益。</td></tr>
+    <tr><td>D. 後端重啟時，進行中的內容怎麼辦？</td><td>接受遺失</td><td>緩衝只在記憶體，實作簡單；重啟屬少數情況，可以接受。</td></tr>
+  </table>
+
+  <h3>為什麼 C 不做，要特別注意什麼？</h3>
+  <p>停止按鈕的常見用途是省錢與省時間，但這兩點在這個專案都不成立：</p>
   <ul class="steps">
-    <li><strong>A. 切走時要不要繼續生成？</strong>（你選了「繼續」，這裡只是確認）</li>
-    <li><strong>B. 續讀（4-2）還是輪詢（4-4）？</strong>續讀較即時、較複雜；輪詢簡單、有 1 秒延遲。</li>
-    <li><strong>C. 「停止生成」按鈕要不要做？</strong>目前沒有這個功能，修完後需要一個明確的停止方式。</li>
-    <li><strong>D. 後端重啟時正在生成的內容：</strong>接受遺失，或每 N 個 chunk 寫一次 DB？</li>
+    <li><strong>省錢不成立</strong>：OpenRouter 的計費是送出請求後就會跑完，中途斷線不會退費，也不會少算。</li>
+    <li><strong>省時間不成立</strong>：背景生成本來就會跑完，停止只是改變顯示，不會更快。</li>
   </ul>
+  <div class="callout warn"><strong>如果日後要加停止功能</strong><br>
+  必須在後端取消 task，並明確寫回「已停止」到 DB，否則切回時會看到不完整的內容而沒有說明。</div>
 </section>
 
 <section class="card">
-  <h2>7. 實作步驟（確認方案後）</h2>
-  <ol class="steps">
-    <li>後端：建立 registry 與 <code>run_generation</code> task，改寫 <code>/chat</code>（commit: <code>feat: (P3b-A1)</code>）。</li>
-    <li>後端：新增 <code>GET /messages/{id}/stream</code>（或 <code>/messages/{id}</code> 輪詢）（<code>feat: (P3b-A2)</code>）。</li>
-    <li>前端：切換時不 abort，切回時續讀或輪詢（<code>fix: (P3b-A3)</code>）。</li>
-    <li>驗證：送出 → 切走 → 等 10 秒 → 切回，內容應完整；重新整理後內容仍在。</li>
-  </ol>
-  <div class="todo">每一步一個 commit，驗證通過才進下一步。</div>
+  <h2>7. 實作紀錄</h2>
+  <table class="cmp">
+    <tr><th>步驟</th><th>commit</th><th>內容</th></tr>
+    <tr><td>A1 / A2（後端）</td><td><code>8e63c6d</code></td>
+      <td>AI 回覆改由背景 task（<code>run_generation</code>）生成，結果存在記憶體緩衝 <code>GENERATIONS</code>，完成後寫回 DB。
+          新增 <code>GET /messages/{id}/stream?offset=N</code> 續讀端點：生成中會等待直到完成，已完成則直接回傳 DB 內容。
+          錯誤時把「⚠️ 生成中斷」寫進內容，不留空字串。</td></tr>
+    <tr><td>A3（前端）</td><td><code>c1bfe96</code></td>
+      <td><code>loadChat</code>／<code>startNewChat</code> 不再 abort 串流。切回的對話若最後一則 AI 內容是空的，就呼叫 <code>resumeGeneration</code> 續讀並逐段更新畫面；切走後停止寫入畫面。</td></tr>
+  </table>
+
+  <h3>驗證方式</h3>
+  <ul class="steps">
+    <li><strong>後端（真實 HTTP）</strong>：連線讀到一半就關閉，等生成完成後，續讀 offset=0 拿到完整內容，offset=9 接續的內容拼接後與完整內容一致。</li>
+    <li><strong>前端（瀏覽器）</strong>：送出後立即切走，約 2 秒後切回，畫面仍在計數增加，最後完整顯示所有 chunk，沒有卡在 Thinking...。</li>
+    <li><strong>測試方法</strong>：LLM 換成假串流（每 0.2–0.5 秒一個 chunk），不花 API 費用；資料庫與 HTTP 流程都是真實的。</li>
+  </ul>
+
+  <h3>已知限制</h3>
+  <ul class="steps">
+    <li><strong>D 的結果</strong>：後端重啟時，正在生成的回覆會遺失，DB 只有重啟前已寫入的內容（通常是空字串）。</li>
+    <li><strong>單一 worker</strong>：緩衝在程序記憶體中，多 worker 部署時續讀可能找不到緩衝，需要改用 Redis 或 DB。</li>
+    <li><strong>舊資料</strong>：修正前留下的空 AI 訊息（例如 2026-10-22 的兩則測試資料）仍是空的，不會自動修復。</li>
+    <li><strong>真實 LLM 未測</strong>：驗證只用假串流，Gemini／OpenRouter 的實際串流行為需要另行確認。</li>
+  </ul>
 </section>
 
 </div>
