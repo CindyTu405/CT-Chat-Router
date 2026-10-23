@@ -120,12 +120,11 @@ function App() {
       // (P3b) 立刻把「目前顯示的對話」切到新的 root id，並中止正在跑的串流，
       // 讓舊對話的後續 chunk 不會再被寫進畫面。
       activeRootIdRef.current = rootId;
-      if (streamAbortRef.current) {
-        try { streamAbortRef.current.abort(); } catch { /* ignore */ }
-        streamAbortRef.current = null;
-        // 舊串流已經被腰斬，解除它的 loading，否則新對話會卡住不能送出
-        setIsLoading(false);
-      }
+      // (P3b-A3) 不再 abort 串流：後端生成在背景 task 裡跑，切走不影響它。
+      // 舊的讀取迴圈會因為 activeRootIdRef 已改變而自行停止讀取。
+      // 這裡只放掉 ref，讓新對話的送出流程不被舊串流綁住。
+      streamAbortRef.current = null;
+      setIsLoading(false);
       const res = await fetch(`${API_URL}/chats/${rootId}/history`);
       const data = await res.json();
 
@@ -148,10 +147,47 @@ function App() {
       
       // 在手機版點擊後自動收起側邊欄 (優化體驗)
       if (window.innerWidth < 768) setSidebarOpen(false);
+
+      // (P3b-A3) 最後一則是 AI 且內容還是空的 → 可能還在背景生成，改用續讀接回
+      const last = list[list.length - 1];
+      if (last && last.role === 'assistant' && !last.content && last.id) {
+        resumeGeneration(rootId, last.id);
+      }
     } catch (error) {
       console.error("載入對話失敗:", error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // (P3b-A3) 續讀一則 AI 回覆：從 /messages/{id}/stream 讀取，逐段寫進畫面。
+  // 只在「這串對話仍是目前顯示的對話」時寫入，切走就停止寫入。
+  const resumeGeneration = async (rootId, messageId) => {
+    try {
+      const res = await fetch(`${API_URL}/messages/${messageId}/stream?offset=0`);
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (true) {
+        if (activeRootIdRef.current !== rootId) {
+          try { await reader.cancel(); } catch { /* ignore */ }
+          break;
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        setMessages(prev => {
+          if (activeRootIdRef.current !== rootId) return prev;
+          const next = [...prev];
+          const lastMsg = next[next.length - 1];
+          if (!lastMsg || lastMsg.id !== messageId) return prev;
+          next[next.length - 1] = { ...lastMsg, content: text };
+          return next;
+        });
+      }
+    } catch (error) {
+      console.error("續讀失敗:", error);
     }
   };
 
@@ -184,11 +220,9 @@ function App() {
   const startNewChat = () => {
     // (P3b) 新對話沒有 root id，同時中止上一個對話還在跑的串流
     activeRootIdRef.current = null;
-    if (streamAbortRef.current) {
-      try { streamAbortRef.current.abort(); } catch { /* ignore */ }
-      streamAbortRef.current = null;
-      setIsLoading(false); // 同上：舊串流已中止，別讓新對話卡在 loading
-    }
+    // (P3b-A3) 不 abort：舊串流在背景繼續生成，切回去時用續讀接回
+    streamAbortRef.current = null;
+    setIsLoading(false);
     setMessages([]); // 清空畫面
     // setInput("");
     // 在手機版自動收起側邊欄
