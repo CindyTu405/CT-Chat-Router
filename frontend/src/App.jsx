@@ -63,6 +63,8 @@ function App() {
   const activeRootIdRef = useRef(null);
   // 目前進行中的串流，切換對話時直接中止
   const streamAbortRef = useRef(null);
+  // 送出訊息時自動捲動至底部
+  const [sendScrollToken, setSendScrollToken] = useState(0);
 
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = useCallback( async () => {
@@ -259,6 +261,7 @@ function App() {
       { role: 'user', content: userMessageContent },
       { role: 'assistant', content: '', model_used: model } // 提早顯示 Thinking
     ]);
+    setSendScrollToken(t => t + 1); // ← 新增:只有自己送出才會遞增
 
     fetchHistory();
 
@@ -671,6 +674,7 @@ function App() {
           onOpenBranch={openBranchFromHighlight}
           scrollContainerRef={scrollContainerRef}
           skipAutoScrollToken={restoreToken}
+          forceScrollToken={sendScrollToken}
         />
 
         <ChatInput

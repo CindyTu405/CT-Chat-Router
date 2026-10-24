@@ -97,6 +97,7 @@ function MessageList({
   // (P3b-F1b) 捲動容器 ref 由 App 持有，載入對話時才能在父層還原閱讀位置
   scrollContainerRef,
   skipAutoScrollToken = null,
+  forceScrollToken=0,
 }) {
   const messagesEndRef = useRef(null);
   const internalContainerRef = useRef(null);
@@ -259,6 +260,19 @@ function MessageList({
     scrollToBottomNow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, skipAutoScrollToken, scrollContainerRef]);
+
+  // 使用者自己送出訊息:不管目前在哪裡,都強制捲到底,
+  // 並把「貼底」狀態設為 true,之後串流會繼續跟著捲
+  const lastForceTokenRef = useRef(forceScrollToken);
+
+  useEffect(() => {
+    if (forceScrollToken === lastForceTokenRef.current) return; // 擋掉初次掛載
+    lastForceTokenRef.current = forceScrollToken;
+
+    isAtBottomRef.current = true; // 先標記貼底,讓原本的 effect 之後也會跟著串流捲
+    scrollToBottomNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceScrollToken]);
 
   return (
     <div
