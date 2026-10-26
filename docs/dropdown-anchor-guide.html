@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>下拉選單與錨點的實作 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #5a6474;
+    --accent: #2563eb; --accent-soft: #e8f0fe;
+    --code-bg: #1e293b; --code-ink: #e2e8f0;
+    --tip: #0f766e; --tip-bg: #ecfdf5;
+    --warn: #b45309; --warn-bg: #fffbeb; --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero { background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff; border-radius: 16px; padding: 36px 32px; margin-bottom: 28px; }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge { display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px; }
+  section.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 26px 28px; margin-bottom: 22px; }
+  section.card h2 { margin: 0 0 12px; font-size: 22px; color: var(--accent); }
+  section.card h3 { margin: 22px 0 8px; font-size: 17px; }
+  code { background: var(--accent-soft); color: #1e40af; padding: 1px 6px; border-radius: 6px; font-size: 14px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); color: var(--code-ink); padding: 16px 18px; border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .callout { border-radius: 10px; padding: 14px 18px; margin: 16px 0; border-left: 4px solid; }
+  .tip { background: var(--tip-bg); border-color: var(--tip); color: #134e4a; }
+  .warn { background: var(--warn-bg); border-color: var(--warn); color: #78350f; }
+  ul.steps { padding-left: 20px; } ul.steps li { margin: 6px 0; }
+  table.cmp { width: 100%; border-collapse: collapse; font-size: 15px; }
+  table.cmp th, table.cmp td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  table.cmp th { background: var(--accent-soft); }
+
+  /* 示範：錨點與面板的關係（純 CSS，可直接在瀏覽器看） */
+  .stage { position: relative; height: 150px; background: #e8f1f5; border-radius: 12px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 18px; }
+  .anchor-btn { position: relative; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 6px 16px; font-size: 14px; }
+  .panel { position: absolute; left: 50%; transform: translateX(-50%); width: 170px; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.12); padding: 4px 0; font-size: 13px; text-align: left; }
+  .panel div { padding: 4px 12px; }
+  .panel.up { bottom: 100%; margin-bottom: 6px; }
+  .panel.down { top: 100%; margin-top: 6px; }
+  .demo-label { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .demo-col { margin: 10px 0 16px; }
+  .dot { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; background: #ef4444; border-radius: 50%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="badge">前端 · 下拉選單 · 定位</span>
+  <h1>下拉選單與錨點：面板是怎麼「貼」在按鈕上的</h1>
+  <p>模型選單的面板要出現在按鈕的正上方或正下方，而且不能超出螢幕。這篇解釋它用到的 CSS 定位、翻轉判斷，以及為什麼要用置中錨點。</p>
+</header>
+
+<section class="card">
+  <h2>0. 結論先講</h2>
+  <ul class="steps">
+    <li>面板是按鈕的<strong>子元素</strong>，用 <code>position: absolute</code> 定位，相對於按鈕所在的容器（<code>position: relative</code>）。</li>
+    <li>水平位置由「錨點」決定：現在是 <strong>置中</strong>（<code>left-1/2 -translate-x-1/2</code>）。</li>
+    <li>垂直位置由 <code>top-full</code>（在下方）或 <code>bottom-full</code>（在上方）決定。上下方向由 JavaScript 量測空間後決定，這叫「翻轉」。</li>
+    <li>點擊面板外要關閉，是監聽整個文件的 <code>mousedown</code> 事件，判斷點擊目標是否在容器內。</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>1. 基礎：position 與參考容器</h2>
+  <p><code>position: absolute</code> 的元素不佔版面，位置由「最近的、本身有定位（relative／absolute／fixed）的祖先」決定。這個祖先就叫<strong>參考容器</strong>。</p>
+  <pre><code>&lt;div class="relative"&gt;          &lt;!-- 參考容器 --&gt;
+  &lt;button&gt;選模型&lt;/button&gt;
+  &lt;div class="absolute top-full"&gt;   &lt;!-- 面板：位於參考容器的底部之下 --&gt;
+    ...
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+  <div class="callout tip"><strong>為什麼容器要是按鈕的父層？</strong><br>
+  如果參考容器是整個頁面，面板會飄到頁面的某個角落。把參考容器縮到剛好包住按鈕，面板的 <code>top-full</code> 就會緊貼按鈕底邊，<code>left-1/2</code> 就是按鈕的中間。</div>
+</section>
+
+<section class="card">
+  <h2>2. 錨點：水平方向的對齊</h2>
+  <p>「錨點」是面板與按鈕對齊的那一點。同一個面板可以錨在不同位置：</p>
+  <table class="cmp">
+    <tr><th>寫法</th><th>面板的哪一邊對齊按鈕</th><th>何時用</th></tr>
+    <tr><td><code>left-0</code></td><td>面板左緣 = 按鈕左緣</td><td>按鈕在畫面最左側</td></tr>
+    <tr><td><code>right-0</code></td><td>面板右緣 = 按鈕右緣</td><td>按鈕在畫面最右側（舊版用這個）</td></tr>
+    <tr><td><code>left-1/2 -translate-x-1/2</code></td><td>面板中心 = 按鈕中心</td><td>按鈕在中間，要對稱展開（現在用這個）</td></tr>
+  </table>
+
+  <h3>為什麼 <code>left-1/2</code> 還要加 <code>-translate-x-1/2</code>？</h3>
+  <p><code>left-1/2</code> 只會把面板的<strong>左緣</strong>放在參考容器寬度的 50%，面板會偏右。要讓面板的<strong>中心</strong>落在 50%，要再往左移動自己寬度的一半，這就是 <code>-translate-x-1/2</code>（<code>translateX(-50%)</code>）。</p>
+
+  <div class="demo-col">
+    <div class="demo-label">示範：置中錨點（面板中心對齊按鈕中心）</div>
+    <div class="stage">
+      <div class="anchor-btn">模型 ▾
+        <div class="panel up"><div>Gemini 2.5</div><div>GPT-4o</div><div>免費模型</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout warn"><strong>注意：寬度大於容器時</strong><br>
+  面板是置中的，所以寬度超過按鈕的一半，左右都會超出按鈕範圍。在手機（375px）寬時，要確認面板左右都還在螢幕內。我們用 <code>max-w-[calc(100vw-2rem)]</code> 限制面板最寬不超過螢幕寬度減 2rem，並在 375px 量測過：面板左 43px、右 299px，都在螢幕內。</div>
+</section>
+
+<section class="card">
+  <h2>3. 垂直方向：翻轉（flip）</h2>
+  <p>按鈕在輸入框下方，靠近螢幕底部，下方空間不夠。這時面板要改到按鈕上方展開。這個判斷要用 JavaScript 做，CSS 本身無法知道「剩多少空間」。</p>
+
+<pre><code>// 面板展開後量測
+const rect = buttonRef.current.getBoundingClientRect();
+const spaceBelow = window.innerHeight - rect.bottom;   // 按鈕下方剩餘高度
+const spaceAbove = rect.top;                            // 按鈕上方剩餘高度
+const needed = panelRef.current.offsetHeight + 8;       // 面板高度 + 8px 間隙
+
+setDropUp(spaceBelow &lt; needed &amp;&amp; spaceAbove &gt; spaceBelow);</code></pre>
+
+  <h3>為什麼用 useLayoutEffect 而不是 useEffect？</h3>
+  <p>兩者都在面板展開後執行，差別在時機：</p>
+  <ul class="steps">
+    <li><strong>useEffect</strong>：瀏覽器可能已經先畫出一幀，使用者會看到面板先出現在錯的位置，再跳到正確位置（閃爍）。</li>
+    <li><strong>useLayoutEffect</strong>：在瀏覽器繪製之前同步執行，改變 <code>dropUp</code> 後會在同一幀內完成重新渲染，使用者看不到錯誤位置。</li>
+  </ul>
+  <div class="callout tip"><strong>判斷原則</strong><br>
+  需要「先量測、再決定版面」時用 <code>useLayoutEffect</code>；只是跟外部系統同步（例如註冊事件）用 <code>useEffect</code>。</div>
+
+  <h3>class 的切換</h3>
+<pre><code>className={`absolute left-1/2 -translate-x-1/2 ... ${
+  dropUp ? 'bottom-full mb-1' : 'top-full mt-1'
+}`}</code></pre>
+  <p><code>bottom-full</code> 是面板底邊對齊按鈕頂邊（向上），<code>top-full</code> 是面板頂邊對齊按鈕底邊（向下）；<code>mb-1</code>／<code>mt-1</code> 留 4px 間隙。</p>
+</section>
+
+<section class="card">
+  <h2>4. 關閉與點擊判斷</h2>
+  <p>面板是開著的 UI，點擊面板外應該關閉。做法是在 <code>document</code> 上監聽 <code>mousedown</code>，判斷點擊的目標是不是在容器內：</p>
+<pre><code>const handlePointerDown = (e) =&gt; {
+  if (wrapperRef.current &amp;&amp; !wrapperRef.current.contains(e.target)) setOpen(false);
+};
+document.addEventListener('mousedown', handlePointerDown);
+document.addEventListener('touchstart', handlePointerDown);</code></pre>
+  <ul class="steps">
+    <li><strong>為什麼是 mousedown 而不是 click？</strong>mousedown 在按下時就觸發，比 click（放開才觸發）快，面板會先關閉，不會與其他操作衝突。</li>
+    <li><strong>為什麼要 removeEventListener？</strong>effect 的清理函式會在面板關閉時移除監聽，避免記憶體洩漏，也避免關閉後仍然響應。</li>
+    <li><strong>為什麼 wrapperRef 包住的是按鈕和面板？</strong>面板是按鈕的子元素，所以點面板本身不算「外面」，不會誤關閉。</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>5. 驗證方式（本次）</h2>
+  <table class="cmp">
+    <tr><th>情境</th><th>按鈕中心</th><th>面板中心</th><th>面板位置</th><th>結論</th></tr>
+    <tr><td>桌面 1280px，按鈕在下方</td><td>432</td><td>432</td><td>向上展開（bottom 529 &lt; 按鈕 top 533）</td><td>對齊</td></tr>
+    <tr><td>手機 375px</td><td>171</td><td>171</td><td>左 43、右 299</td><td>對齊且在螢幕內</td></tr>
+  </table>
+  <p class="callout tip" style="margin-top:12px">量測方式：在瀏覽器取 <code>getBoundingClientRect()</code>，比較按鈕與面板的水平中心，並確認面板左右邊界在視窗內。</p>
+</section>
+
+<section class="card">
+  <h2>6. 相關檔案</h2>
+  <ul class="steps">
+    <li><code>frontend/src/components/ModelSelector.jsx</code>：錨點、翻轉、點擊外關閉</li>
+    <li><code>frontend/src/components/ChatInput.jsx</code>：模型選單所在的輸入列</li>
+  </ul>
+</section>
+
+</div>
+</body>
+</html>
