@@ -206,8 +206,8 @@ function ModelSelector({
                 aria-label="選擇模型"
                 aria-activedescendant={activeIndex >= 0 ? `model-option-${activeIndex}` : undefined}
                 onKeyDown={handlePanelKeyDown}
-                /* 錨點：按鈕正中央（left-1/2 + -translate-x-1/2）；上下方向由 top-full / bottom-full 決定 */
-                className={`absolute left-1/2 -translate-x-1/2 z-50 w-64 md:w-72 max-w-[calc(100vw-2rem)] max-h-[400px] overflow-y-auto overscroll-contain bg-white border border-gray-200 rounded-lg shadow-lg py-1 outline-none ${
+                /* 錨點：手機（預設）左緣對齊按鈕左緣；md 以上置中（left-1/2 + -translate-x-1/2）；上下由 top-full / bottom-full 決定 */
+                className={`absolute left-0 md:left-1/2 md:-translate-x-1/2 z-50 w-64 md:w-72 max-w-[calc(100vw-2rem)] max-h-[400px] overflow-y-auto overscroll-contain bg-white border border-gray-200 rounded-lg shadow-lg py-1 outline-none ${
                   dropUp ? 'bottom-full mb-1' : 'top-full mt-1'
                 }`}
               >
