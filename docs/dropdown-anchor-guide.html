@@ -60,7 +60,7 @@
   <h2>0. 結論先講</h2>
   <ul class="steps">
     <li>面板是按鈕的<strong>子元素</strong>，用 <code>position: absolute</code> 定位，相對於按鈕所在的容器（<code>position: relative</code>）。</li>
-    <li>水平位置由「錨點」決定：現在是 <strong>置中</strong>（<code>left-1/2 -translate-x-1/2</code>）。</li>
+    <li>水平位置由「錨點」決定：桌面是 <strong>置中</strong>（<code>md:left-1/2 md:-translate-x-1/2</code>），手機是 <strong>左緣對齊</strong>（<code>left-0</code>）。</li>
     <li>垂直位置由 <code>top-full</code>（在下方）或 <code>bottom-full</code>（在上方）決定。上下方向由 JavaScript 量測空間後決定，這叫「翻轉」。</li>
     <li>點擊面板外要關閉，是監聽整個文件的 <code>mousedown</code> 事件，判斷點擊目標是否在容器內。</li>
   </ul>
@@ -86,8 +86,13 @@
     <tr><th>寫法</th><th>面板的哪一邊對齊按鈕</th><th>何時用</th></tr>
     <tr><td><code>left-0</code></td><td>面板左緣 = 按鈕左緣</td><td>按鈕在畫面最左側</td></tr>
     <tr><td><code>right-0</code></td><td>面板右緣 = 按鈕右緣</td><td>按鈕在畫面最右側（舊版用這個）</td></tr>
-    <tr><td><code>left-1/2 -translate-x-1/2</code></td><td>面板中心 = 按鈕中心</td><td>按鈕在中間，要對稱展開（現在用這個）</td></tr>
+    <tr><td><code>left-1/2 -translate-x-1/2</code></td><td>面板中心 = 按鈕中心</td><td>按鈕在中間，要對稱展開（桌面用這個）</td></tr>
   </table>
+
+  <h3>響應式錨點：<code>md:</code> 前綴</h3>
+  <p>手機（&lt; 768px）與桌面用不同錨點，靠 Tailwind 的斷點前綴切換：</p>
+<pre><code>className="absolute left-0 md:left-1/2 md:-translate-x-1/2 ..."</code></pre>
+  <p>沒有前綴的 <code>left-0</code> 是所有寬度都生效的預設值；<code>md:</code> 開頭的規則只在視窗寬度 ≥ 768px 時才套用。所以手機用左緣，桌面回到置中。</p>
 
   <h3>為什麼 <code>left-1/2</code> 還要加 <code>-translate-x-1/2</code>？</h3>
   <p><code>left-1/2</code> 只會把面板的<strong>左緣</strong>放在參考容器寬度的 50%，面板會偏右。要讓面板的<strong>中心</strong>落在 50%，要再往左移動自己寬度的一半，這就是 <code>-translate-x-1/2</code>（<code>translateX(-50%)</code>）。</p>
@@ -102,7 +107,7 @@
   </div>
 
   <div class="callout warn"><strong>注意：寬度大於容器時</strong><br>
-  面板是置中的，所以寬度超過按鈕的一半，左右都會超出按鈕範圍。在手機（375px）寬時，要確認面板左右都還在螢幕內。我們用 <code>max-w-[calc(100vw-2rem)]</code> 限制面板最寬不超過螢幕寬度減 2rem，並在 375px 量測過：面板左 43px、右 299px，都在螢幕內。</div>
+  桌面的面板是置中的，寬度超過按鈕一半時左右都會超出按鈕範圍。手機寬度有限，所以改成左緣對齊：面板往右展開，右側可能超出螢幕。我們用 <code>max-w-[calc(100vw-2rem)]</code> 限制面板最寬不超過螢幕寬度減 2rem，並在 375px 量測過：面板左 91px、右 347px，在螢幕內。</div>
 </section>
 
 <section class="card">
@@ -152,8 +157,8 @@ document.addEventListener('touchstart', handlePointerDown);</code></pre>
   <h2>5. 驗證方式（本次）</h2>
   <table class="cmp">
     <tr><th>情境</th><th>按鈕中心</th><th>面板中心</th><th>面板位置</th><th>結論</th></tr>
-    <tr><td>桌面 1280px，按鈕在下方</td><td>432</td><td>432</td><td>向上展開（bottom 529 &lt; 按鈕 top 533）</td><td>對齊</td></tr>
-    <tr><td>手機 375px</td><td>171</td><td>171</td><td>左 43、右 299</td><td>對齊且在螢幕內</td></tr>
+    <tr><td>桌面 1280px，按鈕在下方（置中錨點）</td><td>432</td><td>432</td><td>向上展開（bottom 529 &lt; 按鈕 top 533）</td><td>對齊</td></tr>
+    <tr><td>手機 375px（左下角錨點）</td><td>按鈕左 91</td><td>面板左 91</td><td>左 91、右 347，向上展開</td><td>左緣對齊、在螢幕內</td></tr>
   </table>
   <p class="callout tip" style="margin-top:12px">量測方式：在瀏覽器取 <code>getBoundingClientRect()</code>，比較按鈕與面板的水平中心，並確認面板左右邊界在視窗內。</p>
 </section>
