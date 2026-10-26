@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>響應式抽屜與可拖曳寬度 教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #5a6474;
+    --accent: #2563eb; --accent-soft: #e8f0fe;
+    --code-bg: #1e293b; --code-ink: #e2e8f0;
+    --tip: #0f766e; --tip-bg: #ecfdf5;
+    --warn: #b45309; --warn-bg: #fffbeb; --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero { background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff; border-radius: 16px; padding: 36px 32px; margin-bottom: 28px; }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge { display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px; }
+  section.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 26px 28px; margin-bottom: 22px; }
+  section.card h2 { margin: 0 0 12px; font-size: 22px; color: var(--accent); }
+  section.card h3 { margin: 22px 0 8px; font-size: 17px; }
+  code { background: var(--accent-soft); color: #1e40af; padding: 1px 6px; border-radius: 6px; font-size: 14px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); color: var(--code-ink); padding: 16px 18px; border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .callout { border-radius: 10px; padding: 14px 18px; margin: 16px 0; border-left: 4px solid; }
+  .tip { background: var(--tip-bg); border-color: var(--tip); color: #134e4a; }
+  .warn { background: var(--warn-bg); border-color: var(--warn); color: #78350f; }
+  ul.steps { padding-left: 20px; } ul.steps li { margin: 6px 0; }
+  table.cmp { width: 100%; border-collapse: collapse; font-size: 15px; }
+  table.cmp th, table.cmp td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  table.cmp th { background: var(--accent-soft); }
+
+  /* 示範：拖曳把手（純 CSS） */
+  .demo-label { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .split { display: flex; height: 110px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); margin: 10px 0 16px; }
+  .split .side { background: #e8f1f5; width: 25%; position: relative; display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--muted); }
+  .split .main { flex: 1; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--muted); }
+  .split .handle { position: absolute; top: 0; right: 0; height: 100%; width: 6px; margin-right: -3px; background: rgba(81,168,221,.4); cursor: col-resize; }
+  .phone { width: 180px; height: 230px; border: 2px solid #94a3b8; border-radius: 16px; position: relative; overflow: hidden; background: #fff; margin: 10px 0 16px; }
+  .phone .drawer { position: absolute; inset: 0; background: #e8f1f5; }
+  .phone .x { position: absolute; top: 8px; left: 8px; font-size: 14px; color: #64748b; }
+  .phone .new { position: absolute; top: 34px; left: 12px; right: 12px; background: #51a8dd; color: #fff; border-radius: 8px; padding: 6px; font-size: 12px; text-align: center; }
+  .bar { height: 10px; background: #cbd5e1; border-radius: 4px; margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="badge">前端 · 響應式版面 · 拖曳寬度</span>
+  <h1>響應式抽屜與可拖曳寬度</h1>
+  <p>同一個側欄，手機是全屏抽屜，桌面是可以拖寬的並排欄位。這篇說明怎麼用同一套 class 達成，以及這次踩到的三個坑：class 衝突、inline style 與 class 的優先序、把手的定位父層。</p>
+</header>
+
+<section class="card">
+  <h2>0. 目標行為</h2>
+  <table class="cmp">
+    <tr><th></th><th>手機（&lt; 768px）</th><th>桌面（≥ 768px）</th></tr>
+    <tr><td>左側欄</td><td>全屏抽屜，左上 X 關閉</td><td>並排，可拖寬（12%–30%）</td></tr>
+    <tr><td>右側分支面板</td><td>全屏，右上 X 關閉</td><td>並排，可拖寬（20%–50%）</td></tr>
+    <tr><td>拖曳把手</td><td>隱藏</td><td>貼在欄位邊緣</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>1. 響應式前綴：<code>md:</code> 是什麼</h2>
+  <p>Tailwind 的斷點前綴讓同一個 class 只在某個寬度以上生效：</p>
+<pre><code>class="fixed inset-0 w-full md:relative md:w-auto"
+//    ↑ 所有寬度都生效          ↑ 只在 ≥ 768px 生效</code></pre>
+  <p>寫法的規則是<strong>手機優先</strong>：沒有前綴的是預設（手機），<code>md:</code> 覆蓋桌面。所以手機的全屏覆蓋寫成無前綴，桌面再用 <code>md:</code> 改回並排。</p>
+
+  <div class="demo-label">示範：手機抽屜（fixed 覆蓋全屏）</div>
+  <div class="phone">
+    <div class="drawer">
+      <span class="x">✕</span>
+      <div class="new">New Chat</div>
+      <div style="padding: 60px 12px 0"><div class="bar"></div><div class="bar"></div><div class="bar"></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>2. 定位（position）：fixed、relative、absolute 各自的角色</h2>
+  <table class="cmp">
+    <tr><th>值</th><th>位置相對於</th><th>是否佔版面</th><th>這裡的用途</th></tr>
+    <tr><td><code>static</code></td><td>正常文件流</td><td>是</td><td>預設（桌面並排的欄位）</td></tr>
+    <tr><td><code>relative</code></td><td>自己原本的位置</td><td>是</td><td>成為<strong>子元素</strong>的定位父層</td></tr>
+    <tr><td><code>absolute</code></td><td>最近的 relative／absolute／fixed 祖先</td><td>否</td><td>拖曳把手、手機的 X 按鈕</td></tr>
+    <tr><td><code>fixed</code></td><td>視窗（viewport）</td><td>否</td><td>手機抽屜，蓋住整個畫面</td></tr>
+  </table>
+
+  <div class="callout tip"><strong>關鍵規則</strong><br>
+  子元素的 <code>absolute</code> 要貼在欄位邊緣，欄位本身必須是 <code>relative</code>（或 absolute／fixed）。如果欄位是 <code>static</code>，子元素會跑到更外層的定位祖先，看起來就像「跑掉了」。</div>
+</section>
+
+<section class="card">
+  <h2>3. 踩坑一：同一個元素上的 class 衝突</h2>
+  <p>這次的問題是側欄 class 字串裡同時出現：</p>
+<pre><code>className="... md:static ... md:relative ..."</code></pre>
+  <p>兩個都是 <code>md:</code> 斷點，CSS 裡後定義的規則勝出。Tailwind 產生的 CSS 順序是 <code>md:relative</code> 先、<code>md:static</code> 後，所以結果是 <code>static</code>。拖曳把手因此失去定位父層，跑到頁面右上角。</p>
+
+  <div class="callout warn"><strong>判斷方式</strong><br>
+  同一個屬性（position、width、display）只能有一個生效的值。class 字串裡不要同時放兩個互斥的值。要確認實際生效的值，用瀏覽器的 <code>getComputedStyle(el).position</code> 查，不要只看 class 字串。</div>
+
+  <h3>修正</h3>
+<pre><code>// 修正前：md:static 覆蓋 md:relative
+className="fixed inset-0 z-40 w-full md:static md:z-auto ... md:relative"
+
+// 修正後：只保留 md:relative
+className="fixed inset-0 z-40 w-full md:z-auto ... md:relative"</code></pre>
+</section>
+
+<section class="card">
+  <h2>4. 踩坑二：flex 沒開，flex-col 與 mt-auto 全部失效</h2>
+  <p>側欄的底部使用者區塊要貼齊底部，寫了 <code>mt-auto</code>，但它沒有貼底。原因是開啟狀態的 class 少了 <code>flex</code>：</p>
+<pre><code>// 錯：只有 flex-col，沒有 flex，所以 display 是 block
+className="fixed inset-0 ... flex-col"
+
+// 對：flex 讓 flex-col 生效，mt-auto 才會把底部推到底
+className="flex fixed inset-0 ... flex-col"</code></pre>
+  <div class="callout tip"><strong>原則</strong><br>
+  <code>flex-col</code>、<code>flex-1</code>、<code>mt-auto</code> 都依賴父層是 flex 容器。修改 class 時先確認 <code>display</code> 是 <code>flex</code>。</div>
+  <p>這個狀態也說明了為什麼要區分「開啟」與「收起」兩組 class：收起時用 <code>hidden md:flex md:w-0</code>，開啟時用 <code>flex fixed ...</code>，兩組都要明確寫出 display。</p>
+</section>
+
+<section class="card">
+  <h2>5. 踩坑三：inline style 與 class 的優先序</h2>
+  <p>桌面寬度是百分比，用 inline style 寫：</p>
+<pre><code>style={{ width: `${sidebarPct}%` }}</code></pre>
+  <p>inline style 的優先序高於 class（除非 class 用 <code>!important</code>）。所以手機要的 <code>w-full</code>，會被桌面的 inline 百分比蓋掉。</p>
+
+  <div class="callout warn"><strong>解法：讓 inline style 只在桌面生效</strong><br>
+  用 JavaScript 的 <code>matchMedia</code> 判斷目前是否為桌面，只在桌面才設 inline 寬度：</div>
+<pre><code>const [isDesktop, setIsDesktop] = useState(() =&gt;
+  window.matchMedia('(min-width: 768px)').matches
+);
+useEffect(() =&gt; {
+  const mq = window.matchMedia('(min-width: 768px)');
+  const onChange = (e) =&gt; setIsDesktop(e.matches);
+  mq.addEventListener('change', onChange);
+  return () =&gt; mq.removeEventListener('change', onChange);
+}, []);
+
+style={isDesktop ? { width: `${sidebarPct}%` } : undefined}</code></pre>
+  <p>為什麼不用 CSS 解決？因為 inline style 無法被 class 的斷點覆蓋。只要寬度是由 JavaScript 算出來的，就得由 JavaScript 決定什麼時候套用。</p>
+</section>
+
+<section class="card">
+  <h2>6. 拖曳把手：如何實作</h2>
+  <div class="demo-label">示範：側欄右緣的把手</div>
+  <div class="split">
+    <div class="side">側欄 25%<div class="handle"></div></div>
+    <div class="main">主畫面</div>
+  </div>
+
+  <h3>(1) 把手貼在邊緣</h3>
+  <pre><code>&lt;div class="absolute top-0 right-0 h-full w-1.5 -mr-[3px] cursor-col-resize"&gt;</code></pre>
+  <ul class="steps">
+    <li><code>absolute</code> + <code>top-0 right-0 h-full</code>：貼在父層右上到右下。</li>
+    <li><code>-mr-[3px]</code>：把把手往右推半個寬度，讓它跨在邊界線上，不會蓋住內容。</li>
+    <li>父層（側欄）必須是 <code>relative</code>，見第 2 節。</li>
+  </ul>
+
+  <h3>(2) pointer 事件：按下、移動、放開</h3>
+<pre><code>// 按下：只在把手上觸發，記錄正在拖曳
+onPointerDown={(e) =&gt; { e.preventDefault(); setIsResizing(true); }}
+
+// 移動與放開：掛在 window 上，拖到欄位外也能持續追蹤
+useEffect(() =&gt; {
+  if (!isResizing) return;
+  const onMove = (e) =&gt; {
+    const percent = (e.clientX / window.innerWidth) * 100;   // 側欄：游標位置 ÷ 視窗寬
+    setSidebarPct(clamp(percent, 12, 30));
+  };
+  const onUp = () =&gt; setIsResizing(false);
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+  return () =&gt; { /* 移除三個監聽 */ };
+}, [isResizing]);</code></pre>
+
+  <h3>(3) 為什麼監聽掛在 window 上？</h3>
+  <p>把手只有 6px 寬，使用者拖得很快時游標很容易離開把手。如果 <code>pointermove</code> 掛在把手上，游標一離開就會斷掉。掛在 <code>window</code> 上，只要按鈕沒放開，移動都會被接收。</p>
+
+  <h3>(4) 寬度換算成百分比</h3>
+  <p>寬度存成視窗寬度的百分比（12–30%），而不是像素。視窗縮放時比例不變，不會因為固定像素而超出畫面。側欄與分支面板的換算方向不同：</p>
+  <table class="cmp">
+    <tr><th>欄位</th><th>位置</th><th>寬度公式</th></tr>
+    <tr><td>左側欄</td><td>貼左邊</td><td><code>游標 X ÷ 視窗寬 × 100</code></td></tr>
+    <tr><td>右側分支面板</td><td>貼右邊</td><td><code>(視窗寬 − 游標 X) ÷ 視窗寬 × 100</code></td></tr>
+  </table>
+
+  <h3>(5) 拖曳時的副作用</h3>
+  <ul class="steps">
+    <li><strong>鎖住文字選取</strong>：拖曳時設 <code>document.body.style.userSelect = 'none'</code>，避免拖過的文字被反白。</li>
+    <li><strong>游標樣式</strong>：設 <code>cursor = 'col-resize'</code>，整頁都顯示水平拖曳游標。</li>
+    <li><strong>關閉過渡動畫</strong>：拖曳時不套用 <code>transition-[width]</code>，否則寬度會有延遲感。</li>
+    <li><strong>清理</strong>：effect 的清理函式還原 userSelect 與 cursor，並移除三個監聽。</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>7. 持久化</h2>
+  <p>寬度寫入 <code>localStorage</code>，重新整理後保留：</p>
+<pre><code>const [sidebarPct, setSidebarPct] = useState(() =&gt; {
+  const num = parseFloat(localStorage.getItem(KEY));
+  return Number.isFinite(num) ? clamp(num, 12, 30) : 20;   // 讀取時也要夾住範圍
+});
+useEffect(() =&gt; { localStorage.setItem(KEY, String(sidebarPct)); }, [sidebarPct]);</code></pre>
+  <div class="callout tip"><strong>為什麼讀取時也要 clamp？</strong><br>
+  localStorage 的值可能是舊版本寫入的，或被手動修改。讀取時夾住範圍，才不會讓欄位寬度跑出合理區間。</div>
+</section>
+
+<section class="card">
+  <h2>8. 驗證方法</h2>
+  <table class="cmp">
+    <tr><th>檢查項目</th><th>怎麼查</th><th>預期（本次實測）</th></tr>
+    <tr><td>手機抽屜是否全屏</td><td>量 <code>getBoundingClientRect()</code> 與 <code>position</code>（375px）</td><td><code>fixed</code>，375×740</td></tr>
+    <tr><td>桌面是否並排</td><td>量寬度與 <code>position</code>（1280px）</td><td>側欄 <code>relative</code> 256px；分支面板 <code>relative</code> 320px</td></tr>
+    <tr><td>把手位置</td><td>量把手中心 x</td><td>貼在欄位邊緣（側欄 x=255；面板 x=964）</td></tr>
+    <tr><td>拖曳有效</td><td>派發 pointerdown → pointermove → pointerup</td><td>面板向左拖 160px：320 → 476</td></tr>
+    <tr><td>寬度持久化</td><td>查 localStorage</td><td>面板寫入 <code>ct-chat:branchPanelWidthPercent</code></td></tr>
+  </table>
+  <div class="callout warn"><strong>注意：CDP 模擬滑鼠不一定觸發 pointer 事件</strong><br>
+  我們一開始用 <code>Input.dispatchMouseEvent</code> 模擬拖曳，寬度沒有變化。改用 JavaScript 派發 <code>PointerEvent</code> 才驗證成功。真實滑鼠操作仍需要你在桌面確認。</div>
+</section>
+
+<section class="card">
+  <h2>9. 相關檔案與 commit</h2>
+  <ul class="steps">
+    <li><code>frontend/src/components/Sidebar.jsx</code>：側欄抽屜、寬度、把手、底部區塊</li>
+    <li><code>frontend/src/components/BranchPanel.jsx</code>：分支面板抽屜、寬度、把手</li>
+    <li><code>frontend/src/App.jsx</code>：傳入 <code>onCloseSidebar</code></li>
+    <li>commit <code>e815b51</code> feat: (P3b-F5) mobile full-screen drawers; keep desktop resizable sidebar and branch panel</li>
+  </ul>
+</section>
+
+</div>
+</body>
+</html>
