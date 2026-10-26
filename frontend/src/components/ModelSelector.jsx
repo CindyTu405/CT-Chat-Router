@@ -190,7 +190,7 @@ function ModelSelector({
                   setOpen(true);
                 }
               }}
-              className="bg-white border border-gray-300 text-gray-700 text-xs md:text-sm rounded-lg w-40 md:w-56 pl-8 pr-2 py-2 cursor-pointer hover:bg-gray-50 transition shadow-sm flex items-center gap-1"
+              className="bg-transparent text-gray-600 text-xs md:text-sm rounded-lg w-40 md:w-56 pl-8 pr-2 py-1 cursor-pointer hover:bg-white/60 transition flex items-center gap-1"
             >
               <span className="truncate flex-1 text-left">{currentLabel}</span>
               <ChevronDown
@@ -206,8 +206,8 @@ function ModelSelector({
                 aria-label="選擇模型"
                 aria-activedescendant={activeIndex >= 0 ? `model-option-${activeIndex}` : undefined}
                 onKeyDown={handlePanelKeyDown}
-                /* 錨點：right-0 + top-full（按鈕右下角）；翻轉時 right-0 + bottom-full（按鈕右上角） */
-                className={`absolute right-0 z-50 w-64 md:w-72 max-w-[calc(100vw-2rem)] max-h-[400px] overflow-y-auto overscroll-contain bg-white border border-gray-200 rounded-lg shadow-lg py-1 outline-none ${
+                /* 錨點：按鈕正中央（left-1/2 + -translate-x-1/2）；上下方向由 top-full / bottom-full 決定 */
+                className={`absolute left-1/2 -translate-x-1/2 z-50 w-64 md:w-72 max-w-[calc(100vw-2rem)] max-h-[400px] overflow-y-auto overscroll-contain bg-white border border-gray-200 rounded-lg shadow-lg py-1 outline-none ${
                   dropUp ? 'bottom-full mb-1' : 'top-full mt-1'
                 }`}
               >
@@ -254,7 +254,7 @@ function ModelSelector({
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder="例如: qwen/qwen-2.5-72b..."
-              className="bg-white border border-[#7DB9DE] text-gray-800 text-xs md:text-sm rounded-lg focus:ring-2 focus:ring-[#7DB9DE] block w-40 md:w-56 pl-8 p-2 transition outline-none shadow-sm"
+              className="bg-transparent text-gray-700 text-xs md:text-sm rounded-lg focus:ring-2 focus:ring-[#7DB9DE] block w-40 md:w-56 pl-8 py-1 transition outline-none"
               autoFocus // 切換過來時自動聚焦
             />
             <button

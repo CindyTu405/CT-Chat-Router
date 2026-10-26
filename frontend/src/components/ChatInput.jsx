@@ -51,7 +51,7 @@ function ChatInput({
           <Send className="w-5 h-5 text-white" />
         </button>
       </div>
-      <div className="max-w-4xl mx-auto mt-3 flex items-center justify-between gap-2">
+      <div className="max-w-4xl mx-auto mt-2 flex items-center justify-between gap-2">
         <ModelSelector
           model={model}
           setModel={setModel}
