@@ -194,6 +194,7 @@ function Sidebar({
   onDeleteChat,
   onStartRenaming,
   onSubmitRename,
+  onCloseSidebar,
 }) {
   // P5a：時間軸分組跟著當前排序走（updated → last_activity，created → created_at）
   const timeGroups = useMemo(
@@ -219,6 +220,14 @@ function Sidebar({
     return SIDEBAR_PCT_DEFAULT;
   });
   const [isResizing, setIsResizing] = useState(false);
+  // P3b-F5：手機（< 768px）不套用 inline 百分比寬度，改由 fixed 滿版 class 決定
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 768px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = (e) => setIsDesktop(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // 拖曳中：pointermove / pointerup 掛在 window 上，放開或卸載時清掉監聽與選取封鎖
   useEffect(() => {
@@ -271,10 +280,22 @@ function Sidebar({
     // P5b-fix（B2）：加上 overflow-hidden，收起（w-0）時內容不再溢出到主畫面、不攔截觸控
     // P3b-F2：寬度改用 inline style 的百分比（預設 20%，可拖曳 12%~30%），展開時才套用；
     // transition 只在收合/展開時生效，拖曳中關掉避免延遲感。
+    // P3b-F5：手機（< 768px）改為滿版 drawer（fixed 覆蓋全螢幕）；收起時 hidden。
+    // 桌面（md 以上）維持原本的推擠式側欄與百分比寬度。
     <aside
-      style={sidebarOpen ? { width: `${sidebarPct}%`, minWidth: 0 } : undefined}
-      className={`${sidebarOpen ? '' : 'w-0'} overflow-hidden bg-[#E8F1F5] border-r border-gray-300 flex flex-col flex-shrink-0 relative ${isResizing ? '' : 'transition-[width] duration-300'}`}
+      style={sidebarOpen && isDesktop ? { width: `${sidebarPct}%`, minWidth: 0 } : undefined}
+      className={`${sidebarOpen ? 'flex fixed inset-0 z-40 w-full md:relative md:z-auto' : 'hidden md:flex md:w-0'} bg-[#E8F1F5] border-r border-gray-300 flex-col flex-shrink-0 overflow-hidden ${isResizing ? '' : 'transition-[width] duration-300'}`}
     >
+      {/* P3b-F5：手機版左上 X 關閉（桌面不顯示） */}
+      {sidebarOpen && (
+        <button
+          onClick={onCloseSidebar}
+          aria-label="關閉側邊欄"
+          className="md:hidden absolute top-3 left-3 z-50 p-2 text-gray-500 hover:text-[#7DB9DE] hover:bg-white/70 rounded-lg cursor-pointer"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      )}
       {/* P3b-F2：右側邊界的細拖曳把手（col-resize），只在展開時可拖 */}
       {sidebarOpen && (
         <div
@@ -287,8 +308,8 @@ function Sidebar({
         />
       )}
 
-      {/* New Chat 按鈕 */}
-      <div className="p-4">
+      {/* New Chat 按鈕（手機版要放在左上 X 按鈕下方，所以頂部留白 pt-16） */}
+      <div className="p-4 pt-16 md:pt-4">
         <button 
           onClick={onStartNewChat}
           className="w-full flex items-center gap-3 px-4 py-3 bg-[#51A8DD] hover:bg-[#3D9AD1] rounded-xl transition text-sm font-semibold cursor-pointer shadow-md shadow-[#51A8DD]/30 text-white group"
@@ -356,8 +377,8 @@ function Sidebar({
         </div>
       </div>
 
-      {/* 底部設定區 */}
-      <div className="p-4 border-t border-gray-300 bg-[#E8F1F5]">
+      {/* 底部設定區（mt-auto 讓它貼齊側欄底部） */}
+      <div className="mt-auto p-4 border-t border-gray-300 bg-[#E8F1F5]">
         <div className="flex items-center gap-3 px-2">
           <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#7DB9DE] to-[#7B90D2] flex items-center justify-center font-bold text-xs text-white shadow-sm">
             ME

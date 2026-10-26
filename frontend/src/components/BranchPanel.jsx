@@ -49,6 +49,14 @@ function BranchPanel({
     return DEFAULT_PANEL_PERCENT;
   });
   const [isResizing, setIsResizing] = useState(false);
+  // P3b-F5：手機（< 768px）不套用 inline 百分比寬度
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 768px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = (e) => setIsDesktop(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // 寬度變動時寫回 localStorage
   useEffect(() => {
@@ -125,18 +133,20 @@ function BranchPanel({
   }, [activeBranch?.input, activeBranchId]);
 
   return (
+    // P3b-F5：手機（< 768px）滿版覆蓋（fixed）；桌面（md 以上）維持並排的百分比寬度。
+    // 桌面寬度用 inline style；手機不設 inline 寬度，由 w-full 決定。
     <aside
-      style={{ width: `${panelPercent}%` }}
-      className="relative hidden md:flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)]"
+      style={isDesktop ? { width: `${panelPercent}%` } : undefined}
+      className="fixed inset-0 z-40 w-full md:z-auto md:inset-auto md:h-full md:w-auto md:relative flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)]"
     >
-      {/* --- 左側拖曳把手：調整面板寬度 --- */}
+      {/* --- 左側拖曳把手：調整面板寬度（僅桌面） --- */}
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label="拖曳調整分支面板寬度"
         title="拖曳調整寬度"
         onPointerDown={handleResizeStart}
-        className={`absolute left-0 top-0 z-10 h-full w-[6px] cursor-col-resize transition-colors ${
+        className={`absolute left-0 top-0 z-10 h-full w-[6px] cursor-col-resize transition-colors hidden md:block ${
           isResizing ? 'bg-[#51A8DD]/60' : 'bg-transparent hover:bg-[#51A8DD]/40'
         }`}
       />
@@ -158,9 +168,12 @@ function BranchPanel({
           <button
             onClick={onToggle}
             title="收起分支面板"
+            aria-label="收起分支面板"
             className="p-1.5 text-gray-400 hover:text-[#51A8DD] hover:bg-gray-100 rounded-lg transition cursor-pointer flex-shrink-0"
           >
-            <PanelRightClose className="w-4 h-4" />
+            {/* 手機版用 X（關閉覆蓋層），桌面版用收合圖示 */}
+            <X className="w-4 h-4 md:hidden" />
+            <PanelRightClose className="w-4 h-4 hidden md:block" />
           </button>
         )}
       </div>

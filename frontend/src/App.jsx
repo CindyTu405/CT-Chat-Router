@@ -645,6 +645,7 @@ function App() {
         onLoadChat={loadChat}
         onOpenTreeModal={openTreeModal}
         onDeleteChat={handleDeleteChat}
+        onCloseSidebar={() => setSidebarOpen(false)}
         onStartRenaming={startRenaming}
         onSubmitRename={submitRename}
       />
