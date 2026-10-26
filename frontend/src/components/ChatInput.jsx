@@ -16,8 +16,11 @@ function ChatInput({
     // P2: 未輸入（含只有空白字元）時維持單行高度
     if (input.trim() === '') {
       textareaRef.current.style.height = '56px';
+      // 空白時內容高度（56px 含邊框）略大於可用區（54px），隱藏捲軸避免出現空的滾動條
+      textareaRef.current.style.overflowY = 'hidden';
       return;
     }
+    textareaRef.current.style.overflowY = '';
     // 步驟 A: 先把高度強制重置回基礎高度，這樣如果刪除文字，框才會縮小
     textareaRef.current.style.height = 'auto';
     // 步驟 B: 將高度設定為內容的實際高度 (scrollHeight)
