@@ -657,12 +657,8 @@ function App() {
           sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
           messages={messages}
-          model={model}
-          setModel={setModel}
-          isCustomModel={isCustomModel}
-          setIsCustomModel={setIsCustomModel}
-          freeModels={freeModels}
-          freeModelsLoading={freeModelsLoading}
+          branchPanelOpen={branchPanelOpen}
+          setBranchPanelOpen={setBranchPanelOpen}
         />
 
         <MessageList
@@ -682,6 +678,12 @@ function App() {
           setInput={setInput}
           isLoading={isLoading}
           onSend={handleSend}
+          model={model}
+          setModel={setModel}
+          isCustomModel={isCustomModel}
+          setIsCustomModel={setIsCustomModel}
+          freeModels={freeModels}
+          freeModelsLoading={freeModelsLoading}
         />
 
       </div>

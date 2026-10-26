@@ -1,17 +1,12 @@
-import { Menu } from 'lucide-react';
-import ModelSelector from './ModelSelector';
+import { Menu, PanelRight } from 'lucide-react';
 
-// 頂部導航列：側邊欄開關、對話標題、模型選單（未來匯出按鈕也在此）
+// 頂部導航列：側邊欄開關、對話標題、右側分支面板開關（模型選單已移到輸入框下方）
 function ChatHeader({
   sidebarOpen,
   setSidebarOpen,
   messages,
-  model,
-  setModel,
-  isCustomModel,
-  setIsCustomModel,
-  freeModels,
-  freeModelsLoading,
+  branchPanelOpen,
+  setBranchPanelOpen,
 }) {
   return (
     <div className="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white/80 backdrop-blur-sm z-10 sticky top-0 shadow-sm">
@@ -34,14 +29,15 @@ function ChatHeader({
         </span>
       </div>
 
-      <ModelSelector
-        model={model}
-        setModel={setModel}
-        isCustomModel={isCustomModel}
-        setIsCustomModel={setIsCustomModel}
-        freeModels={freeModels}
-        freeModelsLoading={freeModelsLoading}
-      />
+      <button
+        onClick={() => setBranchPanelOpen(!branchPanelOpen)}
+        title={branchPanelOpen ? '收起分支面板' : '展開分支面板'}
+        aria-label={branchPanelOpen ? '收起分支面板' : '展開分支面板'}
+        aria-pressed={branchPanelOpen}
+        className={`p-2 rounded-lg transition cursor-pointer ${branchPanelOpen ? 'text-[#228DCD] bg-[#E8F1F5]' : 'text-gray-500 hover:text-[#7DB9DE] hover:bg-gray-100'}`}
+      >
+        <PanelRight className="w-5 h-5" />
+      </button>
     </div>
   );
 }

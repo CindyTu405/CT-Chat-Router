@@ -1,9 +1,13 @@
 import { useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
 import { handleEnterKey } from '../keyUtils';
+import ModelSelector from './ModelSelector';
 
-// 底部輸入區塊：自動高度的輸入框、送出按鈕、Enter 行為處理
-function ChatInput({ input, setInput, isLoading, onSend }) {
+// 底部輸入區塊：自動高度的輸入框、送出按鈕、Enter 行為處理、下方的模型選單
+function ChatInput({
+  input, setInput, isLoading, onSend,
+  model, setModel, isCustomModel, setIsCustomModel, freeModels, freeModelsLoading,
+}) {
   const textareaRef = useRef(null);
 
   // 監聽 input 內容，自動調整輸入框高度
@@ -47,8 +51,18 @@ function ChatInput({ input, setInput, isLoading, onSend }) {
           <Send className="w-5 h-5 text-white" />
         </button>
       </div>
-      <div className="text-center mt-3 text-xs text-gray-400 font-medium">
-         AI模型有可能會出錯，請檢察回覆內容。
+      <div className="max-w-4xl mx-auto mt-3 flex items-center justify-between gap-2">
+        <ModelSelector
+          model={model}
+          setModel={setModel}
+          isCustomModel={isCustomModel}
+          setIsCustomModel={setIsCustomModel}
+          freeModels={freeModels}
+          freeModelsLoading={freeModelsLoading}
+        />
+        <span className="text-xs text-gray-400 font-medium">
+          AI模型有可能會出錯，請檢察回覆內容。
+        </span>
       </div>
     </div>
   );
