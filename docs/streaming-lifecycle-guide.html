@@ -210,7 +210,7 @@ async def stream_generator():
     <li><strong>D 的結果</strong>：後端重啟時，正在生成的回覆會遺失，DB 只有重啟前已寫入的內容（通常是空字串）。</li>
     <li><strong>單一 worker</strong>：緩衝在程序記憶體中，多 worker 部署時續讀可能找不到緩衝，需要改用 Redis 或 DB。</li>
     <li><strong>舊資料</strong>：修正前留下的空 AI 訊息（例如 2026-10-22 的兩則測試資料）仍是空的，不會自動修復。</li>
-    <li><strong>真實 LLM 未測</strong>：驗證只用假串流，Gemini／OpenRouter 的實際串流行為需要另行確認。</li>
+    <li><strong>真實 LLM</strong>：已由使用者實測 Gemini／OpenRouter 真實串流，沒有問題。</li>
   </ul>
 </section>
 
