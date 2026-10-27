@@ -5,6 +5,8 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { handleEnterKey } from '../keyUtils';
+import ContextPanel from './ContextPanel';
+import { fakeBranchContextItems } from '../fakeContextData';
 
 // (P2-5) 右側分支面板：多 tab 切換、各分支獨立訊息串與獨立輸入框
 // props:
@@ -68,6 +70,11 @@ function BranchPanel({
   }, [panelPercent]);
 
   const activeBranch = branches.find((b) => b.id === activeBranchId) || null;
+
+  // P3b-F6：分支檢視的上下文勾選（僅本地 state + 假資料，未接後端）
+  // 本分支歷史一律納入，不出現於清單；清單只列出「其他分支」與主對話開關
+  const [selectedContextIds, setSelectedContextIds] = useState([]);
+  const [includeMain, setIncludeMain] = useState(false);
 
   // 拖曳時在 window 上監聽 pointermove / pointerup，並鎖住文字選取
   useEffect(() => {
@@ -356,6 +363,18 @@ function BranchPanel({
             >
               <Send className="w-4 h-4 text-white" />
             </button>
+          </div>
+          {/* P3b-F6：上下文開關（分支模式：本分支歷史固定納入） */}
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <ContextPanel
+              items={fakeBranchContextItems}
+              selectedIds={selectedContextIds}
+              onChange={setSelectedContextIds}
+              mode="branch"
+              includeMain={includeMain}
+              onIncludeMainChange={setIncludeMain}
+            />
+            <span className="text-[10px] text-gray-400 truncate">本分支歷史已自動納入</span>
           </div>
           <p className="mt-2 text-[10px] text-gray-400 text-center">
             分支訊息與主對話各自獨立，不會影響原本的時間線

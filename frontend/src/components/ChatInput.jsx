@@ -1,7 +1,9 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Send } from 'lucide-react';
 import { handleEnterKey } from '../keyUtils';
 import ModelSelector from './ModelSelector';
+import ContextPanel from './ContextPanel';
+import { fakeContextBranches } from '../fakeContextData';
 
 // 底部輸入區塊：自動高度的輸入框、送出按鈕、Enter 行為處理、下方的模型選單
 function ChatInput({
@@ -9,6 +11,8 @@ function ChatInput({
   model, setModel, isCustomModel, setIsCustomModel, freeModels, freeModelsLoading,
 }) {
   const textareaRef = useRef(null);
+  // P3b-F6：上下文勾選狀態（僅本地 state + 假資料，未接後端）
+  const [selectedContextIds, setSelectedContextIds] = useState([]);
 
   // 監聽 input 內容，自動調整輸入框高度
   useEffect(() => {
@@ -55,14 +59,23 @@ function ChatInput({
         </button>
       </div>
       <div className="max-w-4xl mx-auto mt-2 flex items-center justify-between gap-2">
-        <ModelSelector
-          model={model}
-          setModel={setModel}
-          isCustomModel={isCustomModel}
-          setIsCustomModel={setIsCustomModel}
-          freeModels={freeModels}
-          freeModelsLoading={freeModelsLoading}
-        />
+        <div className="flex items-center gap-2 min-w-0">
+          <ModelSelector
+            model={model}
+            setModel={setModel}
+            isCustomModel={isCustomModel}
+            setIsCustomModel={setIsCustomModel}
+            freeModels={freeModels}
+            freeModelsLoading={freeModelsLoading}
+          />
+          {/* P3b-F6：上下文開關面板（假資料） */}
+          <ContextPanel
+            items={fakeContextBranches}
+            selectedIds={selectedContextIds}
+            onChange={setSelectedContextIds}
+            mode="main"
+          />
+        </div>
         <span className="text-xs text-gray-400 font-medium">
           AI模型有可能會出錯，請檢察回覆內容。
         </span>
