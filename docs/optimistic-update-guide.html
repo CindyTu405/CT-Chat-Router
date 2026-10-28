@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>樂觀更新與串流 id 回傳 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #5a6474;
+    --accent: #2563eb; --accent-soft: #e8f0fe; --code-bg: #1e293b; --code-ink: #e2e8f0;
+    --tip: #0f766e; --tip-bg: #ecfdf5; --warn: #b45309; --warn-bg: #fffbeb;
+    --danger: #b91c1c; --danger-bg: #fef2f2; --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn, .danger { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .danger { background: var(--danger-bg); border-left: 4px solid var(--danger); }
+  .tip b { color: var(--tip); } .warn b { color: var(--warn); } .danger b { color: var(--danger); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="badge">Phase 3b · G1 · 前端＋後端</div>
+  <h1>樂觀更新與串流 id 回傳：為什麼新對話不能開分支</h1>
+  <p>看懂「樂觀更新」造成的 id 斷層，以及為什麼 id 要放在 HTTP header 回傳。</p>
+</header>
+
+<section class="card">
+  <h2><span class="num">1</span>問題現象</h2>
+  <p>開一個<em>全新的對話</em>，送出第一則訊息，等 AI 回完之後，選取 AI 的文字想開分支——結果跳出「請先重新載入對話再建立分支」。重新整理網頁後再試，就正常了。</p>
+  <p>直覺上會想：「我不是已經送出訊息了嗎？為什麼還要重新載入？」這份文件就是解釋背後的原因，以及正確的修法。</p>
+</section>
+
+<section class="card">
+  <h2><span class="num">2</span>什麼是「樂觀更新」</h2>
+  <p>當你按下送出，前端其實做了兩件事，順序是反過來的：</p>
+  <ol>
+    <li><b>先樂觀地把訊息畫上去</b>（不等後端），讓使用者覺得「秒回」。</li>
+    <li><b>再呼叫後端</b>，後端把訊息寫進資料庫，回傳真正的 id。</li>
+  </ol>
+  <p>「樂觀」的意思就是：前端先假設會成功，先把畫面做出來，之後再跟後端對答案、校正。</p>
+  <pre><code><span class="cm">// 前端 handleSend：先自己畫兩則訊息，id 還沒生出來</span>
+setMessages(prev => [
+  ...prev,
+  { role: 'user', content: userMessageContent },      <span class="cm">// 沒有 id</span>
+  { role: 'assistant', content: '', model_used: model } <span class="cm">// 沒有 id（顯示 Thinking）</span>
+]);</code></pre>
+  <p>注意看：這兩則訊息<b>都沒有 id</b>。因為 id 是資料庫產生的（UUID），前端在訊息真正寫進資料庫之前，根本不知道 id 是多少。</p>
+  <div class="tip"><b>直覺：</b>id 是「後端／資料庫」發的號碼牌，不是前端自己能決定的。樂觀更新時前端只是先把「還沒領到號碼牌」的訊息畫上去。</div>
+</section>
+
+<section class="card">
+  <h2><span class="num">3</span>id 是怎麼回傳的？—— 放在 HTTP header</h2>
+  <p>後端 <code>/chat</code> 會把訊息寫進資料庫，此時 user 和 AI 兩則訊息都拿到了真正的 UUID。但問題來了：回應的 body 是<b>一串正在持續產生的文字</b>（SSE 串流），AI 的回覆是一點一點流出來的，body 裡放不下「這則訊息的 id」。</p>
+  <p>所以 id 改放在 <b>HTTP response header</b>（回應的檔頭）。後端目前是這樣回傳的：</p>
+  <pre><code><span class="cm"># backend/main.py 的 /chat 端點</span>
+headers = {
+    "X-Message-Id": ai_id,          <span class="cm"># 只有 AI 訊息的 id</span>
+    "X-Accel-Buffering": "no",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+}
+return StreamingResponse(stream_generator(), headers=headers)</code></pre>
+  <p>前端在「開始讀 body 之前」就能先讀 header，拿到 AI 訊息的 id：</p>
+  <pre><code>const response = await fetch(url, ...);
+const newMsgId = response.headers.get("X-Message-Id");  <span class="cm">// AI 的 id</span></code></pre>
+  <div class="tip"><b>為什麼不塞進 body？</b>因為 body 是「會慢慢流出來」的內容，而 id 在回應一開始就得知道（拿來做 resume、定位訊息）。header 在 body 之前就到，所以放 header 最合適。</div>
+</section>
+
+<section class="card">
+  <h2><span class="num">4</span>根因：user 訊息的 id 被漏掉了</h2>
+  <p>後端只回傳了 AI 的 id（<code>X-Message-Id</code>），前端拿到後也只補了 AI 訊息：</p>
+  <pre><code>lastMsg.id = newMsgId;  <span class="cm">// 只補了最後一則（AI）的 id</span></code></pre>
+  <p>結果：</p>
+  <table>
+    <thead><tr><th>訊息</th><th>樂觀畫上時</th><th>後端回傳後</th></tr></thead>
+    <tbody>
+      <tr><td>user 訊息（messages[0]）</td><td>無 id</td><td><b>還是無 id ← 問題</b></td></tr>
+      <tr><td>AI 訊息（最後一則）</td><td>無 id</td><td>有 id（X-Message-Id）</td></tr>
+    </tbody>
+  </table>
+  <p>開分支時，前端要拿 <code>messages[0].id</code> 當「這棵對話的根」（root id）：</p>
+  <pre><code>const rootId = messages[0]?.id;
+if (!rootId) {
+  alert("請先重新載入對話再建立分支");  <span class="cm">// ← 就是這個 alert</span>
+  return;
+}</code></pre>
+  <p>新對話的 <code>messages[0]</code> 就是那則「一直沒有 id」的樂觀 user 訊息，所以 <code>rootId</code> 是空的 → 彈出警語。</p>
+  <p>「重新載入」之所以能解，是因為它重新呼叫 <code>fetchHistory</code>，這次 <code>messages[0]</code> 是從資料庫抓回來的，才有真正的 id。</p>
+</section>
+
+<section class="card">
+  <h2><span class="num">5</span>修法：把 user 的 id 也回傳</h2>
+  <p>既然 AI 的 id 能透過 header 回傳，user 的 id 一樣可以。作法分後端、前端兩小步：</p>
+
+  <h3>後端：多回傳一個 header</h3>
+  <pre><code><span class="cm"># /chat 端點，user 訊息建立後（user_msg.id 可用）</span>
+headers = {
+    "X-Message-Id": ai_id,
+    "X-User-Message-Id": user_id,   <span class="cm"># ★ 新增：user 訊息的 id</span>
+    ...
+}</code></pre>
+  <p>還有一個<b>容易被忽略</b>的點：瀏覽器對「跨來源（CORS）回應」的 header 有管制，預設只放行一部分。自訂的 <code>X-User-Message-Id</code> 必須加進 CORS 的 <code>expose_headers</code>，前端才讀得到：</p>
+  <pre><code>app.add_middleware(
+    CORSMiddleware,
+    ...
+    expose_headers=["X-Message-Id", "X-User-Message-Id"],  <span class="cm"># ★ 加上去</span>
+)</code></pre>
+  <div class="warn"><b>常見坑：</b>不加 <code>expose_headers</code>，前端 <code>response.headers.get(...)</code> 會回 <code>null</code>，看起來像後端沒回傳，其實是被瀏覽器擋掉了。</div>
+
+  <h3>前端：讀到後補上第一則的 id</h3>
+  <pre><code>const newUserMsgId = response.headers.get("X-User-Message-Id");
+if (newUserMsgId) {
+  setMessages(prev => {
+    <span class="cm">// 只補「畫面第一則、是 user、而且還沒有 id」的那則</span>
+    const first = prev[0];
+    if (!first || first.role !== 'user' || first.id) return prev;
+    const next = [...prev];
+    next[0] = { ...first, id: newUserMsgId };
+    return next;
+  });
+}</code></pre>
+  <p>補上之後，<code>messages[0].id</code> 在送出後立刻就有值，不用等重新載入，開分支就能正常拿到 root id。</p>
+</section>
+
+<section class="card">
+  <h2><span class="num">6</span>動手前的練習</h2>
+  <ol>
+    <li>「樂觀更新」的「樂觀」是指什麼？為什麼前端畫上的訊息一開始沒有 id？</li>
+    <li>為什麼 id 要放在 response header，而不是 SSE 的 body 裡？</li>
+    <li>為什麼加了 <code>X-User-Message-Id</code> header 後，還一定要加進 <code>expose_headers</code>？</li>
+    <li>前端補 <code>messages[0].id</code> 時，為什麼要檢查「是 user 而且還沒有 id」？（想想：如果不是新對話，會發生什麼事？）</li>
+  </ol>
+  <p class="muted">實作範圍：後端 <code>/chat</code> 加 header＋<code>expose_headers</code>；前端 <code>handleSend</code> 讀 header 補 id。確認概念 OK 後由子代理實作（commit 編號 G1）。</p>
+</section>
+
+</div>
+</body>
+</html>
