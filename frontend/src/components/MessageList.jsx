@@ -124,6 +124,53 @@ const copyText = async (text) => {
   }
 };
 
+// (G9) 使用者訊息：純文字（不解析 markdown），保留換行；超過 5 行收合。
+const COLLAPSE_LINE_HEIGHT = 22.5; // leading-relaxed @ 15px ≈ 1.5 * 15
+const COLLAPSE_MAX_HEIGHT = COLLAPSE_LINE_HEIGHT * 5;
+
+function UserPlainText({ content, expanded, onToggle }) {
+  const ref = useRef(null);
+  const [overflowing, setOverflowing] = useState(false);
+
+  const collapsed = overflowing && !expanded;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // 量測完整內容高度來決定是否需要收合（收合時先暫時解除高度限制再量）
+    const prevMaxHeight = el.style.maxHeight;
+    const prevOverflow = el.style.overflow;
+    el.style.maxHeight = 'none';
+    el.style.overflow = 'visible';
+    const fullHeight = el.scrollHeight;
+    el.style.maxHeight = prevMaxHeight;
+    el.style.overflow = prevOverflow;
+    setOverflowing(fullHeight > COLLAPSE_MAX_HEIGHT + 1);
+  }, [content]);
+
+  return (
+    <div>
+      <div
+        ref={ref}
+        className="whitespace-pre-wrap break-words"
+        style={collapsed ? { maxHeight: COLLAPSE_MAX_HEIGHT, overflow: 'hidden' } : undefined}
+      >
+        {content}
+      </div>
+      {overflowing && (
+        <button
+          type="button"
+          onClick={onToggle}
+          title={expanded ? '收起訊息' : '展開完整訊息'}
+          className="mt-1.5 text-[12px] font-medium text-white/80 hover:text-white underline underline-offset-2 cursor-pointer"
+        >
+          {expanded ? '收起' : '展開'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // 中間對話視窗：空狀態提示、訊息氣泡（Markdown／程式碼高亮）、選取文字建立分支
 function MessageList({
   messages,
@@ -158,6 +205,18 @@ function MessageList({
   const handleCopyMessage = async (msg, key) => {
     const ok = await copyText(msg.content || '');
     if (ok) setCopiedKey(key);
+  };
+
+  // (G9) 使用者訊息以純文字 pre-wrap 呈現（保留換行、不解析 markdown），
+  // 超過 5 行自動收合，可展開／收起。
+  const [expandedUserMsgs, setExpandedUserMsgs] = useState(() => new Set());
+  const toggleUserExpanded = (key) => {
+    setExpandedUserMsgs((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   // (P2-12) message id → 掛在這則訊息上的分支（只收有 anchor_text 的）
@@ -273,7 +332,18 @@ function MessageList({
   // (F8) 有 offset 的錨點：整段 Markdown 只渲染一次，由 rehypeHighlight 在 AST 內精準包 mark。
   // 這取代了舊的「依 anchor_text 切段」做法：切段會打斷段落結構（高亮自成一行），
   // 且相同文字會全部命中。
-  const renderContent = (msg) => {
+  const renderContent = (msg, key) => {
+    // (G9) 使用者訊息走純文字渲染，保留換行並可收合；AI 訊息維持 markdown
+    if (msg.role === 'user') {
+      return (
+        <UserPlainText
+          content={msg.content}
+          expanded={expandedUserMsgs.has(key)}
+          onToggle={() => toggleUserExpanded(key)}
+        />
+      );
+    }
+
     const anchors = anchorsByMessageId.get(msg.id) || [];
     const precise = anchors
       .filter(
@@ -455,7 +525,7 @@ function MessageList({
                       onMouseUp={msg.role === 'assistant' ? (e) => handleAssistantMouseUp(e, msg) : undefined}
                     >
                       {msg.content ? (
-                        renderContent(msg)
+                        renderContent(msg, msg.id || `idx-${index}`)
                       ) : (
                         <span className="animate-pulse text-gray-400">Thinking...</span>
                       )}
