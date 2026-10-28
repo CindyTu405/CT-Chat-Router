@@ -238,10 +238,13 @@ function App() {
   };
 
   // 4. 發送訊息 (核心邏輯)
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+  // (G6) 抽成 sendMessage(content)：handleSend 用它送輸入框內容，
+  // 「重試」也用它把失敗的那則使用者訊息原封不動重送一次。
+  const sendMessage = async (rawContent) => {
+    const content = typeof rawContent === 'string' ? rawContent : input;
+    if (!content.trim() || isLoading) return;
 
-    const userMessageContent = input;
+    const userMessageContent = content;
     setInput(""); // 馬上清空輸入框，提升體驗
     setIsLoading(true);
 
@@ -360,7 +363,24 @@ function App() {
         // 已被切換的對話：靜默結束
       } else {
         console.error("Error:", error);
-        setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 連線錯誤，請檢查後端是否啟動。" }]);
+        // (G6) 串流失敗：把最後那則空的 assistant 佔位換成可重試的錯誤訊息，
+        // 並記下這次要重送的使用者內容（retryContent），重試時才不用重新打字。
+        setMessages(prev => {
+          if (activeRootIdRef.current !== sendConvId) return prev;
+          const next = [...prev];
+          const last = next[next.length - 1];
+          const errorMsg = {
+            role: 'assistant',
+            content: "⚠️ 連線錯誤，請檢查後端是否啟動。",
+            isError: true,
+            retryContent: userMessageContent,
+          };
+          if (last && last.role === 'assistant' && !last.content) {
+            next[next.length - 1] = { ...errorMsg, id: last.id };
+            return next;
+          }
+          return [...next, errorMsg];
+        });
       }
     } finally {
       // 只有還是「自己這條」串流時才清掉 loading，否則新對話自己的送出流程會被誤解除
@@ -369,6 +389,38 @@ function App() {
         setIsLoading(false);
       }
     }
+  };
+
+  // 送出輸入框內容（原本 handleSend 的行為）
+  const handleSend = () => sendMessage(input);
+
+  // (G6) 重試失敗的回應：把結尾那則「錯誤 + 它前一則 user 訊息」移除後重送，
+  // 避免同一個提問在畫面上出現兩次、parent_id 也對不上。
+  const handleRetry = async (retryMessage) => {
+    if (isLoading) return;
+    const content = retryMessage?.retryContent;
+    if (!content) return;
+
+    let removedUserContent = null;
+    setMessages(prev => {
+      const next = [...prev];
+      let idx = next.length - 1;
+      // 從尾端往前跳過所有「錯誤／還在 Thinking 的空」assistant 訊息
+      while (idx >= 0 && next[idx]?.role === 'assistant' && (next[idx].isError || !next[idx].content)) {
+        idx -= 1;
+      }
+      if (next[idx]?.role === 'user') {
+        removedUserContent = next[idx].content;
+        next.splice(idx); // 移除那則 user 訊息與其後所有殘骸
+      } else {
+        next.splice(idx + 1); // 只清掉尾端的錯誤／空訊息
+      }
+      return next;
+    });
+
+    // sendMessage 會補回 user 訊息並重送，parent_id 也會依清理後的畫面重算
+    setIsLoading(false); // 允許重送（sendMessage 會擋掉 isLoading）
+    await sendMessage(removedUserContent ?? content);
   };
 
   // ★★★ (P2-5) 分支面板：狀態操作小工具 ★★★
@@ -684,6 +736,7 @@ function App() {
           isLoading={isLoading}
           setInput={setInput}
           onCreateBranch={handleCreateBranch}
+          onRetry={handleRetry}
           branchList={branchList}
           onOpenBranch={openBranchFromHighlight}
           scrollContainerRef={scrollContainerRef}

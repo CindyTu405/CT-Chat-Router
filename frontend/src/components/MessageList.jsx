@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { Bot, User, Sparkles, GitBranch, ArrowDown, Copy, Check } from 'lucide-react';
+import { Bot, User, Sparkles, GitBranch, ArrowDown, Copy, Check, RotateCw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -177,6 +177,8 @@ function MessageList({
   isLoading,
   setInput,
   onCreateBranch,
+  // (G6) 重試失敗的回應：由 App 移除錯誤訊息並重送該則提問
+  onRetry = () => {},
   branchList = [],
   onOpenBranch = () => {},
   // (P3b-F1b) 捲動容器 ref 由 App 持有，載入對話時才能在父層還原閱讀位置
@@ -556,6 +558,19 @@ function MessageList({
                         <span className="animate-pulse text-gray-400">Thinking...</span>
                       )}
                     </div>
+                    {/* (G6) 失敗的回應：顯示錯誤文字 + 重試按鈕 */}
+                    {msg.isError && (
+                      <button
+                        type="button"
+                        onClick={() => onRetry(msg)}
+                        disabled={isLoading}
+                        title="重新送出這則訊息"
+                        className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border border-[#7B90D2] text-[#51A8DD] bg-white hover:bg-[#51A8DD] hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <RotateCw className="w-3.5 h-3.5" />
+                        重試
+                      </button>
+                    )}
                   </div>
 
                   {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
