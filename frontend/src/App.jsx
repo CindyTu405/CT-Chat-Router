@@ -417,7 +417,7 @@ function App() {
 
   // ★★★ (P2-4) 選取 AI 回覆文字 → 建立分支 ★★★
   // (P2-5) 成功後在右側面板開一個新 tab，並載入該分支的訊息
-  const handleCreateBranch = async (anchorMessageId, selectedText) => {
+  const handleCreateBranch = async (anchorMessageId, selectedText, anchorStart = null, anchorEnd = null) => {
     // root_id 一律取目前時間線的第一則訊息 (messages[0])。
     // 剛開始的新對話還沒重新載入歷史，messages[0] 還沒有真正的 id，就沒得建立分支。
     const rootId = messages[0]?.id;
@@ -433,6 +433,8 @@ function App() {
         body: JSON.stringify({
           anchor_message_id: anchorMessageId,
           anchor_text: selectedText,
+          anchor_start: anchorStart,
+          anchor_end: anchorEnd,
         }),
       });
 

@@ -6,6 +6,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 // 這裡選用 vscDarkPlus 主題，看起來會很像 VS Code 的深色模式
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { formatShortDateTime } from '../dateUtils';
+import rehypeSourceOffsets from '../rehypeSourceOffsets';
+import { selectionOffsets } from '../selectionOffset';
 
 // Markdown 樣式覆寫（程式碼區塊、表格、連結…），依氣泡角色決定行內程式碼配色。
 // 抽成函式，讓「單段渲染」與「錨點切段渲染」共用同一套樣式。
@@ -149,7 +151,19 @@ function MessageList({
       return;
     }
 
-    const text = selection.toString().trim();
+    // (F7) 先試著把選取對映回 source offset；對得到就用 offset 反推文字，
+    // 確保 anchor_text 與 offset 永遠一致（content.slice(start, end) === anchor_text）。
+    // 對不到（例如選到 code block）就退回 selection.toString()，offset 留 null（後端 precise=false）。
+    const offsets = selectionOffsets(selection);
+    let text;
+    let start = null;
+    let end = null;
+    if (offsets) {
+      [start, end] = offsets;
+      text = msg.content.slice(start, end);
+    } else {
+      text = selection.toString().trim();
+    }
     if (!text) {
       setBranchSel(null);
       return;
@@ -171,6 +185,8 @@ function MessageList({
     setBranchSel({
       messageId: msg.id,
       text,
+      start,
+      end,
       x: Math.min(Math.max(rect.left + rect.width / 2, halfButton), window.innerWidth - halfButton),
       y: Math.max(rect.top - 8, 48),
     });
@@ -178,7 +194,7 @@ function MessageList({
 
   const createBranchFromSelection = () => {
     if (!branchSel) return;
-    onCreateBranch(branchSel.messageId, branchSel.text);
+    onCreateBranch(branchSel.messageId, branchSel.text, branchSel.start, branchSel.end);
     window.getSelection()?.removeAllRanges();
     setBranchSel(null);
   };
@@ -188,6 +204,7 @@ function MessageList({
     <ReactMarkdown
       key={key}
       remarkPlugins={[remarkGfm]}
+      rehypePlugins={role === 'assistant' ? [rehypeSourceOffsets] : []}
       components={buildMarkdownComponents(role)}
     >
       {content}
