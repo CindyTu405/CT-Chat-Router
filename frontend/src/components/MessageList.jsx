@@ -7,11 +7,19 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { formatShortDateTime } from '../dateUtils';
 import rehypeSourceOffsets from '../rehypeSourceOffsets';
+import rehypeHighlight from '../rehypeHighlight';
 import { selectionOffsets } from '../selectionOffset';
+
+// 錨點高亮的可點擊樣式（與先前 split 版一致）
+const ANCHOR_MARK_CLASS =
+  'bg-amber-200/80 text-inherit rounded-sm px-0.5 underline decoration-amber-500/70 decoration-2 underline-offset-2 cursor-pointer transition-colors hover:bg-amber-300';
+const ANCHOR_MARK_PLAIN_CLASS = 'bg-amber-200/80 text-inherit rounded-sm px-0.5';
 
 // Markdown 樣式覆寫（程式碼區塊、表格、連結…），依氣泡角色決定行內程式碼配色。
 // 抽成函式，讓「單段渲染」與「錨點切段渲染」共用同一套樣式。
-const buildMarkdownComponents = (role) => ({
+// (F8) branchById：branch id → branch 物件（rehypeHighlight 標在 mark 的 data-branch 上）；
+//      onOpenBranch：點擊高亮時開啟該分支。
+const buildMarkdownComponents = (role, branchById, onOpenBranch) => ({
   // 處理多行程式碼區塊 (Code Blocks)
   code({ inline, className, children, ...props }) {
     const match = /language-(\w+)/.exec(className || '');
@@ -60,6 +68,24 @@ const buildMarkdownComponents = (role) => ({
   table: ({ children }) => <div className="overflow-x-auto my-4"><table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">{children}</table></div>,
   th: ({ children }) => <th className="px-4 py-2 bg-gray-50 text-left text-sm font-semibold text-gray-700 border-b">{children}</th>,
   td: ({ children }) => <td className="px-4 py-2 text-sm text-gray-600 border-b">{children}</td>,
+  // (F8) rehypeHighlight 依 source offset 標出的錨點：只有精確的那一段會變成 mark，
+  // 點擊即可開啟對應分支。找不到對應分支時退化為不可點擊的純高亮。
+  mark: ({ node, children }) => {
+    const branchId = node?.properties?.['data-branch'];
+    const branch = branchId != null ? branchById?.get(String(branchId)) : null;
+    if (!branch) {
+      return <mark className={ANCHOR_MARK_PLAIN_CLASS}>{children}</mark>;
+    }
+    return (
+      <mark
+        onClick={() => onOpenBranch(branch)}
+        title={`開啟分支：${branch.title || '新分支'}`}
+        className={ANCHOR_MARK_CLASS}
+      >
+        {children}
+      </mark>
+    );
+  },
 });
 
 // (P2-12) 把訊息內容依錨點文字切成「純文字片段 / 錨點片段」交錯的陣列。
@@ -211,9 +237,43 @@ function MessageList({
     </ReactMarkdown>
   );
 
-  // (P2-12) 有錨點就切段渲染：文字段落照舊走 Markdown，中間插可點擊的高亮
+  // (F8) branch id → branch 物件，供 mark 元件反查要開啟哪個分支
+  const branchById = useMemo(() => {
+    const map = new Map();
+    (branchList || []).forEach((branch) => {
+      if (branch?.id == null) return;
+      map.set(String(branch.id), branch);
+    });
+    return map;
+  }, [branchList]);
+
+  // (F8) 有 offset 的錨點：整段 Markdown 只渲染一次，由 rehypeHighlight 在 AST 內精準包 mark。
+  // 這取代了舊的「依 anchor_text 切段」做法：切段會打斷段落結構（高亮自成一行），
+  // 且相同文字會全部命中。
   const renderContent = (msg) => {
     const anchors = anchorsByMessageId.get(msg.id) || [];
+    const precise = anchors
+      .filter(
+        (a) =>
+          Number.isInteger(a?.anchor_start) &&
+          Number.isInteger(a?.anchor_end) &&
+          a.anchor_start < a.anchor_end
+      )
+      .map((a) => ({ id: a.id, start: a.anchor_start, end: a.anchor_end }));
+
+    if (precise.length > 0) {
+      return (
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[[rehypeHighlight, precise]]}
+          components={buildMarkdownComponents(msg.role, branchById, onOpenBranch)}
+        >
+          {msg.content}
+        </ReactMarkdown>
+      );
+    }
+
+    // 舊分支（沒有 offset，例如選到 code block）：退回原本的切段渲染
     const segments = buildAnchorSegments(msg.content, anchors);
     const hasAnchor = segments.some((seg) => seg.type === 'anchor');
 
@@ -229,7 +289,7 @@ function MessageList({
               key={`a-${i}`}
               onClick={() => onOpenBranch(seg.branch)}
               title={`開啟分支：${seg.branch.title || '新分支'}`}
-              className="bg-amber-200/80 text-inherit rounded-sm px-0.5 underline decoration-amber-500/70 decoration-2 underline-offset-2 cursor-pointer transition-colors hover:bg-amber-300"
+              className={ANCHOR_MARK_CLASS}
             >
               {seg.text}
             </mark>
