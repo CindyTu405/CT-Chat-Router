@@ -95,7 +95,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Message-Id"],
+    expose_headers=["X-Message-Id", "X-User-Message-Id"],
 )
 
 # 模型白名單（免費 tier）：環境變數 ALLOWED_MODELS，逗號分隔。
@@ -253,6 +253,7 @@ async def chat_endpoint(payload: ChatRequest, request: Request, session: Session
 
     # (P3b-A1) 生成交給背景 task；連線只負責讀緩衝。
     ai_id = str(ai_msg.id)
+    user_id = str(user_msg.id)
     GENERATIONS[ai_id] = {"text": "", "done": False}
     # 背景 task 不能拿請求 session 的 ORM 物件（commit 後會過期），先轉成純資料
     history_plain = [SimpleNamespace(role=m.role, content=m.content) for m in history]
@@ -268,6 +269,7 @@ async def chat_endpoint(payload: ChatRequest, request: Request, session: Session
         stream_generator(),
         media_type="text/plain",
         headers={"X-Message-Id": ai_id,
+                "X-User-Message-Id": user_id,   # ★ (G1) 前端據此補上新對話第一則 user 訊息的 id
                 "X-Accel-Buffering": "no",      # ★ 叫 Nginx 絕對不要緩衝
                 "Cache-Control": "no-cache",    # ★ 不要快取
                 "Connection": "keep-alive"      # ★ 保持連線開啟

@@ -301,6 +301,21 @@ function App() {
       
       // ★ 修正 1：將 ID 的抓取移到 while 迴圈「之前」，這樣迴圈內才能使用
       const newMsgId = response.headers.get("X-Message-Id");
+      // (G1) 後端回傳本次 user 訊息的真實 id：新對話的第一則 user 訊息是樂觀插入的（無 id），
+      // 補上後 handleCreateBranch 才拿得到 rootId，不會誤報「請先重新載入對話再建立分支」。
+      const newUserMsgId = response.headers.get("X-User-Message-Id");
+      if (newUserMsgId) {
+        setMessages(prev => {
+          if (activeRootIdRef.current !== sendConvId) return prev;
+          if (prev.length === 0) return prev;
+          const first = prev[0];
+          // 只補「這次送出的那則」：畫面第一則是 user 且還沒有 id 時才寫入
+          if (!first || first.role !== 'user' || first.id) return prev;
+          const next = [...prev];
+          next[0] = { ...first, id: newUserMsgId };
+          return next;
+        });
+      }
 
       while (true) {
         // ★★★ (P3b) 使用者已切換到別的對話 → 停止套用，別把內容寫進別人的對話 ★★★
