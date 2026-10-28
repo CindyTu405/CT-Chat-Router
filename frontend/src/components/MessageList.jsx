@@ -448,19 +448,24 @@ function MessageList({
 
           {/* 自動捲動定位點 */}
           <div ref={messagesEndRef} />
-        </>
-      )}
 
-      {/* ★★★ (P3b-F1a-fix) 懸浮「回到底部」按鈕：只有不在底部且有訊息時才出現 ★★★ */}
-      {!isAtBottom && messages.length > 0 && (
-        <button
-          onClick={scrollToBottomNow}
-          title="回到底部"
-          aria-label="回到底部"
-          className="fixed bottom-24 right-8 z-30 flex items-center justify-center w-10 h-10 text-[#51A8DD] bg-white border border-[#7DB9DE] hover:bg-[#51A8DD] hover:text-white rounded-full shadow-lg transition-colors cursor-pointer"
-        >
-          <ArrowDown className="w-5 h-5" />
-        </button>
+          {/* ★★★ (G3) 懸浮「回到底部」按鈕：只有不在底部且有訊息時才出現 ★★★
+              改為 absolute 定位在捲動容器（主對話欄）的右下角，而不再用 fixed 貼視窗右緣，
+              這樣右側分支面板打開、主欄變窄時，按鈕仍然只落在主對話區內。
+              sticky 的 0 高度容器讓它隨內容捲動時仍常駐在容器底部（不需 position:relative 的祖先）。 */}
+          {!isAtBottom && messages.length > 0 && (
+            <div className="sticky bottom-0 z-30 h-0 pointer-events-none">
+              <button
+                onClick={scrollToBottomNow}
+                title="回到底部"
+                aria-label="回到底部"
+                className="absolute bottom-2 right-2 pointer-events-auto flex items-center justify-center w-10 h-10 text-[#51A8DD] bg-white border border-[#7DB9DE] hover:bg-[#51A8DD] hover:text-white rounded-full shadow-lg transition-colors cursor-pointer"
+              >
+                <ArrowDown className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕 ★★★ */}
