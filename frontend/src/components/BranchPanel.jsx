@@ -243,7 +243,7 @@ function BranchPanel({
                 className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
               >
                 <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-white mt-0.5 ${
+                  className={`hidden md:flex w-6 h-6 rounded-full items-center justify-center flex-shrink-0 text-white mt-0.5 ${
                     msg.role === 'user' ? 'bg-[#51A8DD]' : 'bg-[#7B90D2]'
                   }`}
                 >
