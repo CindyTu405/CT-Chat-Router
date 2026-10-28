@@ -145,25 +145,10 @@ const getLayoutedElements = (nodes, edges) => {
       groups.get(key).push(node);
     });
 
-  // 分支之間的排序依「錨點在主幹上的位置（y）」由上而下，
-  // 同一錨點的多條分支自然聚在一起；錨點位置未知時才退回第一則訊息的時間。
-  const anchorRectOf = (key) => {
-    const msgs = groups.get(key);
-    const anchorId =
-      msgs.find((m) => m.data.anchor_message_id)?.data.anchor_message_id ??
-      msgs[0].data.parent_id;
-    return anchorId ? pos.get(anchorId) : null;
-  };
-
-  const orderedKeys = [...groups.keys()].sort((a, b) => {
-    const ra = anchorRectOf(a);
-    const rb = anchorRectOf(b);
-    if (ra && rb && ra.y !== rb.y) return ra.y - rb.y;
-    if (ra && !rb) return -1;
-    if (!ra && rb) return 1;
-    // 同錨點（或都未知）時，依第一則訊息的時間穩定排序
-    return byCreatedAt(groups.get(a)[0], groups.get(b)[0]);
-  });
+  // 分支之間也依「第一則訊息的時間」排序，讓顏色/位置穩定可預期
+  const orderedKeys = [...groups.keys()].sort((a, b) =>
+    byCreatedAt(groups.get(a)[0], groups.get(b)[0])
+  );
 
   // 逐條分支放置（用 placed 矩形避開已佔用的空間）
   orderedKeys.forEach((key) => {

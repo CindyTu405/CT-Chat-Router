@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { Bot, User, Sparkles, GitBranch, ArrowDown, Copy, Check, RotateCw } from 'lucide-react';
+import { Bot, User, Sparkles, GitBranch, ArrowDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -114,71 +114,12 @@ const buildAnchorSegments = (content, anchors) => {
   return segments;
 };
 
-// (G8) 複製訊息內容；clipboard 不可用時靜默失敗（不拋錯）
-const copyText = async (text) => {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-// (G9) 使用者訊息：純文字（不解析 markdown），保留換行；超過 5 行收合。
-const COLLAPSE_LINE_HEIGHT = 22.5; // leading-relaxed @ 15px ≈ 1.5 * 15
-const COLLAPSE_MAX_HEIGHT = COLLAPSE_LINE_HEIGHT * 5;
-
-function UserPlainText({ content, expanded, onToggle }) {
-  const ref = useRef(null);
-  const [overflowing, setOverflowing] = useState(false);
-
-  const collapsed = overflowing && !expanded;
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // 量測完整內容高度來決定是否需要收合（收合時先暫時解除高度限制再量）
-    const prevMaxHeight = el.style.maxHeight;
-    const prevOverflow = el.style.overflow;
-    el.style.maxHeight = 'none';
-    el.style.overflow = 'visible';
-    const fullHeight = el.scrollHeight;
-    el.style.maxHeight = prevMaxHeight;
-    el.style.overflow = prevOverflow;
-    setOverflowing(fullHeight > COLLAPSE_MAX_HEIGHT + 1);
-  }, [content]);
-
-  return (
-    <div>
-      <div
-        ref={ref}
-        className="whitespace-pre-wrap break-words"
-        style={collapsed ? { maxHeight: COLLAPSE_MAX_HEIGHT, overflow: 'hidden' } : undefined}
-      >
-        {content}
-      </div>
-      {overflowing && (
-        <button
-          type="button"
-          onClick={onToggle}
-          title={expanded ? '收起訊息' : '展開完整訊息'}
-          className="mt-1.5 text-[12px] font-medium text-white/80 hover:text-white underline underline-offset-2 cursor-pointer"
-        >
-          {expanded ? '收起' : '展開'}
-        </button>
-      )}
-    </div>
-  );
-}
-
 // 中間對話視窗：空狀態提示、訊息氣泡（Markdown／程式碼高亮）、選取文字建立分支
 function MessageList({
   messages,
   isLoading,
   setInput,
   onCreateBranch,
-  // (G6) 重試失敗的回應：由 App 移除錯誤訊息並重送該則提問
-  onRetry = () => {},
   branchList = [],
   onOpenBranch = () => {},
   // (P3b-F1b) 捲動容器 ref 由 App 持有，載入對話時才能在父層還原閱讀位置
@@ -195,31 +136,6 @@ function MessageList({
   // (P2-4) 選取 AI 回覆後的浮動「建立分支」按鈕狀態
   const [branchSel, setBranchSel] = useState(null); // { messageId, text, x, y } | null
   const branchBtnRef = useRef(null);
-
-  // (G8) 剛複製成功的訊息 key（短暫顯示勾勾）
-  const [copiedKey, setCopiedKey] = useState(null);
-  useEffect(() => {
-    if (!copiedKey) return undefined;
-    const t = setTimeout(() => setCopiedKey(null), 1200);
-    return () => clearTimeout(t);
-  }, [copiedKey]);
-
-  const handleCopyMessage = async (msg, key) => {
-    const ok = await copyText(msg.content || '');
-    if (ok) setCopiedKey(key);
-  };
-
-  // (G9) 使用者訊息以純文字 pre-wrap 呈現（保留換行、不解析 markdown），
-  // 超過 5 行自動收合，可展開／收起。
-  const [expandedUserMsgs, setExpandedUserMsgs] = useState(() => new Set());
-  const toggleUserExpanded = (key) => {
-    setExpandedUserMsgs((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
 
   // (P2-12) message id → 掛在這則訊息上的分支（只收有 anchor_text 的）
   const anchorsByMessageId = useMemo(() => {
@@ -279,11 +195,10 @@ function MessageList({
       return;
     }
 
-    // 選取必須完全落在這個 AI 泡泡內，並記下父層容器以驗證（mouseup 時用）
-    const bubbleEl = e.currentTarget;
+    // 選取必須完全落在這個 AI 泡泡內
     if (
-      !bubbleEl.contains(selection.anchorNode) ||
-      !bubbleEl.contains(selection.focusNode)
+      !e.currentTarget.contains(selection.anchorNode) ||
+      !e.currentTarget.contains(selection.focusNode)
     ) {
       return;
     }
@@ -291,19 +206,13 @@ function MessageList({
     // 串流中的訊息還沒有真正的 id，不能當 anchor
     if (!msg.id) return;
 
-    const selectedText = offsets ? msg.content.slice(start, end) : selection.toString().trim();
-    if (!selectedText) {
-      setBranchSel(null);
-      return;
-    }
-
     const rect = selection.getRangeAt(0).getBoundingClientRect();
     const halfButton = 60; // 粗略半寬，避免按鈕被視窗邊界切掉
-    // (G5) 只記「哪則訊息 + 內容 + 按鈕位置」：文字/offset 等按下按鈕那一刻再重算，
-    // 這樣使用者還能用 shift+方向鍵／手機選取把手調整範圍。
     setBranchSel({
       messageId: msg.id,
-      content: msg.content,
+      text,
+      start,
+      end,
       x: Math.min(Math.max(rect.left + rect.width / 2, halfButton), window.innerWidth - halfButton),
       y: Math.max(rect.top - 8, 48),
     });
@@ -311,26 +220,7 @@ function MessageList({
 
   const createBranchFromSelection = () => {
     if (!branchSel) return;
-    // (G5) 以「現在的」選取為準重算 offset / 文字，讓使用者調整後的範圍生效。
-    const selection = window.getSelection();
-    let text = '';
-    let start = null;
-    let end = null;
-    if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
-      const offsets = selectionOffsets(selection);
-      if (offsets) {
-        [start, end] = offsets;
-        text = branchSel.content.slice(start, end);
-      } else {
-        text = selection.toString().trim();
-      }
-    }
-    const finalText = text || selection?.toString().trim() || '';
-    if (!finalText) {
-      setBranchSel(null);
-      return;
-    }
-    onCreateBranch(branchSel.messageId, finalText, start, end);
+    onCreateBranch(branchSel.messageId, branchSel.text, branchSel.start, branchSel.end);
     window.getSelection()?.removeAllRanges();
     setBranchSel(null);
   };
@@ -360,18 +250,7 @@ function MessageList({
   // (F8) 有 offset 的錨點：整段 Markdown 只渲染一次，由 rehypeHighlight 在 AST 內精準包 mark。
   // 這取代了舊的「依 anchor_text 切段」做法：切段會打斷段落結構（高亮自成一行），
   // 且相同文字會全部命中。
-  const renderContent = (msg, key) => {
-    // (G9) 使用者訊息走純文字渲染，保留換行並可收合；AI 訊息維持 markdown
-    if (msg.role === 'user') {
-      return (
-        <UserPlainText
-          content={msg.content}
-          expanded={expandedUserMsgs.has(key)}
-          onToggle={() => toggleUserExpanded(key)}
-        />
-      );
-    }
-
+  const renderContent = (msg) => {
     const anchors = anchorsByMessageId.get(msg.id) || [];
     const precise = anchors
       .filter(
@@ -516,7 +395,7 @@ function MessageList({
               className={`flex gap-4 max-w-4xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
             >
               {/* 頭像 */}
-              <div className={`hidden md:flex w-8 h-8 rounded-full items-center justify-center flex-shrink-0 text-white shadow-sm ${msg.role === 'user' ? 'bg-[#51A8DD]' : 'bg-[#7B90D2]'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white shadow-sm ${msg.role === 'user' ? 'bg-[#51A8DD]' : 'bg-[#7B90D2]'}`}>
                 {msg.role === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
               </div>
 
@@ -528,18 +407,6 @@ function MessageList({
               }`}>
                 
                 <div className="relative group/bubble">
-                  {/* (G8) 複製按鈕：懸停訊息時出現在氣泡右上角 */}
-                  <button
-                    type="button"
-                    onClick={() => handleCopyMessage(msg, index)}
-                    title={copiedKey === index ? '已複製' : '複製訊息'}
-                    aria-label="複製訊息"
-                    className={`absolute -top-2 z-10 p-1 rounded-lg border bg-white/95 shadow-sm transition-opacity cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-400 hover:text-[#51A8DD] border-gray-200 ${
-                      msg.role === 'user' ? '-left-2' : '-right-2'
-                    }`}
-                  >
-                    {copiedKey === index ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
                   {/* 對話框 */}
                   <div className={`
                     px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
@@ -553,24 +420,11 @@ function MessageList({
                       onMouseUp={msg.role === 'assistant' ? (e) => handleAssistantMouseUp(e, msg) : undefined}
                     >
                       {msg.content ? (
-                        renderContent(msg, msg.id || `idx-${index}`)
+                        renderContent(msg)
                       ) : (
                         <span className="animate-pulse text-gray-400">Thinking...</span>
                       )}
                     </div>
-                    {/* (G6) 失敗的回應：顯示錯誤文字 + 重試按鈕 */}
-                    {msg.isError && (
-                      <button
-                        type="button"
-                        onClick={() => onRetry(msg)}
-                        disabled={isLoading}
-                        title="重新送出這則訊息"
-                        className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border border-[#7B90D2] text-[#51A8DD] bg-white hover:bg-[#51A8DD] hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <RotateCw className="w-3.5 h-3.5" />
-                        重試
-                      </button>
-                    )}
                   </div>
 
                   {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
@@ -594,34 +448,27 @@ function MessageList({
 
           {/* 自動捲動定位點 */}
           <div ref={messagesEndRef} />
-
-          {/* ★★★ (G3) 懸浮「回到底部」按鈕：只有不在底部且有訊息時才出現 ★★★
-              改為 absolute 定位在捲動容器（主對話欄）的右下角，而不再用 fixed 貼視窗右緣，
-              這樣右側分支面板打開、主欄變窄時，按鈕仍然只落在主對話區內。
-              sticky 的 0 高度容器讓它隨內容捲動時仍常駐在容器底部（不需 position:relative 的祖先）。 */}
-          {!isAtBottom && messages.length > 0 && (
-            <div className="sticky bottom-0 z-30 h-0 pointer-events-none">
-              <button
-                onClick={scrollToBottomNow}
-                title="回到底部"
-                aria-label="回到底部"
-                className="absolute bottom-2 right-2 pointer-events-auto flex items-center justify-center w-10 h-10 text-[#51A8DD] bg-white border border-[#7DB9DE] hover:bg-[#51A8DD] hover:text-white rounded-full shadow-lg transition-colors cursor-pointer"
-              >
-                <ArrowDown className="w-5 h-5" />
-              </button>
-            </div>
-          )}
         </>
       )}
 
+      {/* ★★★ (P3b-F1a-fix) 懸浮「回到底部」按鈕：只有不在底部且有訊息時才出現 ★★★ */}
+      {!isAtBottom && messages.length > 0 && (
+        <button
+          onClick={scrollToBottomNow}
+          title="回到底部"
+          aria-label="回到底部"
+          className="fixed bottom-24 right-8 z-30 flex items-center justify-center w-10 h-10 text-[#51A8DD] bg-white border border-[#7DB9DE] hover:bg-[#51A8DD] hover:text-white rounded-full shadow-lg transition-colors cursor-pointer"
+        >
+          <ArrowDown className="w-5 h-5" />
+        </button>
+      )}
+
       {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕 ★★★ */}
-      {/* 注意：這裡的 onPointerDown preventDefault 是「刻意」的——(G5) 防止按下按鈕時清掉文字選取，
-          讓原生選取高亮保留，使用者還可以用 shift+方向鍵／手機把手調整範圍，再按按鈕建立分支。
-          onClick 仍會正常觸發，建立分支時再重算最新的 offset／文字。 */}
+      {/* 注意：不要在這裡攔截 mousedown（例如 e.preventDefault()），否則會吃掉滑鼠預設行為、妨礙選取與複製。
+          選取的文字在按鈕出現時已存進 branchSel state，因此 onClick 不需要靠 mousedown 保住選取。 */}
       {branchSel && (
         <button
           ref={branchBtnRef}
-          onPointerDown={(e) => e.preventDefault()}
           onClick={createBranchFromSelection}
           style={{ left: branchSel.x, top: branchSel.y }}
           className="fixed -translate-x-1/2 -translate-y-full z-50 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#7B90D2] hover:bg-[#51A8DD] rounded-full shadow-lg border border-white/50 transition-colors cursor-pointer"

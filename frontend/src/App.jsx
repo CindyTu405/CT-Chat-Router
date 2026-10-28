@@ -238,13 +238,10 @@ function App() {
   };
 
   // 4. 發送訊息 (核心邏輯)
-  // (G6) 抽成 sendMessage(content)：handleSend 用它送輸入框內容，
-  // 「重試」也用它把失敗的那則使用者訊息原封不動重送一次。
-  const sendMessage = async (rawContent) => {
-    const content = typeof rawContent === 'string' ? rawContent : input;
-    if (!content.trim() || isLoading) return;
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
 
-    const userMessageContent = content;
+    const userMessageContent = input;
     setInput(""); // 馬上清空輸入框，提升體驗
     setIsLoading(true);
 
@@ -304,21 +301,6 @@ function App() {
       
       // ★ 修正 1：將 ID 的抓取移到 while 迴圈「之前」，這樣迴圈內才能使用
       const newMsgId = response.headers.get("X-Message-Id");
-      // (G1) 後端回傳本次 user 訊息的真實 id：新對話的第一則 user 訊息是樂觀插入的（無 id），
-      // 補上後 handleCreateBranch 才拿得到 rootId，不會誤報「請先重新載入對話再建立分支」。
-      const newUserMsgId = response.headers.get("X-User-Message-Id");
-      if (newUserMsgId) {
-        setMessages(prev => {
-          if (activeRootIdRef.current !== sendConvId) return prev;
-          if (prev.length === 0) return prev;
-          const first = prev[0];
-          // 只補「這次送出的那則」：畫面第一則是 user 且還沒有 id 時才寫入
-          if (!first || first.role !== 'user' || first.id) return prev;
-          const next = [...prev];
-          next[0] = { ...first, id: newUserMsgId };
-          return next;
-        });
-      }
 
       while (true) {
         // ★★★ (P3b) 使用者已切換到別的對話 → 停止套用，別把內容寫進別人的對話 ★★★
@@ -363,24 +345,7 @@ function App() {
         // 已被切換的對話：靜默結束
       } else {
         console.error("Error:", error);
-        // (G6) 串流失敗：把最後那則空的 assistant 佔位換成可重試的錯誤訊息，
-        // 並記下這次要重送的使用者內容（retryContent），重試時才不用重新打字。
-        setMessages(prev => {
-          if (activeRootIdRef.current !== sendConvId) return prev;
-          const next = [...prev];
-          const last = next[next.length - 1];
-          const errorMsg = {
-            role: 'assistant',
-            content: "⚠️ 連線錯誤，請檢查後端是否啟動。",
-            isError: true,
-            retryContent: userMessageContent,
-          };
-          if (last && last.role === 'assistant' && !last.content) {
-            next[next.length - 1] = { ...errorMsg, id: last.id };
-            return next;
-          }
-          return [...next, errorMsg];
-        });
+        setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 連線錯誤，請檢查後端是否啟動。" }]);
       }
     } finally {
       // 只有還是「自己這條」串流時才清掉 loading，否則新對話自己的送出流程會被誤解除
@@ -389,38 +354,6 @@ function App() {
         setIsLoading(false);
       }
     }
-  };
-
-  // 送出輸入框內容（原本 handleSend 的行為）
-  const handleSend = () => sendMessage(input);
-
-  // (G6) 重試失敗的回應：把結尾那則「錯誤 + 它前一則 user 訊息」移除後重送，
-  // 避免同一個提問在畫面上出現兩次、parent_id 也對不上。
-  const handleRetry = async (retryMessage) => {
-    if (isLoading) return;
-    const content = retryMessage?.retryContent;
-    if (!content) return;
-
-    let removedUserContent = null;
-    setMessages(prev => {
-      const next = [...prev];
-      let idx = next.length - 1;
-      // 從尾端往前跳過所有「錯誤／還在 Thinking 的空」assistant 訊息
-      while (idx >= 0 && next[idx]?.role === 'assistant' && (next[idx].isError || !next[idx].content)) {
-        idx -= 1;
-      }
-      if (next[idx]?.role === 'user') {
-        removedUserContent = next[idx].content;
-        next.splice(idx); // 移除那則 user 訊息與其後所有殘骸
-      } else {
-        next.splice(idx + 1); // 只清掉尾端的錯誤／空訊息
-      }
-      return next;
-    });
-
-    // sendMessage 會補回 user 訊息並重送，parent_id 也會依清理後的畫面重算
-    setIsLoading(false); // 允許重送（sendMessage 會擋掉 isLoading）
-    await sendMessage(removedUserContent ?? content);
   };
 
   // ★★★ (P2-5) 分支面板：狀態操作小工具 ★★★
@@ -736,7 +669,6 @@ function App() {
           isLoading={isLoading}
           setInput={setInput}
           onCreateBranch={handleCreateBranch}
-          onRetry={handleRetry}
           branchList={branchList}
           onOpenBranch={openBranchFromHighlight}
           scrollContainerRef={scrollContainerRef}
