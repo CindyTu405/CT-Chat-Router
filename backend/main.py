@@ -95,7 +95,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Message-Id"],
+    expose_headers=["X-Message-Id", "X-User-Message-Id"],
 )
 
 # 模型白名單（免費 tier）：環境變數 ALLOWED_MODELS，逗號分隔。
@@ -268,6 +268,7 @@ async def chat_endpoint(payload: ChatRequest, request: Request, session: Session
         stream_generator(),
         media_type="text/plain",
         headers={"X-Message-Id": ai_id,
+                "X-User-Message-Id": str(user_msg.id),  # 讓前端把樂觀顯示的 user 訊息補上真 id
                 "X-Accel-Buffering": "no",      # ★ 叫 Nginx 絕對不要緩衝
                 "Cache-Control": "no-cache",    # ★ 不要快取
                 "Connection": "keep-alive"      # ★ 保持連線開啟
