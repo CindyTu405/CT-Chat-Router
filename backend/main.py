@@ -540,6 +540,8 @@ def create_branch(
         root_message_id=None,
         anchor_message_id=payload.anchor_message_id,
         anchor_text=payload.anchor_text,
+        anchor_start=payload.anchor_start,
+        anchor_end=payload.anchor_end,
         title=title,
         # 若 anchor 本身已屬於某條分支，代表這是「分支再分支」
         parent_branch_id=anchor_msg.branch_id,
@@ -577,6 +579,9 @@ def create_branch(
         "branch_id": str(branch.id),
         "anchor_message_id": str(branch.anchor_message_id),
         "anchor_text": branch.anchor_text,
+        "anchor_start": branch.anchor_start,
+        "anchor_end": branch.anchor_end,
+        "precise": branch.anchor_start is not None and branch.anchor_end is not None,
         "root_message_id": None,
     }
 
@@ -599,6 +604,7 @@ def list_branches(root_id: uuid.UUID, session: Session = Depends(get_session)):
         JOIN tree t ON m.parent_id = t.id
     )
     SELECT b.id, b.title, b.anchor_message_id, b.anchor_text,
+           b.anchor_start, b.anchor_end,
            b.root_message_id, b.parent_branch_id, b.created_at
     FROM branch b
     WHERE b.anchor_message_id IN (SELECT id FROM tree)
@@ -613,6 +619,9 @@ def list_branches(root_id: uuid.UUID, session: Session = Depends(get_session)):
             "title": row["title"],
             "anchor_message_id": str(row["anchor_message_id"]),
             "anchor_text": row["anchor_text"],
+            "anchor_start": row["anchor_start"],
+            "anchor_end": row["anchor_end"],
+            "precise": row["anchor_start"] is not None and row["anchor_end"] is not None,
             "root_message_id": str(row["root_message_id"]) if row["root_message_id"] else None,
             "parent_branch_id": str(row["parent_branch_id"]) if row["parent_branch_id"] else None,
             "created_at": to_utc_iso(row["created_at"]),

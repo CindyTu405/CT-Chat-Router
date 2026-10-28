@@ -39,6 +39,9 @@ class Branch(SQLModel, table=True):
     anchor_message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
     # 分支當下的錨點文字快照 (P2-9)：anchor 訊息被編輯/刪除時仍能顯示分支來源
     anchor_text: Optional[str] = None
+    # 錨點在來源 markdown 的字元位移（半開區間：[start, end)），None 代表沒有精確位置
+    anchor_start: Optional[int] = None
+    anchor_end: Optional[int] = None
     title: Optional[str] = None
     parent_branch_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="branch.id"
@@ -142,6 +145,9 @@ class CreateBranchRequest(SQLModel):
     content: Optional[str] = None
     # 錨點文字快照，用來當分支標題
     anchor_text: Optional[str] = None
+    # 錨點在來源 markdown 的字元位移（半開區間：[start, end)）
+    anchor_start: Optional[int] = None
+    anchor_end: Optional[int] = None
 
 
 class FreeModelsCache(SQLModel, table=True):
