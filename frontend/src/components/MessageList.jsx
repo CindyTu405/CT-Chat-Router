@@ -277,10 +277,11 @@ function MessageList({
       return;
     }
 
-    // 選取必須完全落在這個 AI 泡泡內
+    // 選取必須完全落在這個 AI 泡泡內，並記下父層容器以驗證（mouseup 時用）
+    const bubbleEl = e.currentTarget;
     if (
-      !e.currentTarget.contains(selection.anchorNode) ||
-      !e.currentTarget.contains(selection.focusNode)
+      !bubbleEl.contains(selection.anchorNode) ||
+      !bubbleEl.contains(selection.focusNode)
     ) {
       return;
     }
@@ -288,13 +289,19 @@ function MessageList({
     // 串流中的訊息還沒有真正的 id，不能當 anchor
     if (!msg.id) return;
 
+    const selectedText = offsets ? msg.content.slice(start, end) : selection.toString().trim();
+    if (!selectedText) {
+      setBranchSel(null);
+      return;
+    }
+
     const rect = selection.getRangeAt(0).getBoundingClientRect();
     const halfButton = 60; // 粗略半寬，避免按鈕被視窗邊界切掉
+    // (G5) 只記「哪則訊息 + 內容 + 按鈕位置」：文字/offset 等按下按鈕那一刻再重算，
+    // 這樣使用者還能用 shift+方向鍵／手機選取把手調整範圍。
     setBranchSel({
       messageId: msg.id,
-      text,
-      start,
-      end,
+      content: msg.content,
       x: Math.min(Math.max(rect.left + rect.width / 2, halfButton), window.innerWidth - halfButton),
       y: Math.max(rect.top - 8, 48),
     });
@@ -302,7 +309,26 @@ function MessageList({
 
   const createBranchFromSelection = () => {
     if (!branchSel) return;
-    onCreateBranch(branchSel.messageId, branchSel.text, branchSel.start, branchSel.end);
+    // (G5) 以「現在的」選取為準重算 offset / 文字，讓使用者調整後的範圍生效。
+    const selection = window.getSelection();
+    let text = '';
+    let start = null;
+    let end = null;
+    if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
+      const offsets = selectionOffsets(selection);
+      if (offsets) {
+        [start, end] = offsets;
+        text = branchSel.content.slice(start, end);
+      } else {
+        text = selection.toString().trim();
+      }
+    }
+    const finalText = text || selection?.toString().trim() || '';
+    if (!finalText) {
+      setBranchSel(null);
+      return;
+    }
+    onCreateBranch(branchSel.messageId, finalText, start, end);
     window.getSelection()?.removeAllRanges();
     setBranchSel(null);
   };
@@ -574,11 +600,13 @@ function MessageList({
       )}
 
       {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕 ★★★ */}
-      {/* 注意：不要在這裡攔截 mousedown（例如 e.preventDefault()），否則會吃掉滑鼠預設行為、妨礙選取與複製。
-          選取的文字在按鈕出現時已存進 branchSel state，因此 onClick 不需要靠 mousedown 保住選取。 */}
+      {/* 注意：這裡的 onPointerDown preventDefault 是「刻意」的——(G5) 防止按下按鈕時清掉文字選取，
+          讓原生選取高亮保留，使用者還可以用 shift+方向鍵／手機把手調整範圍，再按按鈕建立分支。
+          onClick 仍會正常觸發，建立分支時再重算最新的 offset／文字。 */}
       {branchSel && (
         <button
           ref={branchBtnRef}
+          onPointerDown={(e) => e.preventDefault()}
           onClick={createBranchFromSelection}
           style={{ left: branchSel.x, top: branchSel.y }}
           className="fixed -translate-x-1/2 -translate-y-full z-50 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#7B90D2] hover:bg-[#51A8DD] rounded-full shadow-lg border border-white/50 transition-colors cursor-pointer"
