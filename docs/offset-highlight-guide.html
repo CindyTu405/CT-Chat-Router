@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>高亮為什麼破版 — offset＋AST 教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --danger: #b91c1c;
+    --danger-bg: #fef2f2;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn, .danger { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .danger { background: var(--danger-bg); border-left: 4px solid var(--danger); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .danger b { color: var(--danger); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .demo {
+    border: 1px dashed var(--accent); border-radius: 10px; padding: 16px 18px;
+    background: #fafbff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+    margin: 14px 0; overflow-x: auto; line-height: 1.9;
+  }
+  .demo .idx { color: #9aa5b5; font-size: 12px; }
+  mark.demo-mark { background: #fcd34d; color: inherit; padding: 1px 3px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="badge">Phase 3b · 主題 1 · 前端＋後端</div>
+  <h1>高亮為什麼破版：從字串 split 到 offset＋AST</h1>
+  <p>這份文件解釋兩個 bug 的共同根因，以及正確的修法要引入什麼概念。</p>
+</header>
+
+<section class="card">
+  <h2><span class="num">1</span>先看問題長怎樣</h2>
+  <p>目前在對話裡選一段文字、開分支後，那則訊息的高亮有兩個已知問題：</p>
+  <ul>
+    <li><b>問題 A（換行）</b>：被高亮的那段文字會跳出來變成<mark class="demo-mark">單獨一行</mark>，原本的段落結構被拆散。</li>
+    <li><b>問題 B（重複）</b>：整則訊息裡，只要出現「一樣的文字」，<mark class="demo-mark">全都</mark>變成高亮，而不是只有你選取的那一處。</li>
+  </ul>
+  <p>這兩個問題看起來無關，其實是同一個根因造成的。看懂這個根因，後面就一路順。</p>
+</section>
+
+<section class="card">
+  <h2><span class="num">2</span>什麼是「字串 split」</h2>
+  <p>現在的高亮程式（<code>frontend/src/components/MessageList.jsx</code> 的 <code>buildAnchorSegments</code>）是這樣做的：</p>
+  <pre><code>const content = "蘋果好吃，蘋果也很甜";
+const needle  = "蘋果";                    <span class="cm">// 使用者選取的那段文字</span>
+content.split(needle);
+<span class="cm">// 回傳：["", "好吃，", "也很甜"]</span></code></pre>
+  <p><code>split</code> 是字串內建的方法：給它一個「刀」，它就沿著每一處刀口把字串切成一塊一塊。</p>
+  <p>那「高亮」是怎麼用 split 做出來的呢？就是：把內容切成「普通文字 / 高亮文字 / 普通文字 / 高亮文字 …」交錯的片段，然後普通片段照常渲染、高亮片段用 <code>&lt;mark&gt;</code> 包起來。</p>
+  <div class="flow">
+    <div class="box">整段 markdown</div>
+    <div class="arrow">→ split →</div>
+    <div class="box">文字片段 A</div>
+    <div class="box">高亮片段</div>
+    <div class="box">文字片段 B</div>
+  </div>
+  <div class="warn"><b>核心缺陷：</b>split 只知道「文字長什麼樣」，<b>不知道「位置」</b>。這正是兩個 bug 的來源。</div>
+</section>
+
+<section class="card">
+  <h2><span class="num">3</span>為什麼 split 造成這兩個 bug</h2>
+
+  <h3>問題 B（重複）：split 命中「每一處」相同文字</h3>
+  <p>split 沿著<em>所有</em>刀口切，所以上面那個範例裡兩個「蘋果」都被切到。你明明只選了第二個「蘋果」，但程式只知道「找『蘋果』」，於是全都高亮。</p>
+
+  <h3>問題 A（換行）：split 把 markdown 結構切碎了</h3>
+  <p>這比較微妙。原本一整段 markdown 是「一整塊」交給解析器渲染，例如：</p>
+  <pre><code>**重點**文字在這裡繼續</code></pre>
+  <p>渲染後是同一段落的串流：<code>&lt;p&gt;&lt;strong&gt;重點&lt;/strong&gt;文字在這裡繼續&lt;/p&gt;</code>。</p>
+  <p>但 split 之後變成三塊，各自<em>分開</em>渲染：</p>
+  <pre><code>&lt;p&gt;&lt;strong&gt;重點&lt;/strong&gt;&lt;/p&gt;   <span class="cm">← 文字片段 A，自己變一段</span>
+&lt;mark&gt;文字&lt;/mark&gt;            <span class="cm">← 高亮片段，孤零零在 p 之外</span>
+&lt;p&gt;在這裡繼續&lt;/p&gt;              <span class="cm">← 文字片段 B，又自己一段</span></code></pre>
+  <p>因為 <code>&lt;mark&gt;</code> 被放在段落（<code>&lt;p&gt;</code>）之間，瀏覽器就把它當成獨立的一塊（block），前後自然斷行。段落被打散、粗體語法（<code>**</code>）也被切到不同塊裡，結構就壞了。</p>
+
+  <div class="tip"><b>一句話總結：</b>split 是「切字串」，但 markdown 是「有結構的樹」。用切字串的方式去改樹的內容，結構一定壞。</div>
+</section>
+
+<section class="card">
+  <h2><span class="num">4</span>更對的概念：offset（字元位置）</h2>
+  <p>如果我們不只記錄「選了什麼文字」，還記錄「選的是<em>哪個位置</em>」，重複問題就解了——因為位置是唯一的，同樣的文字出現兩次，位置不同。</p>
+  <p>「位置」的標準講法叫 <b>offset（偏移量）</b>，就是「第幾個字元」。字串裡每個字元都有一個編號，從 0 開始：</p>
+  <div class="demo">
+    "蘋果好吃，蘋果也很甜"<br>
+    <span class="idx">&nbsp;0&nbsp;1&nbsp;2&nbsp;3&nbsp;4&nbsp;5&nbsp;6&nbsp;7&nbsp;8&nbsp;9</span><br>
+    <span class="idx">&nbsp;蘋 果 好 吃 ， 蘋 果 也 很 甜</span>
+  </div>
+  <pre><code>const s = "蘋果好吃，蘋果也很甜";
+s[0];           <span class="cm">// "蘋"</span>
+s[1];           <span class="cm">// "果"</span>
+s.slice(5, 7);  <span class="cm">// "蘋果"  ← 第二個「蘋果」，位置是 [5, 7)</span></code></pre>
+  <p>注意它寫成 <b>[5, 7)</b>：<b>半開區間</b>——包含起點 5，不包含終點 7。終點「指到哪裡、就不算到哪裡」。這是程式界的慣例（Python 的 <code>slice</code>、JS 的 <code>slice</code> 都是這樣）。</p>
+  <p>所以一個「高亮錨點」不再是「一段文字」，而是「一對數字」：</p>
+  <pre><code>anchor_start = 5     <span class="cm">// 從第 5 個字元開始</span>
+anchor_end   = 7     <span class="cm">// 到第 7 個字元之前結束（不含第 7 個）</span>
+anchor_text  = "蘋果" <span class="cm">// 快照，方便顯示標題、做校驗</span></code></pre>
+  <p>有了這對數字，「只高亮第二個蘋果」就是「只包住 [5, 7) 這一段」，第一個蘋果在 [0, 2)，完全不受影響。</p>
+</section>
+
+<section class="card">
+  <h2><span class="num">5</span>為什麼 offset 要存進後端</h2>
+  <p>你可能會想：那就在前端選取時算好 offset，存在前端記憶體就好，幹嘛動後端？</p>
+  <p>問題在於「重新整理」。使用者重新整理網頁（或換裝置）之後：</p>
+  <ul>
+    <li>前端記憶體沒了，offset 就沒了。</li>
+    <li>但分支資料是從後端（資料庫）讀回來的。</li>
+  </ul>
+  <p>如果後端只存了 <code>anchor_text = "蘋果"</code> 而沒存 offset，重新整理後前端又只剩下「文字」、沒有「位置」，於是又退回 split 的老路 → 重複高亮復發。</p>
+  <p>所以要根治，<b>offset 必須跟著分支一起存進資料庫</b>。後端只是「幫你把這兩個數字存起來、原樣還給你」，它自己不用算、不用懂。</p>
+  <div class="flow">
+    <div class="box">前端：選取 → 算出 offset</div>
+    <div class="arrow">→ 存 →</div>
+    <div class="box">後端 DB：Branch 表多兩欄</div>
+    <div class="arrow">→ 讀回 →</div>
+    <div class="box">前端：照 offset 高亮</div>
+  </div>
+  <p>這就是 DESIGN_P3 主題 1 說的「後端 B1」：給 <code>Branch</code> 加 <code>anchor_start</code>、<code>anchor_end</code> 兩個欄位，並讓 <code>create_branch</code> 把它們存起來、列表時回傳。</p>
+</section>
+
+<section class="card">
+  <h2><span class="num">6</span>前端怎麼「算出」offset：DOM 選取對映</h2>
+  <p>這是最難的一步，先建立直覺。</p>
+
+  <h3>為什麼不能直接數「畫面上的文字」？</h3>
+  <p>因為 markdown 渲染後，文字和原始內容對不上。例如原始內容是 <code>**重點**</code>，畫面上只有「重點」兩個字，那兩個 <code>**</code> 不見了；又例如列表、表格，渲染後還會多出編號、換行。所以你從「渲染後的文字」往回數位置，是數不準的。</p>
+
+  <h3>解法：渲染時就「埋座標」</h3>
+  <p>markdown 解析器（remark）在把字串解析成樹的時候，<b>本來就知道每個字元的原始位置</b>——這份資訊叫 <b>position</b>（每個節點記錄自己「從 source 第幾個字元到第幾個字元」）。</p>
+  <p>我們只要在渲染時，把這個位置「寫進」每個文字節點，之後選取時就能讀回來。做法：用一個 rehype 外掛，把每個 text node 包成帶座標的 <code>&lt;span&gt;</code>：</p>
+  <pre><code><span class="cm">// 渲染時（rehype 外掛）——把 text node 換成帶座標的 span</span>
+&lt;span data-s="5" data-e="7"&gt;蘋果&lt;/span&gt;
+<span class="cm">// data-s = source start，data-e = source end（也就是這個 text 的 offset 範圍）</span></code></pre>
+  <p>使用者選取時，瀏覽器會給我們一個 <code>Range</code>（選取的範圍），裡面有 <code>startContainer</code>（從哪個 DOM 節點開始）和 <code>startOffset</code>（在該節點內的第幾個字元）。我們往上找到那個帶 <code>data-s</code> 的 span，就能還原出 source 的 offset：</p>
+  <pre><code>const range = window.getSelection().getRangeAt(0);
+const node  = range.startContainer;      <span class="cm">// DOM 文字節點</span>
+const span  = node.parentElement;        <span class="cm">// 帶 data-s 的那個</span>
+const start = Number(span.dataset.s) + range.startOffset;
+<span class="cm">// 同理，end 用 range.endContainer / range.endOffset 算出來</span></code></pre>
+
+  <div class="tip"><b>直覺：</b>「埋座標 → 讀座標」。渲染時把每個字元的原始位置偷偷寫在 DOM 上，選取時再從 DOM 讀回來。這樣不管 markdown 怎麼變形，都能精準對回原始字串。</div>
+</section>
+
+<section class="card">
+  <h2><span class="num">7</span>高亮走 AST：不要切字串，改「在樹裡包一段」</h2>
+  <p>有了 offset，高亮就不用 split 了。新做法是：</p>
+  <ol>
+    <li>把整則訊息內容解析成樹（HAST）。這棵樹就是「段落 → 句子 → 文字」的結構，每個文字節點都帶 position。</li>
+    <li>走訪所有文字節點，找出「和 [anchor_start, anchor_end) 有重疊」的那（幾）個。</li>
+    <li>在重疊的那個文字節點<b>內部</b>，把它切成三段：前面、重疊段、後面。</li>
+    <li>只把「重疊段」用 <code>&lt;mark&gt;</code> 包起來，前面、後面維持原樣。</li>
+  </ol>
+  <pre><code>const content = "**重點**文字在這裡";
+const anchor  = { start: 6, end: 8 };   <span class="cm">// 假設選了「文字」</span>
+
+<span class="cm">// 樹長這樣（簡化）</span>
+// paragraph
+//   ├─ strong "重點"     ← 這個文字節點位置 [0, 4]，沒重疊 → 不動
+//   └─ text   "文字在這裡" ← 位置 [6, 11]，和 [6,8) 重疊 → 在內部切開
+
+<span class="cm">// 切開後，只在段落「裡面」插入 mark，段落結構完整保留：</span>
+&lt;p&gt;
+  &lt;strong&gt;重點&lt;/strong&gt;
+  &lt;mark&gt;文字&lt;/mark&gt;在這裡
+&lt;/p&gt;</code></pre>
+  <p>和 split 的差別，一目了然：</p>
+  <ul>
+    <li><b>split</b>：把整塊 markdown 先切成碎片，再各自渲染 → 段落結構被拆散（問題 A）。</li>
+    <li><b>AST</b>：樹不動，只在某個文字節點<em>內部</em>做局部切割 → 段落、粗體、列表、表格全部原封不動。</li>
+  </ul>
+  <p>而且因為是照 offset 定位，只有選取的那一處被包（問題 B 也一起解決）。</p>
+
+  <div class="tip"><b>同一個 offset 還能做別的事：</b>之後要做的「匯出成 Obsidian wiki 連結（<code>[[分支標題|顯示文字]]</code>）」也是同一套邏輯——照 offset 做「由右到左」的單次替換。所以這一套 offset 是後面一連串功能的共用地基。</div>
+</section>
+
+<section class="card">
+  <h2><span class="num">8</span>前後對比</h2>
+  <table>
+    <thead>
+      <tr><th></th><th>現在（split）</th><th>目標（offset＋AST）</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>定位方式</td><td>比對「文字內容」</td><td>比對「字元位置 [start, end)」</td></tr>
+      <tr><td>同樣文字出現多次</td><td>全中（問題 B）</td><td>只中選取那一處</td></tr>
+      <tr><td>markdown 結構</td><td>被切碎（問題 A）</td><td>原封不動</td></tr>
+      <tr><td>資料存哪裡</td><td>後端只存 anchor_text</td><td>後端多存 anchor_start / anchor_end</td></tr>
+      <tr><td>重新整理後</td><td>退回重複高亮</td><td>offset 還在，高亮精準</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2><span class="num">9</span>一個容易踩的坑：emoji 與字元編碼</h2>
+  <p>offset 是「第幾個字元」，但「字元」在兩種語言裡數法不一樣，處理 emoji 時會打架：</p>
+  <ul>
+    <li><b>JavaScript（前端）</b>用 <b>UTF-16 code unit</b> 數：一個 emoji（如 😀）佔 <b>2</b> 個單位，<code>"😀".length</code> 是 2。</li>
+    <li><b>Python（後端）</b>用 <b>Unicode code point</b> 數：同一個 emoji 佔 <b>1</b> 個，<code>len("😀")</code> 是 1。</li>
+  </ul>
+  <p>如果「前端算、後端拿來切字串」，兩邊的數字對不上，就會切錯。</p>
+  <div class="tip"><b>對策（很重要）：</b>offset 一律<b>由前端算、由前端用</b>。後端只負責「存數字、還數字」，<b>絕對不拿 offset 去切字串</b>。這樣兩端永遠用同一套（JS 的）計數法，emoji 再多也不會跑掉。</div>
+</section>
+
+<section class="card">
+  <h2><span class="num">10</span>動手前的練習</h2>
+  <p>看完這份文件，先自己回答這幾題，確認概念有進去：</p>
+  <ol>
+    <li><code>"你好世界".split("好")</code> 回傳什麼？「好」在兩個不同位置出現，split 分得出來嗎？</li>
+    <li>「世界」在 <code>"你好世界"</code> 裡的 offset 是多少？（提示：半開區間，數一下「你」「好」各佔一格。）</li>
+    <li>為什麼 offset 一定要存後端，不能只留前端記憶體？</li>
+    <li>「渲染後畫面文字」為什麼不能直接數位置對回原始 markdown？（舉一個 markdown 語法當例子。）</li>
+    <li>AST 高亮和 split 高亮，對「段落結構」的差別是什麼？</li>
+  </ol>
+  <p class="muted">這份文件是「概念層」。真正的實作會拆成三個 commit：後端 offset 欄位（B1）→ 前端選取對映（F7）→ 前端 AST 高亮（F8）。確認概念 OK 再開始。</p>
+</section>
+
+</div>
+</body>
+</html>
