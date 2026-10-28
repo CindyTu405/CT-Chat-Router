@@ -239,7 +239,35 @@ const anchor  = { start: 6, end: 8 };   <span class="cm">// 假設選了「文�
   </ul>
   <p>而且因為是照 offset 定位，只有選取的那一處被包（問題 B 也一起解決）。</p>
 
-  <div class="tip"><b>同一個 offset 還能做別的事：</b>之後要做的「匯出成 Obsidian wiki 連結（<code>[[分支標題|顯示文字]]</code>）」也是同一套邏輯——照 offset 做「由右到左」的單次替換。所以這一套 offset 是後面一連串功能的共用地基。</div>
+  <div class="tip"><b>同一個 offset 還能做別的事：</b>之後要做的「匯出成 Obsidian wiki 連結（<code>[[分支標題|顯示文字]]</code>）」也是同一套邏輯。所以這一套 offset 是後面一連串功能的共用地基。</div>
+
+  <h3>補充：匯出成 md 檔時，高亮怎麼變連結？</h3>
+  <p>這是整套 offset 最簡單的一步——因為 md 檔本身就是「字串」，不用管畫面結構。做法是對原始 markdown 字串做<b>精準字串替換</b>，把 [start, end) 那段換成 wiki 連結：</p>
+  <pre><code>out = content.slice(0, start)
+    + "[[" + branch.title + "|" + branch.anchor_text + "]]"
+    + content.slice(end);</code></pre>
+  <p>格式（主題 5.2）：<code>[[分支標題|顯示文字]]</code>——標題是匯出後的檔名，顯示文字就是選取的那段 <code>anchor_text</code>。</p>
+  <div class="tip"><b>為什麼這裡能用字串替換、高亮卻不行？</b>差別在「有沒有 offset」。匯出時有 offset，<code>slice(start)</code>＋<code>slice(end)</code> 是精準定位、不會命中別處；之前壞掉的高亮是 split 靠「猜文字」、沒有位置。字串替換本身不是壞東西，壞的是「沒有 offset 的字串替換」。</div>
+
+  <h3>關鍵：一定要「由右到左」</h3>
+  <p>多個錨點時，要先處理「最右邊」的那個，再往左。因為每次替換都會改變字串長度——先改左邊，會讓右邊的 offset 全部位移、切錯位置。</p>
+  <pre><code>anchors.sort((a, b) => b.start - a.start);  <span class="cm">// 依 start 由大到小</span>
+for (const a of anchors) {
+  out = out.slice(0, a.start)
+      + "[[" + a.title + "|" + a.anchor_text + "]]"
+      + out.slice(a.end);
+}</code></pre>
+  <p>舉例：兩個「蘋果」各是一條分支。</p>
+  <div class="demo">
+    原始：蘋果好吃，蘋果也很甜<br>
+    錨點A：[0,2) → 分支A<br>
+    錨點B：[5,7) → 分支B<br><br>
+    由右到左，先 B 再 A：<br>
+    1) 蘋果好吃，[[分支B|蘋果]]也很甜<br>
+    2) [[分支A|蘋果]]好吃，[[分支B|蘋果]]也很甜
+  </div>
+  <p>反過來先處理 A，[5,7) 就會因為前面變長而位移、切錯。</p>
+  <p>輸出格式也能選：不連出去、純高亮就用 <code>==文字==</code>（Obsidian 的 highlight 語法），依匯出開關決定。</p>
 </section>
 
 <section class="card">
