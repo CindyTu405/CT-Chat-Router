@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { Bot, User, Sparkles, GitBranch, ArrowDown } from 'lucide-react';
+import { Bot, User, Sparkles, GitBranch, ArrowDown, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -114,6 +114,16 @@ const buildAnchorSegments = (content, anchors) => {
   return segments;
 };
 
+// (G8) 複製訊息內容；clipboard 不可用時靜默失敗（不拋錯）
+const copyText = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // 中間對話視窗：空狀態提示、訊息氣泡（Markdown／程式碼高亮）、選取文字建立分支
 function MessageList({
   messages,
@@ -136,6 +146,19 @@ function MessageList({
   // (P2-4) 選取 AI 回覆後的浮動「建立分支」按鈕狀態
   const [branchSel, setBranchSel] = useState(null); // { messageId, text, x, y } | null
   const branchBtnRef = useRef(null);
+
+  // (G8) 剛複製成功的訊息 key（短暫顯示勾勾）
+  const [copiedKey, setCopiedKey] = useState(null);
+  useEffect(() => {
+    if (!copiedKey) return undefined;
+    const t = setTimeout(() => setCopiedKey(null), 1200);
+    return () => clearTimeout(t);
+  }, [copiedKey]);
+
+  const handleCopyMessage = async (msg, key) => {
+    const ok = await copyText(msg.content || '');
+    if (ok) setCopiedKey(key);
+  };
 
   // (P2-12) message id → 掛在這則訊息上的分支（只收有 anchor_text 的）
   const anchorsByMessageId = useMemo(() => {
@@ -407,6 +430,18 @@ function MessageList({
               }`}>
                 
                 <div className="relative group/bubble">
+                  {/* (G8) 複製按鈕：懸停訊息時出現在氣泡右上角 */}
+                  <button
+                    type="button"
+                    onClick={() => handleCopyMessage(msg, index)}
+                    title={copiedKey === index ? '已複製' : '複製訊息'}
+                    aria-label="複製訊息"
+                    className={`absolute -top-2 z-10 p-1 rounded-lg border bg-white/95 shadow-sm transition-opacity cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-400 hover:text-[#51A8DD] border-gray-200 ${
+                      msg.role === 'user' ? '-left-2' : '-right-2'
+                    }`}
+                  >
+                    {copiedKey === index ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
                   {/* 對話框 */}
                   <div className={`
                     px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1

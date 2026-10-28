@@ -1,10 +1,20 @@
 import { useRef, useEffect, useState } from 'react';
-import { Send, Bot, User, GitBranch, X, PanelRightClose, Sparkles } from 'lucide-react';
+import { Send, Bot, User, GitBranch, X, PanelRightClose, Sparkles, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { handleEnterKey } from '../keyUtils';
+
+// (G8) 複製訊息內容；clipboard 不可用時靜默失敗（不拋錯）
+const copyText = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 // (P2-5) 右側分支面板：多 tab 切換、各分支獨立訊息串與獨立輸入框
 // props:
@@ -28,6 +38,19 @@ function BranchPanel({
 }) {
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // (G8) 剛複製成功的訊息 key（短暫顯示勾勾）
+  const [copiedKey, setCopiedKey] = useState(null);
+  useEffect(() => {
+    if (!copiedKey) return undefined;
+    const t = setTimeout(() => setCopiedKey(null), 1200);
+    return () => clearTimeout(t);
+  }, [copiedKey]);
+
+  const handleCopyMessage = async (msg, key) => {
+    const ok = await copyText(msg.content || '');
+    if (ok) setCopiedKey(key);
+  };
 
   // 面板寬度（可拖曳調整）：佔視窗寬度 20% ~ 50%，以百分比儲存並持久化
   const MIN_PANEL_PERCENT = 20;
@@ -251,12 +274,28 @@ function BranchPanel({
                 </div>
 
                 <div
-                  className={`min-w-0 max-w-[85%] px-3 py-2 rounded-xl text-[13px] leading-relaxed shadow-sm border ${
+                  className={`relative group/bubble min-w-0 max-w-[85%] px-3 py-2 rounded-xl text-[13px] leading-relaxed shadow-sm border ${
                     msg.role === 'user'
                       ? 'bg-[#51A8DD] text-white border-[#51A8DD] rounded-tr-none'
                       : 'bg-white text-gray-800 border-[#7B90D2]/60 rounded-tl-none'
                   }`}
                 >
+                  {/* (G8) 複製按鈕：懸停訊息時出現在氣泡右上角 */}
+                  <button
+                    type="button"
+                    onClick={() => handleCopyMessage(msg, msg.id || `tmp-${idx}`)}
+                    title={copiedKey === (msg.id || `tmp-${idx}`) ? '已複製' : '複製訊息'}
+                    aria-label="複製訊息"
+                    className={`absolute -top-2 z-10 p-1 rounded-lg border bg-white/95 shadow-sm transition-opacity cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-400 hover:text-[#51A8DD] border-gray-200 ${
+                      msg.role === 'user' ? '-left-2' : '-right-2'
+                    }`}
+                  >
+                    {copiedKey === (msg.id || `tmp-${idx}`) ? (
+                      <Check className="w-3 h-3 text-emerald-500" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                  </button>
                   {msg.content ? (
                     <div className="whitespace-normal break-words overflow-x-auto">
                       <ReactMarkdown
