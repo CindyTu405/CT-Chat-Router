@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { Send, Bot, User, GitBranch, X, PanelRightClose } from 'lucide-react';
+import { Send, Bot, User, GitBranch, X, PanelRightClose, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -327,6 +327,14 @@ function BranchPanel({
                     <span className="animate-pulse text-gray-400">Thinking...</span>
                   )}
                 </div>
+
+                {/* 模型標籤 */}
+                {msg.role === 'assistant' && msg.model_used && (
+                  <div className="mt-1.5 ml-1 text-[11px] text-gray-400 flex items-center gap-1 font-mono">
+                    <Sparkles className="w-3 h-3 text-gray-400" />
+                    {msg.model_used}
+                  </div>
+                )}
               </div>
             ))}
             <div ref={messagesEndRef} />
