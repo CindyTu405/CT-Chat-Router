@@ -1,0 +1,21 @@
+{
+  "model": "sonnet",
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(npm run build)",
+      "Bash(docker compose ps)",
+      "Bash(python3 -m py_compile:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Read(./.env)",
+      "Read(./**/.env)"
+    ]
+  }
+}
