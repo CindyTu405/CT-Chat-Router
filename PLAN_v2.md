@@ -229,7 +229,7 @@ chat-{root_id}-{date}/
 | B4 | 後端：`/chat` context 組裝（`include_main`／`context_branch_ids`、token 截斷） | ⚠️ 待重新評估 | 依賴已廢棄的 F6，需確認是否仍要做 |
 | F9 | 前端：編輯最後一則（inline regenerate）、幽靈分支重連 UI、入口管理右鍵選單 | ⏳ | DESIGN_P3 主題 3、5；範圍待確認 |
 | G2 | 分支地圖依錨點位置排序 | ✅ | 1013464（cherry-pick 自 1c574f1，已在瀏覽器確認） |
-| G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ⏳ 待開始 | 教學：`docs/shared-chat-pane-guide.html`；驗收見下方 |
+| G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ✅ | be02ad3（已在瀏覽器確認）；教學：`docs/shared-chat-pane-guide.html` |
 | G3-2 | 分支面板套用共用組件（含 G4 模型標籤） | ⏳ 待開始 | 依賴 G3-1；驗收見下方 |
 | G5–G9 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
