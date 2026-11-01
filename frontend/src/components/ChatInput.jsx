@@ -3,11 +3,20 @@ import { Send } from 'lucide-react';
 import { handleEnterKey } from '../keyUtils';
 import ModelSelector from './ModelSelector';
 
+// (G3) 主對話／分支面板共用此組件；差異集中在這張表（目前只有提示文字）
+const CHAT_INPUT_VARIANTS = {
+  main: { hint: 'AI模型有可能會出錯，請檢察回覆內容。' },
+  branch: { hint: '分支訊息與主對話各自獨立，不會影響原本的時間線' },
+};
+
 // 底部輸入區塊：自動高度的輸入框、送出按鈕、Enter 行為處理、下方的模型選單
+// (G3) variant：'main'（預設）或 'branch'，決定下方提示文字；placeholder 可自訂輸入框提示。
 function ChatInput({
   input, setInput, isLoading, onSend,
   model, setModel, isCustomModel, setIsCustomModel, freeModels, freeModelsLoading,
+  variant = 'main', placeholder = '輸入訊息...',
 }) {
+  const v = CHAT_INPUT_VARIANTS[variant] || CHAT_INPUT_VARIANTS.main;
   const textareaRef = useRef(null);
 
   // 監聽 input 內容，自動調整輸入框高度
@@ -41,7 +50,7 @@ function ChatInput({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="輸入訊息..."
+          placeholder={placeholder}
           rows="1"
           className="w-full bg-white text-gray-800 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-[#51A8DD]/40 border border-gray-200 group-hover:border-[#7DB9DE] transition resize-none shadow-sm max-h-[224px] overflow-y-auto"
           style={{ minHeight: '56px' }}
@@ -64,7 +73,7 @@ function ChatInput({
           freeModelsLoading={freeModelsLoading}
         />
         <span className="text-xs text-gray-400 font-medium">
-          AI模型有可能會出錯，請檢察回覆內容。
+          {v.hint}
         </span>
       </div>
     </div>

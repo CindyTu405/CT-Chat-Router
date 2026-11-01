@@ -15,6 +15,12 @@ const ANCHOR_MARK_CLASS =
   'bg-amber-200/80 text-inherit rounded-sm px-0.5 underline decoration-amber-500/70 decoration-2 underline-offset-2 cursor-pointer transition-colors hover:bg-amber-300';
 const ANCHOR_MARK_PLAIN_CLASS = 'bg-amber-200/80 text-inherit rounded-sm px-0.5';
 
+// (G3) 主對話／分支面板共用此組件；差異集中在這張表
+const MESSAGE_LIST_VARIANTS = {
+  main: { showAvatar: true },
+  branch: { showAvatar: false },
+};
+
 // Markdown 樣式覆寫（程式碼區塊、表格、連結…），依氣泡角色決定行內程式碼配色。
 // 抽成函式，讓「單段渲染」與「錨點切段渲染」共用同一套樣式。
 // (F8) branchById：branch id → branch 物件（rehypeHighlight 標在 mark 的 data-branch 上）；
@@ -115,6 +121,8 @@ const buildAnchorSegments = (content, anchors) => {
 };
 
 // 中間對話視窗：空狀態提示、訊息氣泡（Markdown／程式碼高亮）、選取文字建立分支
+// (G3) variant：'main'（預設，顯示頭像）或 'branch'（無頭像）；由 MESSAGE_LIST_VARIANTS 決定差異。
+//      emptyState：可選，訊息為空時顯示的內容；未傳則用預設建議卡片。
 function MessageList({
   messages,
   isLoading,
@@ -126,7 +134,10 @@ function MessageList({
   scrollContainerRef,
   skipAutoScrollToken = null,
   forceScrollToken=0,
+  variant = 'main',
+  emptyState,
 }) {
+  const v = MESSAGE_LIST_VARIANTS[variant] || MESSAGE_LIST_VARIANTS.main;
   const messagesEndRef = useRef(null);
   const internalContainerRef = useRef(null);
   // (P3b-F1a-fix) 使用者是否「貼在底部」：由 onScroll 維護，而不是每次內容變動後才量一次
@@ -352,133 +363,142 @@ function MessageList({
   }, [forceScrollToken]);
 
   return (
-    <div
-      ref={(node) => {
-        internalContainerRef.current = node;
-        if (typeof scrollContainerRef === 'function') scrollContainerRef(node);
-        else if (scrollContainerRef) scrollContainerRef.current = node;
-      }}
-      onScroll={handleScroll}
-      className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6"
-    >
-      {messages.length === 0 ? (
-        // --- 空狀態 (Empty State) ---
-        <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-5">
-          <div className="w-16 h-16 bg-[#51A8DD] rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-[#51A8DD]/30">
-            <Bot className="w-8 h-8 text-white" />
-          </div>
-          <div className="text-center space-y-1">
-            <p className="text-2xl font-semibold text-gray-700 tracking-tight">今天想聊些什麼？</p>
-            <p className="text-sm text-gray-400">選一個提示，或直接開始輸入</p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg px-4">
-            {['隨機介紹一個景點', '推薦一道食譜', '分享一本書給我', '講個笑話'].map(suggestion => (
-              <button 
-                key={suggestion}
-                onClick={() => setInput(suggestion)}
-                className="p-4 bg-white/80 border border-[#7DB9DE] hover:bg-gray-100 hover:border-[#7DB9DE] hover:shadow-md rounded-2xl text-sm text-left transition-all cursor-pointer text-gray-600 font-medium"
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : (
-        // --- 對話列表 (Chat List) ---
-        // 修正重點 1: 使用 Fragment (<>...</>) 包裹多個元素
-        <>
-          {messages.map((msg, index) => (
-            <div 
-              key={index} 
-              // (P3b-F1b) scrollToMessage 靠這個屬性定位訊息；樂觀訊息還沒有 id 就不掛
-              {...(msg.id ? { 'data-message-id': msg.id } : {})}
-              className={`flex gap-4 max-w-4xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
-            >
-              {/* 頭像 */}
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white shadow-sm ${msg.role === 'user' ? 'bg-[#51A8DD]' : 'bg-[#7B90D2]'}`}>
-                {msg.role === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
+    // (G3) 外層 relative：「回到底部」按鈕用 absolute 定位在這一區內，不會跑到分支面板上
+    <div className="relative flex-1 min-h-0 flex flex-col">
+      <div
+        ref={(node) => {
+          internalContainerRef.current = node;
+          if (typeof scrollContainerRef === 'function') scrollContainerRef(node);
+          else if (scrollContainerRef) scrollContainerRef.current = node;
+        }}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6"
+      >
+        {messages.length === 0 ? (
+          emptyState !== undefined ? (
+            emptyState
+          ) : (
+            // --- 空狀態 (Empty State) ---
+            <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-5">
+              <div className="w-16 h-16 bg-[#51A8DD] rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-[#51A8DD]/30">
+                <Bot className="w-8 h-8 text-white" />
               </div>
+              <div className="text-center space-y-1">
+                <p className="text-2xl font-semibold text-gray-700 tracking-tight">今天想聊些什麼？</p>
+                <p className="text-sm text-gray-400">選一個提示，或直接開始輸入</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg px-4">
+                {['隨機介紹一個景點', '推薦一道食譜', '分享一本書給我', '講個笑話'].map(suggestion => (
+                  <button
+                    key={suggestion}
+                    onClick={() => setInput(suggestion)}
+                    className="p-4 bg-white/80 border border-[#7DB9DE] hover:bg-gray-100 hover:border-[#7DB9DE] hover:shadow-md rounded-2xl text-sm text-left transition-all cursor-pointer text-gray-600 font-medium"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        ) : (
+          // --- 對話列表 (Chat List) ---
+          // 修正重點 1: 使用 Fragment (<>...</>) 包裹多個元素
+          <>
+            {messages.map((msg, index) => (
+              <div 
+                key={index} 
+                // (P3b-F1b) scrollToMessage 靠這個屬性定位訊息；樂觀訊息還沒有 id 就不掛
+                {...(msg.id ? { 'data-message-id': msg.id } : {})}
+                className={`flex gap-4 max-w-4xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+              >
+                {/* 頭像 */}
+                {v.showAvatar && (
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white shadow-sm ${msg.role === 'user' ? 'bg-[#51A8DD]' : 'bg-[#7B90D2]'}`}>
+                    {msg.role === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
+                  </div>
+                )}
 
-              {/* 訊息內容區塊 */}
-              <div className={`flex flex-col ${
-                msg.role === 'user' 
-                  ? 'items-end max-w-[85%] md:max-w-[75%]' // User 保持原本的泡泡寬度限制
-                  : 'items-start flex-1 min-w-0 mr-12' // AI 使用 flex-1 填滿右側所有剩餘空間，min-w-0 防止文字溢出破版
-              }`}>
+                {/* 訊息內容區塊 */}
+                <div className={`flex flex-col ${
+                  msg.role === 'user' 
+                    ? 'items-end max-w-[85%] md:max-w-[75%]' // User 保持原本的泡泡寬度限制
+                    : 'items-start flex-1 min-w-0 mr-12' // AI 使用 flex-1 填滿右側所有剩餘空間，min-w-0 防止文字溢出破版
+                }`}>
                 
-                <div className="relative group/bubble">
-                  {/* 對話框 */}
-                  <div className={`
-                    px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
-                    ${msg.role === 'user' 
-                      ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD]' 
-                      : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
-                  `}>
-                    {/* (P2-4) 只有 AI 回覆可以「選取文字 → 建立分支」 */}
-                    <div
-                      className="whitespace-normal break-words text-[15px] overflow-x-auto"
-                      onMouseUp={msg.role === 'assistant' ? (e) => handleAssistantMouseUp(e, msg) : undefined}
-                    >
-                      {msg.content ? (
-                        renderContent(msg)
-                      ) : (
-                        <span className="animate-pulse text-gray-400">Thinking...</span>
-                      )}
+                  <div className="relative group/bubble">
+                    {/* 對話框 */}
+                    <div className={`
+                      px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
+                      ${msg.role === 'user' 
+                        ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD]' 
+                        : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
+                    `}>
+                      {/* (P2-4) 只有 AI 回覆可以「選取文字 → 建立分支」 */}
+                      <div
+                        className="whitespace-normal break-words text-[15px] overflow-x-auto"
+                        onMouseUp={msg.role === 'assistant' ? (e) => handleAssistantMouseUp(e, msg) : undefined}
+                      >
+                        {msg.content ? (
+                          renderContent(msg)
+                        ) : (
+                          <span className="animate-pulse text-gray-400">Thinking...</span>
+                        )}
+                      </div>
                     </div>
+
+                    {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
+                    {msg.role === 'user' && (
+                      <div className="text-[11px] text-gray-400 mt-1.5 mr-1 select-none">
+                        {formatShortDateTime(msg.created_at) || '剛剛發送'}
+                      </div>
+                    )}
                   </div>
 
-                  {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
-                  {msg.role === 'user' && (
-                    <div className="text-[11px] text-gray-400 mt-1.5 mr-1 select-none">
-                      {formatShortDateTime(msg.created_at) || '剛剛發送'}
+                  {/* 模型標籤 */}
+                  {msg.role === 'assistant' && msg.model_used && (
+                    <div className="mt-1.5 ml-1 text-[11px] text-gray-400 flex items-center gap-1 font-mono">
+                      <Sparkles className="w-3 h-3 text-gray-400" />
+                      {msg.model_used}
                     </div>
                   )}
                 </div>
-
-                {/* 模型標籤 */}
-                {msg.role === 'assistant' && msg.model_used && (
-                  <div className="mt-1.5 ml-1 text-[11px] text-gray-400 flex items-center gap-1 font-mono">
-                    <Sparkles className="w-3 h-3 text-gray-400" />
-                    {msg.model_used}
-                  </div>
-                )}
               </div>
-            </div>
-          ))}
+            ))}
 
-          {/* 自動捲動定位點 */}
-          <div ref={messagesEndRef} />
-        </>
-      )}
+            {/* 自動捲動定位點 */}
+            <div ref={messagesEndRef} />
+          </>
+        )}
 
+        {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕 ★★★ */}
+        {/* 注意：不要在這裡攔截 mousedown（例如 e.preventDefault()），否則會吃掉滑鼠預設行為、妨礙選取與複製。
+            選取的文字在按鈕出現時已存進 branchSel state，因此 onClick 不需要靠 mousedown 保住選取。 */}
+        {branchSel && (
+          <button
+            ref={branchBtnRef}
+            onClick={createBranchFromSelection}
+            style={{ left: branchSel.x, top: branchSel.y }}
+            className="fixed -translate-x-1/2 -translate-y-full z-50 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#7B90D2] hover:bg-[#51A8DD] rounded-full shadow-lg border border-white/50 transition-colors cursor-pointer"
+            title="用選取的文字建立新分支"
+          >
+            <GitBranch className="w-3.5 h-3.5" />
+            建立分支
+          </button>
+        )}
+      </div>
       {/* ★★★ (P3b-F1a-fix) 懸浮「回到底部」按鈕：只有不在底部且有訊息時才出現 ★★★ */}
+      {/* (G3) absolute 相對於外層 relative，只會出現在自己這一區，不會跑到分支面板上 */}
       {!isAtBottom && messages.length > 0 && (
         <button
           onClick={scrollToBottomNow}
           title="回到底部"
           aria-label="回到底部"
-          className="fixed bottom-24 right-8 z-30 flex items-center justify-center w-10 h-10 text-[#51A8DD] bg-white border border-[#7DB9DE] hover:bg-[#51A8DD] hover:text-white rounded-full shadow-lg transition-colors cursor-pointer"
+          className="absolute bottom-4 right-4 z-30 flex items-center justify-center w-10 h-10 text-[#51A8DD] bg-white border border-[#7DB9DE] hover:bg-[#51A8DD] hover:text-white rounded-full shadow-lg transition-colors cursor-pointer"
         >
           <ArrowDown className="w-5 h-5" />
         </button>
       )}
-
-      {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕 ★★★ */}
-      {/* 注意：不要在這裡攔截 mousedown（例如 e.preventDefault()），否則會吃掉滑鼠預設行為、妨礙選取與複製。
-          選取的文字在按鈕出現時已存進 branchSel state，因此 onClick 不需要靠 mousedown 保住選取。 */}
-      {branchSel && (
-        <button
-          ref={branchBtnRef}
-          onClick={createBranchFromSelection}
-          style={{ left: branchSel.x, top: branchSel.y }}
-          className="fixed -translate-x-1/2 -translate-y-full z-50 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#7B90D2] hover:bg-[#51A8DD] rounded-full shadow-lg border border-white/50 transition-colors cursor-pointer"
-          title="用選取的文字建立新分支"
-        >
-          <GitBranch className="w-3.5 h-3.5" />
-          建立分支
-        </button>
-      )}
-    </div> 
+    </div>
   );
 }
 
