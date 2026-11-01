@@ -224,9 +224,18 @@ const CHAT_INPUT_VARIANTS = {
   </section>
 
   <section class="card">
-    <h2><span class="num">9</span>小練習</h2>
+    <h2><span class="num">9</span>實作紀錄</h2>
+    <table>
+      <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
+      <tr><td>G3-1</td><td><code>be02ad3</code></td><td><code>MESSAGE_LIST_VARIANTS</code>、<code>emptyState</code>、頭像由 <code>showAvatar</code> 控制；「回到底部」改 <code>absolute bottom-4 right-4</code>，放在新的外層 relative 內、捲動層之外；<code>CHAT_INPUT_VARIANTS</code>（提示文字）與 <code>placeholder</code> prop</td><td>build 通過；使用者瀏覽器確認（2026-11-01）</td></tr>
+      <tr><td>G3-2</td><td>—</td><td>分支面板套用共用組件</td><td>待做</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>小練習</h2>
     <ol>
-      <li>打開 <code>frontend/src/components/MessageList.jsx</code> 第 460 行，把 <code>fixed</code> 暫時改成 <code>absolute</code>（不加外層 relative），捲動主對話看看按鈕跑去哪？為什麼？（看完記得改回來）</li>
+      <li>在 <code>MessageList.jsx</code> 找到「回到底部」按鈕，暫時把它搬進捲動層（<code>overflow-y-auto</code> 那個 div）裡面，捲動主對話看看按鈕跑去哪？為什麼？（看完記得改回來）</li>
       <li>在第 2 節的 <code>MESSAGE_LIST_VARIANTS</code> 表裡，如果之後 G7 要「手機版主對話也不顯示頭像」，你會加在哪？提示：Tailwind 的 <code>hidden md:flex</code>。</li>
       <li>如果第 5 節的 <code>key={activeBranchId}</code> 拿掉，在分支 A 往上捲一點再切到分支 B，會看到什麼？</li>
       <li>找出 <code>MessageList</code> 裡哪一行讓「沒傳 <code>onCreateBranch</code> 就不出現建立分支按鈕」成立。</li>
