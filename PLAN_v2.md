@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：逐項確認 G3–G9 細節 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
+**下一步**：G3-1 → G3-2（共用組件，含 G4）→ 逐項確認 G5–G9 細節 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
 
 ---
 
@@ -229,25 +229,57 @@ chat-{root_id}-{date}/
 | B4 | 後端：`/chat` context 組裝（`include_main`／`context_branch_ids`、token 截斷） | ⚠️ 待重新評估 | 依賴已廢棄的 F6，需確認是否仍要做 |
 | F9 | 前端：編輯最後一則（inline regenerate）、幽靈分支重連 UI、入口管理右鍵選單 | ⏳ | DESIGN_P3 主題 3、5；範圍待確認 |
 | G2 | 分支地圖依錨點位置排序 | ✅ | 1013464（cherry-pick 自 1c574f1，已在瀏覽器確認） |
-| G3–G9 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
+| G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ⏳ 待開始 | 教學：`docs/shared-chat-pane-guide.html`；驗收見下方 |
+| G3-2 | 分支面板套用共用組件（含 G4 模型標籤） | ⏳ 待開始 | 依賴 G3-1；驗收見下方 |
+| G5–G9 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
 
 > B2–B4／F9 的拆分以 HANDOVER 為準，尚未寫驗收指令；開工前先補（可執行指令形式）並出教學文件。
 
-### G2–G9（G3–G9 為未確認需求，逐項討論前不實作）
+### G2–G9（G5–G9 為未確認需求，逐項討論前不實作）
 
-細節見 `BACKLOG.md`。G1、G2 已完成。
+細節見 `BACKLOG.md`。G1、G2 已完成；G3、G4 已確認（G3-1／G3-2）。
 
 | 編號 | 需求摘要 | 狀態 |
 |---|---|---|
 | G2 | 分支地圖依「位置順序」排序，不依建立時間 | ✅ 完成（1013464） |
-| G3 | 「跳至底部」按鈕不應出現在分支視窗 | ⏳ 待確認 |
-| G4 | 分支對話顯示模型資訊 | ⏳ 待確認 |
+| G3 | 「跳至底部」按鈕不應出現在分支視窗 → 擴大為主對話／分支共用組件 | ✅ 已確認（G3-1、G3-2） |
+| G4 | 分支對話顯示模型資訊 | ✅ 已確認，併入 G3-2 |
 | G5 | 調整選取範圍時保持反黑（手機控制棒／桌面 shift+方向鍵） | ⏳ 待確認 |
 | G6 | 模型回傳錯誤時的重傳機制 | ⏳ 待確認 |
 | G7 | 手機版聊天區與分支對話隱藏頭像 | ⏳ 待確認 |
 | G8 | 複製訊息按鈕 | ⏳ 待確認 |
 | G9 | user 訊息顯示換行，超過 5 行摺疊 | ⏳ 待確認 |
+
+### G3-1／G3-2 規格與驗收（2026-11-01 定稿）
+
+決策見 `docs/shared-chat-pane-guide.html` 第 8 節。重點：分支與主對話共用 `MessageList`＋`ChatInput`；分支只差「無頭像、白底（外層容器）、輸入框提示文字」，字級／內距／程式碼區塊／輸入框尺寸全部相同；模型標籤與 user 送出時間比照主對話；分支有模型選單，與主對話共用同一個 `model` state；分支不能再開分支、沒有高亮。
+
+**G3-1 抽取（只動 `MessageList.jsx`、`ChatInput.jsx`，不動 BranchPanel／App）**
+- `MessageList` 加 `variant`（預設 `main`）、`MESSAGE_LIST_VARIANTS = { main: { showAvatar: true }, branch: { showAvatar: false } }`、可選 `emptyState`（未傳時用現有建議卡片）。
+- 「回到底部」按鈕：外層包 `relative flex-1 min-h-0 flex flex-col`，捲動容器在內，按鈕為捲動容器的兄弟、`absolute bottom-4 right-4`。
+- `ChatInput` 加 `variant`（預設 `main`）、`CHAT_INPUT_VARIANTS` 只含 `hint` 提示文字。
+
+驗收：
+1. `cd frontend && npm run build` → 結尾印出 `✓ built`
+2. `grep -n "fixed bottom-24" frontend/src/components/MessageList.jsx` → 無輸出
+3. `grep -c "MESSAGE_LIST_VARIANTS" frontend/src/components/MessageList.jsx` → ≥ 2；`grep -c "CHAT_INPUT_VARIANTS" frontend/src/components/ChatInput.jsx` → ≥ 2
+4. `git show --stat HEAD` → 只有 `MessageList.jsx`、`ChatInput.jsx`
+5. 瀏覽器（桌面 ≥ 768）：主對話畫面除按鈕位置外不變；往上捲 → 按鈕在主對話區右下、輸入框上方；打開分支面板 → 按鈕仍在主對話區內，不在分支面板上
+6. 瀏覽器（手機 < 768）：往上捲 → 按鈕在主對話區右下、不擋輸入框
+
+**G3-2 套用（`BranchPanel.jsx`、`App.jsx`）**
+- `BranchPanel` 訊息區改 `<MessageList key={activeBranchId} variant="branch" emptyState=… />`，輸入區改 `<ChatInput variant="branch" … />`；刪除自己的 Markdown／氣泡／textarea／`messagesEndRef` 捲動。
+- `App.jsx` 把 `setModel`、`isCustomModel`、`setIsCustomModel`、`freeModels`、`freeModelsLoading` 傳進 `BranchPanel`。
+- 分支送出時強制捲到底（比照主對話 `forceScrollToken`）。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -cE "ReactMarkdown|<textarea|SyntaxHighlighter" frontend/src/components/BranchPanel.jsx` → `0`
+3. `grep -c 'variant="branch"' frontend/src/components/BranchPanel.jsx` → `2`
+4. `git show --stat HEAD` → 只有 `BranchPanel.jsx`、`App.jsx`
+5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
+6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
 
 > BACKLOG 前三項（編輯按鈕手機版、手機收起側邊欄擠壓、分支情境重設計）已討論並轉為上表編號，不另列。第四項 Voyager 式時間軸見上表 T1。
 
