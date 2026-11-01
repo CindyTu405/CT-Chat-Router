@@ -106,25 +106,23 @@
     <h2><span class="num">2</span>概念一：variant —— 同一個模具，不同設定</h2>
     <p>做法不是「複製一份再改」，而是讓同一個組件吃一個 <code>variant</code> prop，差異集中寫在<strong>一張設定表</strong>裡：</p>
     <pre><code><span class="cm">// 差異集中在一個物件，不要散落成一堆 if</span>
-const VARIANTS = {
-  main: {
-    showAvatar: true,
-    textSize: 'text-[15px]',
-    bubblePadding: 'px-5 py-3.5',
-  },
-  branch: {
-    showAvatar: false,
-    textSize: 'text-[13px]',
-    bubblePadding: 'px-3 py-2',
-  },
+const MESSAGE_LIST_VARIANTS = {
+  main:   { showAvatar: true  },
+  branch: { showAvatar: false },   <span class="cm">// 字級、內距、程式碼區塊都跟主對話一樣（決策 7）</span>
 };
 
 function MessageList({ variant = 'main', ...props }) {
-  const v = VARIANTS[variant];
+  const v = MESSAGE_LIST_VARIANTS[variant];
   ...
   {v.showAvatar &amp;&amp; &lt;Avatar role={msg.role} /&gt;}
-  &lt;div className={`${v.bubblePadding} ${v.textSize} ...`}&gt;
-}</code></pre>
+}
+
+<span class="cm">// ChatInput 同理：只差輸入框下方那句提示（決策 9）</span>
+const CHAT_INPUT_VARIANTS = {
+  main:   { hint: 'AI模型有可能會出錯，請檢察回覆內容。' },
+  branch: { hint: '分支訊息與主對話各自獨立，不會影響原本的時間線' },
+};</code></pre>
+    <p>目前差異很少，表也很短；之後要加差異（例如 G7 手機版隱藏頭像）就往表裡加一欄。</p>
     <p>使用的地方只差一個字：</p>
     <pre><code><span class="cm">// App.jsx（主對話）</span>
 &lt;MessageList variant="main" messages={messages} ... /&gt;
@@ -204,7 +202,7 @@ function MessageList({ variant = 'main', ...props }) {
     <table>
       <tr><th>步驟</th><th>改什麼</th><th>畫面變化</th></tr>
       <tr><td><b>G3-1</b> 抽取</td><td><code>MessageList</code>、<code>ChatInput</code> 加 <code>variant</code>（預設 main）與 <code>emptyState</code>；「回到底部」改 absolute＋外層 relative。<b>不動 BranchPanel</b>。</td><td>主對話只有「回到底部」按鈕位置改為主對話區右下角，其他不變</td></tr>
-      <tr><td><b>G3-2</b> 套用</td><td><code>BranchPanel</code> 改用 <code>&lt;MessageList variant="branch" key={activeBranchId}&gt;</code> 與 <code>&lt;ChatInput variant="branch"&gt;</code>，刪掉它自己的 Markdown／氣泡／textarea</td><td>分支：無頭像、有模型選單、有「回到底部」、貼底自動捲</td></tr>
+      <tr><td><b>G3-2</b> 套用</td><td><code>BranchPanel</code> 改用 <code>&lt;MessageList variant="branch" key={activeBranchId}&gt;</code> 與 <code>&lt;ChatInput variant="branch"&gt;</code>，刪掉它自己的 Markdown／氣泡／textarea</td><td>分支：無頭像；字級與主對話相同；有模型標籤、送出時間、模型選單、「回到底部」、貼底自動捲</td></tr>
     </table>
     <p>先做 G3-1、確認主對話沒壞，再做 G3-2。出問題時能直接看出是「抽取壞了」還是「套用壞了」。</p>
   </section>
@@ -219,9 +217,9 @@ function MessageList({ variant = 'main', ...props }) {
       <tr><td>4</td><td>輸入區</td><td>畫面上兩個獨立輸入框，程式碼共用 <code>ChatInput</code></td><td>✅ 已定</td></tr>
       <tr><td>5</td><td>分支的模型選單</td><td>有（桌面、手機都有），與主對話同步同一個 <code>model</code></td><td>✅ 已定</td></tr>
       <tr><td>6</td><td>分支能否再開分支／高亮</td><td>不能（維持現狀，不傳 <code>onCreateBranch</code>／<code>branchList</code>）</td><td>✅ 已定</td></tr>
-      <tr><td>7</td><td>分支字級與間距</td><td>建議維持現在的緊湊尺寸（13px、小 padding），因為面板只佔 20–50% 寬</td><td>⏳ 待確認</td></tr>
-      <tr><td>8</td><td>分支是否顯示模型標籤（G4）與 user 送出時間</td><td>建議都顯示。共用氣泡後自然就有，等於 G4 一起完成</td><td>⏳ 待確認</td></tr>
-      <tr><td>9</td><td>分支輸入框下方的提示文字</td><td>建議保留「分支訊息與主對話各自獨立…」，取代主對話的「AI 模型有可能會出錯…」</td><td>⏳ 待確認</td></tr>
+      <tr><td>7</td><td>分支字級與間距</td><td>全部跟主對話一樣（15px 字、氣泡內距、標題、程式碼區塊、輸入框尺寸）。分支只差無頭像、白底、提示文字</td><td>✅ 已定（2026-11-01）</td></tr>
+      <tr><td>8</td><td>分支的模型標籤（G4）與送出時間</td><td>跟現在主對話一樣：AI 訊息下方顯示模型標籤、user 訊息下方顯示送出時間。共用氣泡後自然就有，G4 一起完成</td><td>✅ 已定（2026-11-01）</td></tr>
+      <tr><td>9</td><td>分支輸入框下方的提示文字</td><td>保留「分支訊息與主對話各自獨立…」，取代主對話的「AI 模型有可能會出錯…」</td><td>✅ 已定（2026-11-01）</td></tr>
     </table>
   </section>
 
@@ -229,7 +227,7 @@ function MessageList({ variant = 'main', ...props }) {
     <h2><span class="num">9</span>小練習</h2>
     <ol>
       <li>打開 <code>frontend/src/components/MessageList.jsx</code> 第 460 行，把 <code>fixed</code> 暫時改成 <code>absolute</code>（不加外層 relative），捲動主對話看看按鈕跑去哪？為什麼？（看完記得改回來）</li>
-      <li>在第 2 節的 <code>VARIANTS</code> 表裡，如果之後 G7 要「手機版主對話也不顯示頭像」，你會加在哪？提示：Tailwind 的 <code>hidden md:flex</code>。</li>
+      <li>在第 2 節的 <code>MESSAGE_LIST_VARIANTS</code> 表裡，如果之後 G7 要「手機版主對話也不顯示頭像」，你會加在哪？提示：Tailwind 的 <code>hidden md:flex</code>。</li>
       <li>如果第 5 節的 <code>key={activeBranchId}</code> 拿掉，在分支 A 往上捲一點再切到分支 B，會看到什麼？</li>
       <li>找出 <code>MessageList</code> 裡哪一行讓「沒傳 <code>onCreateBranch</code> 就不出現建立分支按鈕」成立。</li>
     </ol>
