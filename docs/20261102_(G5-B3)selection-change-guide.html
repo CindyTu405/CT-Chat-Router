@@ -198,14 +198,22 @@ const y = isMobile
       <tr><td>2</td><td>偵測選取的方式</td><td><code>document</code> 的 <code>selectionchange</code>，取代 AI 泡泡的 <code>onMouseUp</code></td><td>✅ 已定</td></tr>
       <tr><td>3</td><td>按鈕位置</td><td>電腦上方；手機下方</td><td>✅ 已定</td></tr>
       <tr><td>4</td><td>調整範圍時按鈕行為</td><td>防抖 300ms：停手後才出現／移動／隱藏</td><td>✅ 已定</td></tr>
-      <tr><td>5</td><td>電腦選取反白消失</td><td>Markdown 元件只建立一次（useMemo＋ref），重新渲染不再重建 DOM</td><td>根因為推論，實作後在瀏覽器驗證</td></tr>
+      <tr><td>5</td><td>電腦選取反白消失</td><td>Markdown 元件只建立一次（useMemo＋ref），重新渲染不再重建 DOM</td><td>✅ 已驗證：修正後反白保留（2026-11-02）</td></tr>
       <tr><td>6</td><td>捲動時</td><td>維持現況：捲動就隱藏按鈕；之後選取有變化才再出現</td><td>建議（實作預設）</td></tr>
       <tr><td>7</td><td>user 訊息</td><td>不變：user 訊息選字不出現建立分支（G8 的長按選單照舊）</td><td>✅ 沿用</td></tr>
     </table>
   </section>
 
   <section class="card">
-    <h2><span class="num">7</span>小練習</h2>
+    <h2><span class="num">7</span>實作紀錄</h2>
+    <table>
+      <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
+      <tr><td>G5-B3</td><td><code>804d0fd</code></td><td>Markdown components 以 <code>useMemo</code> 只建一次、<code>mark</code> 用 ref 讀最新 <code>branchById</code>／<code>onOpenBranch</code>；移除 <code>onMouseUp</code>，改 <code>document</code> 的 <code>selectionchange</code>＋300ms 防抖；AI 內容區掛 <code>data-branch-source</code>／<code>data-msg-id</code>；手機按鈕在選取下方 28px；按鈕 <code>onMouseDown</code> preventDefault；移除點外面收起的 mousedown 監聽</td><td>build 通過；使用者瀏覽器驗證通過（2026-11-02）</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>小練習</h2>
     <ol>
       <li>在 DevTools console 輸入 <code>document.addEventListener('selectionchange', () =&gt; console.log(String(getSelection())))</code>，分別用滑鼠拖曳、shift＋方向鍵選字，看看各印出幾次？</li>
       <li>如果把防抖從 300ms 改成 0，手機拖控制棒時按鈕會怎樣？</li>
