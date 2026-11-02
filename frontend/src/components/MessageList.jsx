@@ -9,6 +9,7 @@ import { formatShortDateTime } from '../dateUtils';
 import rehypeSourceOffsets from '../rehypeSourceOffsets';
 import rehypeHighlight from '../rehypeHighlight';
 import { selectionOffsets } from '../selectionOffset';
+import { MessageActions, MessageActionMenu } from './MessageActions';
 
 // 錨點高亮的可點擊樣式（與先前 split 版一致）
 const ANCHOR_MARK_CLASS =
@@ -20,6 +21,10 @@ const MESSAGE_LIST_VARIANTS = {
   main: { showAvatar: true },
   branch: { showAvatar: false },
 };
+
+// (G8) 手機 user 氣泡長按：按住 500ms 開選單；移動超過 10px 視為捲動，取消長按
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MOVE_TOLERANCE = 10;
 
 // Markdown 樣式覆寫（程式碼區塊、表格、連結…），依氣泡角色決定行內程式碼配色。
 // 抽成函式，讓「單段渲染」與「錨點切段渲染」共用同一套樣式。
@@ -236,6 +241,39 @@ function MessageList({
     setBranchSel(null);
   };
 
+  // (G8) 手機 user 氣泡長按 → 浮動功能選單：{ msg, rect } | null
+  const [actionMenu, setActionMenu] = useState(null);
+  const pressRef = useRef({ timer: null, x: 0, y: 0 });
+
+  // 卸載時清掉長按計時器
+  useEffect(() => () => clearTimeout(pressRef.current.timer), []);
+
+  // (G8) 只有 user 且有內容的氣泡才掛長按事件；回傳要 spread 到氣泡 div 上的 props
+  const longPressProps = (msg) => {
+    if (msg.role !== 'user' || !msg.content) return {};
+    return {
+      onPointerDown: (e) => {
+        if (e.pointerType !== 'touch') return; // 只處理手指，滑鼠不觸發
+        const el = e.currentTarget;
+        pressRef.current.x = e.clientX;
+        pressRef.current.y = e.clientY;
+        clearTimeout(pressRef.current.timer);
+        pressRef.current.timer = setTimeout(() => {
+          setActionMenu({ msg, rect: el.getBoundingClientRect() });
+        }, LONG_PRESS_MS);
+      },
+      onPointerMove: (e) => {
+        const { x, y } = pressRef.current;
+        const moved = Math.hypot(e.clientX - x, e.clientY - y);
+        if (moved > LONG_PRESS_MOVE_TOLERANCE) clearTimeout(pressRef.current.timer);
+      },
+      onPointerUp: () => clearTimeout(pressRef.current.timer),
+      onPointerCancel: () => clearTimeout(pressRef.current.timer),
+      onPointerLeave: () => clearTimeout(pressRef.current.timer),
+      onContextMenu: (e) => e.preventDefault(), // 擋掉 Android 長按的原生選單
+    };
+  };
+
   // 單段 Markdown 渲染（沿用同一套 components）
   const renderMarkdown = (content, role, key) => (
     <ReactMarkdown
@@ -428,10 +466,11 @@ function MessageList({
                 
                   <div className="relative group/bubble">
                     {/* 對話框 */}
-                    <div className={`
+                    {/* (G8) user 氣泡：手機長按開選單，關閉原生選取與長按選單（max-md 只在手機生效） */}
+                    <div {...longPressProps(msg)} className={`
                       px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
-                      ${msg.role === 'user' 
-                        ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD]' 
+                      ${msg.role === 'user'
+                        ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD] max-md:select-none max-md:[-webkit-touch-callout:none]'
                         : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
                     `}>
                       {/* (P2-4) 只有 AI 回覆可以「選取文字 → 建立分支」 */}
@@ -448,9 +487,13 @@ function MessageList({
                     </div>
 
                     {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
+                    {/* (G8) 時間右邊放功能列；電腦版常態顯示，手機版隱藏（手機改用長按選單） */}
                     {msg.role === 'user' && (
-                      <div className="text-[11px] text-gray-400 mt-1.5 mr-1 select-none">
-                        {formatShortDateTime(msg.created_at) || '剛剛發送'}
+                      <div className="mt-1.5 mr-1 flex items-center justify-end gap-2">
+                        <span className="text-[11px] text-gray-400 select-none">
+                          {formatShortDateTime(msg.created_at) || '剛剛發送'}
+                        </span>
+                        {!!msg.content && <MessageActions msg={msg} className="hidden md:flex" />}
                       </div>
                     )}
                   </div>
@@ -461,6 +504,11 @@ function MessageList({
                       <Sparkles className="w-3 h-3 text-gray-400" />
                       {msg.model_used}
                     </div>
+                  )}
+
+                  {/* (G8) AI 訊息功能列：模型標籤下方，手機與電腦都常態顯示（有內容才顯示） */}
+                  {msg.role === 'assistant' && !!msg.content && (
+                    <MessageActions msg={msg} className="mt-1 ml-0.5 flex" />
                   )}
                 </div>
               </div>
@@ -485,6 +533,15 @@ function MessageList({
             <GitBranch className="w-3.5 h-3.5" />
             建立分支
           </button>
+        )}
+
+        {/* (G8) 手機 user 氣泡長按後的浮動功能選單 */}
+        {actionMenu && (
+          <MessageActionMenu
+            msg={actionMenu.msg}
+            anchorRect={actionMenu.rect}
+            onClose={() => setActionMenu(null)}
+          />
         )}
       </div>
       {/* ★★★ (P3b-F1a-fix) 懸浮「回到底部」按鈕：只有不在底部且有訊息時才出現 ★★★ */}
