@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：逐項確認 G6、G9 細節 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
+**下一步**：G9 → 確認 G6 細節 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
 
 ---
 
@@ -233,12 +233,13 @@ chat-{root_id}-{date}/
 | G3-2 | 分支面板套用共用組件（含 G4 模型標籤） | ✅ | 433effe（使用者瀏覽器驗收 7 項通過；窄面板微調延後） |
 | G8 | 訊息功能列（首項：複製）＋ http 剪貼簿備援＋手機 user 長按選單 | ✅ | ff6f733（使用者驗證通過）；教學：`docs/20261102_(G8)message-actions-guide.html`；驗收見下方 |
 | G5-B3 | 選取保持反白（G5）＋手機選字出現建立分支按鈕（BUGS B3）：Markdown 元件固定身分、selectionchange＋防抖、手機按鈕在下方 | ✅ | 804d0fd（使用者瀏覽器驗證通過）； 教學：`docs/20261102_(G5-B3)selection-change-guide.html`；驗收見下方 |
-| G6、G9 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
+| G9 | user 訊息：原樣顯示（只渲染程式碼區塊／行內程式碼）＋畫面超過 10 行摺疊 | ⏳ 待開始 | 教學：`docs/20261103_(G9)user-message-collapse-guide.html`；驗收見下方 |
+| G6 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
 
 > B2–B4／F9 的拆分以 HANDOVER 為準，尚未寫驗收指令；開工前先補（可執行指令形式）並出教學文件。
 
-### G2–G9（G6、G9 為未確認需求，逐項討論前不實作）
+### G2–G9（G6 為未確認需求，逐項討論前不實作）
 
 細節見 `BACKLOG.md`。G1–G4、G7 已完成。
 
@@ -251,7 +252,7 @@ chat-{root_id}-{date}/
 | G6 | 模型回傳錯誤時的重傳機制 | ⏳ 待確認 |
 | G7 | 手機版聊天區與分支對話隱藏頭像 | ✅ 完成（0665365；手機主對話無頭像、AI 氣泡無右側留白；分支本來就無頭像） |
 | G8 | 複製訊息按鈕 → 訊息功能列 | ✅ 完成（ff6f733） |
-| G9 | user 訊息顯示換行，超過 5 行摺疊 | ⏳ 待確認 |
+| G9 | user 訊息顯示換行，超過 5 行摺疊 → 改為 10 行，只渲染程式碼 | ✅ 已確認（2026-11-03） |
 
 ### G3-1／G3-2 規格與驗收（2026-11-01 定稿）
 
@@ -282,6 +283,20 @@ chat-{root_id}-{date}/
 4. `git show --stat HEAD` → 只有 `BranchPanel.jsx`、`App.jsx`
 5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
 6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
+
+### G9 規格與驗收（2026-11-03 定稿）
+
+決策見 `docs/20261103_(G9)user-message-collapse-guide.html` 第 7 節。
+
+- 新檔 `frontend/src/userContent.js`：`parseUserContent(text)` → `[{type:'text'|'fence'|'code', ...}]`（先切 ```` ``` ```` 區塊再切行內）。
+- 新檔 `frontend/src/components/UserMessageContent.jsx`：渲染片段（text 用 `whitespace-pre-wrap break-words`；fence 用 `SyntaxHighlighter` vscDarkPlus，樣式同 AI；code 用 user 行內樣式）；量測 `scrollHeight` 與 10 × lineHeight，`ResizeObserver` 重量；摺疊時 maxHeight＋overflow hidden＋mask-image 漸層；超過時下方置中 `ChevronDown`／`ChevronUp` 白色小按鈕。
+- `MessageList.jsx`：user 訊息改用 `<UserMessageContent key={msg.id ?? 'tmp-' + index} content={msg.content} />`；AI 訊息不變。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `node -e "import('./frontend/src/userContent.js').then(m=>console.log(JSON.stringify(m.parseUserContent('a **b**\n```js\nx\n```\nc `d`'))))"` → 依序為 text「a **b**\n」、fence(lang js, code「x\n」)、text「\nc 」、code「d」
+3. `git show --stat HEAD` → 只有兩個新檔＋`MessageList.jsx`
+4. 瀏覽器（桌面＋手機）：user 訊息多行換行保留、`**粗體**` 原樣顯示；```` ``` ```` 區塊深色高亮、`` `code` `` 行內樣式；超過 10 行摺疊、底部淡出、V 展開／倒 V 收起；≤ 10 行無按鈕；拖分支面板寬度後摺疊判斷會更新；切換對話後恢復摺疊；G8 長按選單、桌面時間旁複製仍正常；AI 訊息不受影響
 
 ### G5-B3 規格與驗收（2026-11-02 定稿）
 
