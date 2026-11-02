@@ -26,11 +26,21 @@ const MESSAGE_LIST_VARIANTS = {
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_MOVE_TOLERANCE = 10;
 
+// (G5-B3) 手機選字後「建立分支」按鈕放在選取範圍下方，往下偏移這麼多 px，避開控制棒（可調）
+const MOBILE_BUTTON_OFFSET = 28;
+// (G5-B3) selectionchange 防抖時間：停手這麼久才更新按鈕（拖控制棒、shift＋方向鍵時不會一直閃）
+const SELECTION_DEBOUNCE_MS = 300;
+
+// (G5-B3) remark 外掛陣列固定成模組常數，避免每次渲染都是新陣列
+const REMARK_PLUGINS = [remarkGfm];
+
 // Markdown 樣式覆寫（程式碼區塊、表格、連結…），依氣泡角色決定行內程式碼配色。
 // 抽成函式，讓「單段渲染」與「錨點切段渲染」共用同一套樣式。
-// (F8) branchById：branch id → branch 物件（rehypeHighlight 標在 mark 的 data-branch 上）；
-//      onOpenBranch：點擊高亮時開啟該分支。
-const buildMarkdownComponents = (role, branchById, onOpenBranch) => ({
+// (F8) branchByIdRef：branch id → branch 物件的 ref（rehypeHighlight 標在 mark 的 data-branch 上）；
+//      onOpenBranchRef：點擊高亮時開啟該分支的 ref。
+// (G5-B3) 這兩個都改用 ref 讀「最新值」，讓回傳的 components 物件只需建立一次（見 MessageList 內的 markdownComponents），
+//      元件身分固定，React 重新渲染時就不會把整段 DOM 拆掉重建（那會讓選取反白消失）。
+const buildMarkdownComponents = (role, branchByIdRef, onOpenBranchRef) => ({
   // 處理多行程式碼區塊 (Code Blocks)
   code({ inline, className, children, ...props }) {
     const match = /language-(\w+)/.exec(className || '');
@@ -82,14 +92,15 @@ const buildMarkdownComponents = (role, branchById, onOpenBranch) => ({
   // (F8) rehypeHighlight 依 source offset 標出的錨點：只有精確的那一段會變成 mark，
   // 點擊即可開啟對應分支。找不到對應分支時退化為不可點擊的純高亮。
   mark: ({ node, children }) => {
+    // (G5-B3) 渲染時才讀 ref.current，拿到的是最新的 branchList／onOpenBranch
     const branchId = node?.properties?.['data-branch'];
-    const branch = branchId != null ? branchById?.get(String(branchId)) : null;
+    const branch = branchId != null ? branchByIdRef?.current?.get(String(branchId)) : null;
     if (!branch) {
       return <mark className={ANCHOR_MARK_PLAIN_CLASS}>{children}</mark>;
     }
     return (
       <mark
-        onClick={() => onOpenBranch(branch)}
+        onClick={() => onOpenBranchRef?.current?.(branch)}
         title={`開啟分支：${branch.title || '新分支'}`}
         className={ANCHOR_MARK_CLASS}
       >
@@ -165,30 +176,53 @@ function MessageList({
     return map;
   }, [branchList]);
 
-  // 點擊按鈕以外的地方 / 捲動 / 視窗縮放時，收起浮動按鈕
+  // (G5-B3) 點擊按鈕以外的地方改由 selectionchange 處理（選取收合即隱藏），這裡只留捲動／視窗縮放時收起
   useEffect(() => {
     if (!branchSel) return;
-    const handleDocMouseDown = (e) => {
-      if (branchBtnRef.current?.contains(e.target)) return; // 點按鈕本身時保留（交給 onClick）
-      setBranchSel(null);
-    };
     const close = () => setBranchSel(null);
-    document.addEventListener('mousedown', handleDocMouseDown);
     window.addEventListener('scroll', close, true);
     window.addEventListener('resize', close);
     return () => {
-      document.removeEventListener('mousedown', handleDocMouseDown);
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('resize', close);
     };
   }, [branchSel]);
 
-  // (P2-4) 在 AI 泡泡內放開滑鼠：若選取了文字，就在選取處上方顯示「建立分支」按鈕
-  const handleAssistantMouseUp = (e, msg) => {
+  // (G5-B3) selectionchange 防抖用的計時器、以及「最新的」訊息列表與 updateBranchSelection（供監聽器讀取）
+  const selectionTimerRef = useRef(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  // (P2-4) 依目前的 DOM 選取，決定是否顯示「建立分支」按鈕（取代原本 AI 泡泡的滑鼠放開事件）
+  // (G5-B3) 由 selectionchange 防抖後呼叫；選取收合或不在 AI 泡泡內 → 隱藏按鈕
+  const updateBranchSelection = () => {
     if (!onCreateBranch) return;
 
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      setBranchSel(null);
+      return;
+    }
+
+    // 從選取的兩端各自往上找最近的 AI 內容區（帶 data-branch-source）；兩端必須是同一個，且在本元件內
+    const findSourceEl = (node) => {
+      const el = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+      return el?.closest?.('[data-branch-source]') ?? null;
+    };
+    const sourceEl = findSourceEl(selection.anchorNode);
+    if (
+      !sourceEl ||
+      sourceEl !== findSourceEl(selection.focusNode) ||
+      !internalContainerRef.current?.contains(sourceEl)
+    ) {
+      setBranchSel(null);
+      return;
+    }
+
+    // 串流中的訊息還沒有真正的 id（不會掛 data-branch-source），這裡只需找到對應的訊息
+    const msgId = sourceEl.getAttribute('data-msg-id');
+    const msg = (messagesRef.current || []).find((m) => String(m.id) === msgId);
+    if (!msg?.content) {
       setBranchSel(null);
       return;
     }
@@ -211,28 +245,39 @@ function MessageList({
       return;
     }
 
-    // 選取必須完全落在這個 AI 泡泡內
-    if (
-      !e.currentTarget.contains(selection.anchorNode) ||
-      !e.currentTarget.contains(selection.focusNode)
-    ) {
-      return;
-    }
-
-    // 串流中的訊息還沒有真正的 id，不能當 anchor
-    if (!msg.id) return;
-
     const rect = selection.getRangeAt(0).getBoundingClientRect();
     const halfButton = 60; // 粗略半寬，避免按鈕被視窗邊界切掉
+    // (G5-B3) 手機（< 768）放選取下方，避開原生工具列；電腦放上方（現況）
+    const isMobile = window.innerWidth < 768;
     setBranchSel({
       messageId: msg.id,
       text,
       start,
       end,
       x: Math.min(Math.max(rect.left + rect.width / 2, halfButton), window.innerWidth - halfButton),
-      y: Math.max(rect.top - 8, 48),
+      y: isMobile ? rect.bottom + MOBILE_BUTTON_OFFSET : Math.max(rect.top - 8, 48),
+      placement: isMobile ? 'below' : 'above',
     });
   };
+
+  // (G5-B3) 監聽整個文件的選取變化（滑鼠、shift＋方向鍵、手機長按與控制棒都會觸發），停手 SELECTION_DEBOUNCE_MS 後才更新
+  // 監聽器用 ref 讀最新的 updateBranchSelection，避免讀到建立當下的舊 messages／branchSel
+  const updateBranchSelectionRef = useRef(null);
+  updateBranchSelectionRef.current = updateBranchSelection;
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      clearTimeout(selectionTimerRef.current);
+      selectionTimerRef.current = setTimeout(() => {
+        updateBranchSelectionRef.current?.();
+      }, SELECTION_DEBOUNCE_MS);
+    };
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      clearTimeout(selectionTimerRef.current);
+    };
+  }, []);
 
   const createBranchFromSelection = () => {
     if (!branchSel) return;
@@ -274,18 +319,6 @@ function MessageList({
     };
   };
 
-  // 單段 Markdown 渲染（沿用同一套 components）
-  const renderMarkdown = (content, role, key) => (
-    <ReactMarkdown
-      key={key}
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={role === 'assistant' ? [rehypeSourceOffsets] : []}
-      components={buildMarkdownComponents(role)}
-    >
-      {content}
-    </ReactMarkdown>
-  );
-
   // (F8) branch id → branch 物件，供 mark 元件反查要開啟哪個分支
   const branchById = useMemo(() => {
     const map = new Map();
@@ -295,6 +328,33 @@ function MessageList({
     });
     return map;
   }, [branchList]);
+
+  // (G5-B3) 兩個 ref 讓 mark 元件讀到最新的 branchById／onOpenBranch（ref 物件本身不變）
+  const branchByIdRef = useRef(branchById);
+  branchByIdRef.current = branchById;
+  const onOpenBranchRef = useRef(onOpenBranch);
+  onOpenBranchRef.current = onOpenBranch;
+
+  // (G5-B3) Markdown components 只建立一次（依 role 各一份）；每次渲染都用同一組函式身分，React 才不會重建 DOM
+  const markdownComponents = useMemo(
+    () => ({
+      user: buildMarkdownComponents('user', branchByIdRef, onOpenBranchRef),
+      assistant: buildMarkdownComponents('assistant', branchByIdRef, onOpenBranchRef),
+    }),
+    []
+  );
+
+  // 單段 Markdown 渲染（沿用同一套 components）
+  const renderMarkdown = (content, role, key) => (
+    <ReactMarkdown
+      key={key}
+      remarkPlugins={REMARK_PLUGINS}
+      rehypePlugins={role === 'assistant' ? [rehypeSourceOffsets] : []}
+      components={markdownComponents[role === 'user' ? 'user' : 'assistant']}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 
   // (F8) 有 offset 的錨點：整段 Markdown 只渲染一次，由 rehypeHighlight 在 AST 內精準包 mark。
   // 這取代了舊的「依 anchor_text 切段」做法：切段會打斷段落結構（高亮自成一行），
@@ -313,9 +373,9 @@ function MessageList({
     if (precise.length > 0) {
       return (
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={REMARK_PLUGINS}
           rehypePlugins={[[rehypeHighlight, precise]]}
-          components={buildMarkdownComponents(msg.role, branchById, onOpenBranch)}
+          components={markdownComponents[msg.role === 'user' ? 'user' : 'assistant']}
         >
           {msg.content}
         </ReactMarkdown>
@@ -474,9 +534,12 @@ function MessageList({
                         : 'bg-white text-gray-800 rounded-tl-none border border-[#7B90D2]'}
                     `}>
                       {/* (P2-4) 只有 AI 回覆可以「選取文字 → 建立分支」 */}
+                      {/* (G5-B3) AI 內容區掛 data-branch-source／data-msg-id，供 selectionchange 判斷選取落在哪一則（不再用滑鼠放開事件） */}
                       <div
+                        {...(msg.role === 'assistant' && msg.id
+                          ? { 'data-branch-source': '', 'data-msg-id': msg.id }
+                          : {})}
                         className="whitespace-normal break-words text-[15px] overflow-x-auto"
-                        onMouseUp={msg.role === 'assistant' ? (e) => handleAssistantMouseUp(e, msg) : undefined}
                       >
                         {msg.content ? (
                           renderContent(msg)
@@ -520,14 +583,17 @@ function MessageList({
         )}
 
         {/* ★★★ (P2-4) 選取 AI 文字後的浮動「建立分支」按鈕 ★★★ */}
-        {/* 注意：不要在這裡攔截 mousedown（例如 e.preventDefault()），否則會吃掉滑鼠預設行為、妨礙選取與複製。
+        {/* 注意：不要在整個訊息容器上攔截 mousedown（例如 e.preventDefault()），否則會吃掉滑鼠預設行為、妨礙選取與複製。
+            (G5-B3) 只有按鈕本身的 onMouseDown 擋預設行為：電腦點按鈕時不會先把選取清掉；其他地方的 Ctrl+C／右鍵複製不受影響。
             選取的文字在按鈕出現時已存進 branchSel state，因此 onClick 不需要靠 mousedown 保住選取。 */}
         {branchSel && (
           <button
             ref={branchBtnRef}
             onClick={createBranchFromSelection}
+            onMouseDown={(e) => e.preventDefault()}
             style={{ left: branchSel.x, top: branchSel.y }}
-            className="fixed -translate-x-1/2 -translate-y-full z-50 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#7B90D2] hover:bg-[#51A8DD] rounded-full shadow-lg border border-white/50 transition-colors cursor-pointer"
+            // (G5-B3) below：top 是按鈕上緣（不往上移）；above：top 是按鈕下緣（往上移整個按鈕高度）
+            className={`fixed -translate-x-1/2 ${branchSel.placement === 'below' ? '' : '-translate-y-full'} z-50 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#7B90D2] hover:bg-[#51A8DD] rounded-full shadow-lg border border-white/50 transition-colors cursor-pointer`}
             title="用選取的文字建立新分支"
           >
             <GitBranch className="w-3.5 h-3.5" />
