@@ -238,7 +238,16 @@ onContextMenu={(e) =&gt; e.preventDefault()}   <span class="cm">// 擋掉 Androi
   </section>
 
   <section class="card">
-    <h2><span class="num">8</span>小練習</h2>
+    <h2><span class="num">8</span>實作紀錄</h2>
+    <table>
+      <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
+      <tr><td>G8</td><td><code>ff6f733</code></td><td><code>clipboard.js</code>（安全環境用 Clipboard API，否則隱藏 textarea＋<code>execCommand</code>；textarea 固定在左上角避免捲動、補 <code>setSelectionRange</code> 給 iOS）；<code>MessageActions.jsx</code>（功能列＋長按選單，共用同一張 actions 清單）；<code>MessageList.jsx</code> 掛上功能列與手機 user 長按</td><td>build 通過；使用者在部署環境驗證通過（2026-11-02）</td></tr>
+    </table>
+    <p class="muted">驗證時發現「手機長按 AI 文字沒有建立分支按鈕」，經查是 P2-4 起就存在的問題（只監聽滑鼠 mouseup），非 G8 造成，另記於 BUGS.md B3。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>小練習</h2>
     <ol>
       <li>用手機開 <code>http://你的電腦IP:5173</code>，在 console（或遠端偵錯）輸入 <code>window.isSecureContext</code> 和 <code>navigator.clipboard</code>，各是什麼？電腦開 <code>http://localhost:5173</code> 再試一次。</li>
       <li>如果要加一個「重傳」功能（G6），要改 <code>buildMessageActions</code> 的哪裡？要不要改 <code>MessageActions</code> 或 <code>MessageActionMenu</code>？</li>
