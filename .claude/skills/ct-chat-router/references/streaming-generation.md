@@ -1,6 +1,6 @@
 # Streaming and background generation (backend /chat)
 
-Applies to `backend/main.py` `/chat`, the `GENERATIONS` buffer, the resume endpoint, and any new `StreamingResponse`. Teaching doc with the concepts: `docs/streaming-lifecycle-guide.html`.
+Applies to `backend/main.py` `/chat`, the `GENERATIONS` buffer, the resume endpoint, and any new `StreamingResponse`. Teaching doc with the concepts: `docs/20261022_(BugA)streaming-lifecycle-guide.html`.
 
 ## Decided design (Bug A)
 - Generation runs in a background `asyncio.create_task`, not inside the HTTP response generator. A closed connection or a switched conversation must not stop the model call.

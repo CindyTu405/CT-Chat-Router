@@ -33,7 +33,7 @@ Single-line title: `whitespace-nowrap overflow-hidden` plus a right-edge mask so
 - Flip up/down in `useLayoutEffect`, not `useEffect`: it runs before paint, so the panel never flashes in the wrong place. Compare space below and above the trigger with the panel's `offsetHeight + gap`, then pick `bottom-full mb-1` or `top-full mt-1`.
 - Close on outside click with a document `mousedown` listener (fires before click, so it cannot race with other handlers), check `wrapperRef.contains(e.target)`, and remove both listeners in the effect cleanup.
 - A trigger on a tinted background should drop its border, shadow, and white fill when the user asks it to blend in: `bg-transparent` plus a hover tint. Check the computed `border-top-width` and `box-shadow` in the browser, not just the class list.
-- Measure a panel: click the trigger to open it, then compare `getBoundingClientRect()` centers (centered anchor) or left edges (left anchor), and confirm `right <= innerWidth`. Close it again afterwards. Teaching doc: `docs/dropdown-anchor-guide.html`.
+- Measure a panel: click the trigger to open it, then compare `getBoundingClientRect()` centers (centered anchor) or left edges (left anchor), and confirm `right <= innerWidth`. Close it again afterwards. Teaching doc: `docs/20261026_(F4)dropdown-anchor-guide.html`.
 
 ## One component, two layouts (mobile drawer vs desktop column)
 A sidebar or panel that is a full-screen overlay on mobile and a resizable column on desktop needs these rules together:
@@ -73,4 +73,4 @@ A sidebar or panel that is a full-screen overlay on mobile and a resizable colum
 9. When finished, stop both servers (stop the background tasks, or `pgrep -af uvicorn` / `pgrep -af vite` then `kill <pid>`) and confirm they are gone.
 
 ## Teaching docs
-Self-contained HTML in `docs/` (see `docs/css-hover-mask-guide.html` for the sidebar hover/mask case, `docs/create-all-guide.html` for the house style). The hover and mask demos should be interactive in the browser, not just described.
+Self-contained HTML in `docs/` (see `docs/20261022_(BugB)css-hover-mask-guide.html` for the sidebar hover/mask case, `docs/20261020_create-all-guide.html` for the house style). The hover and mask demos should be interactive in the browser, not just described.

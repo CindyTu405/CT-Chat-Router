@@ -229,9 +229,9 @@ chat-{root_id}-{date}/
 | B4 | 後端：`/chat` context 組裝（`include_main`／`context_branch_ids`、token 截斷） | ⚠️ 待重新評估 | 依賴已廢棄的 F6，需確認是否仍要做 |
 | F9 | 前端：編輯最後一則（inline regenerate）、幽靈分支重連 UI、入口管理右鍵選單 | ⏳ | DESIGN_P3 主題 3、5；範圍待確認 |
 | G2 | 分支地圖依錨點位置排序 | ✅ | 1013464（cherry-pick 自 1c574f1，已在瀏覽器確認） |
-| G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ✅ | be02ad3（已在瀏覽器確認）；教學：`docs/shared-chat-pane-guide.html` |
+| G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ✅ | be02ad3（已在瀏覽器確認）；教學：`docs/20261101_(G3)shared-chat-pane-guide.html` |
 | G3-2 | 分支面板套用共用組件（含 G4 模型標籤） | ✅ | 433effe（使用者瀏覽器驗收 7 項通過；窄面板微調延後） |
-| G8 | 訊息功能列（首項：複製）＋ http 剪貼簿備援＋手機 user 長按選單 | ⏳ 待開始 | 教學：`docs/message-actions-guide.html`；驗收見下方 |
+| G8 | 訊息功能列（首項：複製）＋ http 剪貼簿備援＋手機 user 長按選單 | ⏳ 待開始 | 教學：`docs/20261102_(G8)message-actions-guide.html`；驗收見下方 |
 | G5、G6、G9 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
 
@@ -254,7 +254,7 @@ chat-{root_id}-{date}/
 
 ### G3-1／G3-2 規格與驗收（2026-11-01 定稿）
 
-決策見 `docs/shared-chat-pane-guide.html` 第 8 節。重點：分支與主對話共用 `MessageList`＋`ChatInput`；分支只差「無頭像、白底（外層容器）、輸入框提示文字」，字級／內距／程式碼區塊／輸入框尺寸全部相同；模型標籤與 user 送出時間比照主對話；分支有模型選單，與主對話共用同一個 `model` state；分支不能再開分支、沒有高亮。
+決策見 `docs/20261101_(G3)shared-chat-pane-guide.html` 第 8 節。重點：分支與主對話共用 `MessageList`＋`ChatInput`；分支只差「無頭像、白底（外層容器）、輸入框提示文字」，字級／內距／程式碼區塊／輸入框尺寸全部相同；模型標籤與 user 送出時間比照主對話；分支有模型選單，與主對話共用同一個 `model` state；分支不能再開分支、沒有高亮。
 
 **G3-1 抽取（只動 `MessageList.jsx`、`ChatInput.jsx`，不動 BranchPanel／App）**
 - `MessageList` 加 `variant`（預設 `main`）、`MESSAGE_LIST_VARIANTS = { main: { showAvatar: true }, branch: { showAvatar: false } }`、可選 `emptyState`（未傳時用現有建議卡片）。
@@ -284,7 +284,7 @@ chat-{root_id}-{date}/
 
 ### G8 規格與驗收（2026-11-02 定稿）
 
-決策見 `docs/message-actions-guide.html` 第 7 節。
+決策見 `docs/20261102_(G8)message-actions-guide.html` 第 7 節。
 
 - 新檔 `frontend/src/clipboard.js`：`copyText(text)`，安全環境用 `navigator.clipboard.writeText`，否則或失敗時退回隱藏 textarea＋`execCommand('copy')`；回傳 boolean。
 - 新檔 `frontend/src/components/MessageActions.jsx`：`buildMessageActions(msg)`（目前只有 copy，複製 `msg.content`）、`MessageActions`（一排小圖示，複製後圖示變 ✓ 約 2 秒）、`MessageActionMenu`（fixed 浮動選單，點外面／捲動／縮放關閉；複製後該項變「✓ 已複製」約 1 秒後關閉）。

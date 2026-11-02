@@ -156,7 +156,7 @@ session.exec(text("ALTER TABLE message ADD COLUMN IF NOT EXISTS session_id VARCH
 
   <section class="card">
     <h2><span class="num">5</span>為什麼現在要停用它</h2>
-    <p>我們已經引了 <strong>Alembic</strong>（見 <a href="alembic-guide.html">Alembic 教學</a>）。如果兩者並存，等於<strong>兩套系統同時在管資料庫結構</strong>，會打架：</p>
+    <p>我們已經引了 <strong>Alembic</strong>（見 <a href="20261020_alembic-guide.html">Alembic 教學</a>）。如果兩者並存，等於<strong>兩套系統同時在管資料庫結構</strong>，會打架：</p>
     <ul>
       <li>Alembic 的紀錄說「我建到 v3」，但 <code>create_all</code> 又默默建了一張 Alembic 不知道的表。</li>
       <li>之後 <code>alembic revision --autogenerate</code> 比對時就會看到「憑空多出來的表」，產生錯亂。</li>

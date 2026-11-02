@@ -16,7 +16,7 @@ Reply in the language the user writes in.
 
 ## Requirements vs approval
 - A user posting a LIST of items (e.g. G1-G9) is only raising requirements, NOT approving implementation. Discuss each item's details and get explicit confirmation BEFORE delegating any code. Implementing an unconfirmed list produced wrong work that had to be fully reverted (e051fec).
-- 先寫教學再執行: for any change that introduces a new front-end or back-end concept (bug fixes included), write the teaching guide first (`docs/*.html`, self-contained, same style as `docs/create-all-guide.html`; structure: concept, why, code, short practice list), commit it as its own `docs:` commit, wait for the user to read it and say 開始, THEN delegate. When a design decision is made or a step lands, update the same guide (decision table + implementation record) in a separate `docs:` commit.
+- 先寫教學再執行: for any change that introduces a new front-end or back-end concept (bug fixes included), write the teaching guide first (`docs/*.html`, self-contained, same style as `docs/20261020_create-all-guide.html`; filename `YYYYMMDD_(<task id>)<name>-guide.html` with the creation date, e.g. `20261102_(G8)message-actions-guide.html`, omit `(<task id>)` when there is none; structure: concept, why, code, short practice list), commit it as its own `docs:` commit, wait for the user to read it and say 開始, THEN delegate. When a design decision is made or a step lands, update the same guide (decision table + implementation record) in a separate `docs:` commit.
 
 ## Planning and verification
 - Break each phase into numbered tasks with acceptance criteria in the plan doc (like `PLAN_20261012.md`), track progress with the task list, commit per task with the task id (e.g. `feat: (P0-1) ...`).
