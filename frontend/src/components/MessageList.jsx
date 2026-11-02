@@ -15,7 +15,7 @@ const ANCHOR_MARK_CLASS =
   'bg-amber-200/80 text-inherit rounded-sm px-0.5 underline decoration-amber-500/70 decoration-2 underline-offset-2 cursor-pointer transition-colors hover:bg-amber-300';
 const ANCHOR_MARK_PLAIN_CLASS = 'bg-amber-200/80 text-inherit rounded-sm px-0.5';
 
-// (G3) 主對話／分支面板共用此組件；差異集中在這張表
+// (G3) 主對話／分支面板共用此組件；差異集中在這張表（main 的頭像只在桌面顯示（G7））
 const MESSAGE_LIST_VARIANTS = {
   main: { showAvatar: true },
   branch: { showAvatar: false },
@@ -412,8 +412,9 @@ function MessageList({
                 className={`flex gap-4 max-w-4xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
               >
                 {/* 頭像 */}
+                {/* (G7) 手機版不顯示頭像，桌面才顯示 */}
                 {v.showAvatar && (
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white shadow-sm ${msg.role === 'user' ? 'bg-[#51A8DD]' : 'bg-[#7B90D2]'}`}>
+                  <div className={`w-8 h-8 rounded-full hidden md:flex items-center justify-center flex-shrink-0 text-white shadow-sm ${msg.role === 'user' ? 'bg-[#51A8DD]' : 'bg-[#7B90D2]'}`}>
                     {msg.role === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
                   </div>
                 )}
@@ -422,7 +423,7 @@ function MessageList({
                 <div className={`flex flex-col ${
                   msg.role === 'user' 
                     ? 'items-end max-w-[85%] md:max-w-[75%]' // User 保持原本的泡泡寬度限制
-                    : 'items-start flex-1 min-w-0 mr-12' // AI 使用 flex-1 填滿右側所有剩餘空間，min-w-0 防止文字溢出破版
+                    : 'items-start flex-1 min-w-0 md:mr-12' // AI 使用 flex-1 填滿右側所有剩餘空間，min-w-0 防止文字溢出破版（G7）手機不留右側空白
                 }`}>
                 
                   <div className="relative group/bubble">
