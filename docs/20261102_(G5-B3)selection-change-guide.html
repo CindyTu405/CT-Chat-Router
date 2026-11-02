@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>選取保持與 selectionchange 教學（G5＋B3）— CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 前端教學 · G5＋B3</span>
+    <h1>保住選取、跟著選取</h1>
+    <p>為什麼選完字反白馬上消失、為什麼手機沒有「建立分支」按鈕；React 元件身分、selectionchange、防抖。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>兩個症狀，同一塊程式碼</h2>
+    <table>
+      <tr><th>編號</th><th>症狀</th><th>根因</th></tr>
+      <tr><td>G5（電腦）</td><td>選完字放開滑鼠，反白馬上消失；shift+方向鍵無法再調整</td><td>按鈕出現時整段訊息的 DOM 被 React <b>拆掉重建</b>，選取跟著不見（第 2 節）</td></tr>
+      <tr><td>B3（手機）</td><td>長按選字後沒有「建立分支」按鈕</td><td>只監聽滑鼠的 <code>mouseup</code>，手指選字不會觸發（第 3 節）</td></tr>
+    </table>
+    <p>兩者都在 <code>MessageList.jsx</code> 的「選取 → 建立分支」流程，所以合併成一個任務修。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念一：React 用「元件型別」決定要不要重建 DOM</h2>
+    <p>React 每次重新渲染時，會比對新舊兩棵樹。同一個位置上：</p>
+    <ul>
+      <li><b>型別一樣</b>（同一個函式、同一個標籤）→ 保留原本的 DOM，只更新有變的屬性。</li>
+      <li><b>型別不一樣</b> → 把舊的 DOM 整個拆掉，重新建一個。</li>
+    </ul>
+    <p>現在的程式碼每次渲染都呼叫一次 <code>buildMarkdownComponents(...)</code>：</p>
+    <pre><code><span class="cm">// MessageList.jsx 現況（簡化）</span>
+&lt;ReactMarkdown
+  components={buildMarkdownComponents(msg.role, branchById, onOpenBranch)}
+&gt;
+
+const buildMarkdownComponents = (role, ...) =&gt; ({
+  p: ({ children }) =&gt; &lt;p className="..."&gt;{children}&lt;/p&gt;,   <span class="cm">← 每次呼叫都產生一個「新的」函式</span>
+  code: (...) =&gt; ...,
+  ...
+});</code></pre>
+    <p><code>p</code> 雖然長得一樣，但每次都是新的函式，對 React 來說就是<strong>不同型別的元件</strong>。於是：</p>
+    <div class="flow">
+      <div class="box">放開滑鼠</div>
+      <div class="arrow">→</div>
+      <div class="box">setBranchSel<br>（要顯示按鈕）</div>
+      <div class="arrow">→</div>
+      <div class="box">MessageList 重新渲染</div>
+      <div class="arrow">→</div>
+      <div class="box">p / code 是新函式<br>→ DOM 全部重建</div>
+      <div class="arrow">→</div>
+      <div class="box">選取指向的舊文字節點<br>消失 → 反白不見</div>
+    </div>
+    <p>修法：讓這些元件函式<strong>只建立一次</strong>，之後每次渲染都是同一個身分。</p>
+    <pre><code><span class="cm">// 建立一次：依 role 各一份，用 useMemo 固定下來</span>
+const assistantComponents = useMemo(
+  () =&gt; buildMarkdownComponents('assistant', branchByIdRef, onOpenBranchRef),
+  []
+);</code></pre>
+    <p>高亮 <code>mark</code> 需要的 <code>branchById</code>、<code>onOpenBranch</code> 會隨資料改變，不能寫死在建立時，所以改用 <strong>ref</strong> 傳進去：ref 物件本身不變（元件身分不變），點擊時才讀 <code>ref.current</code> 拿最新值。</p>
+    <div class="tip"><b>順便的好處：</b>串流時每來一段文字也會重新渲染。元件身分固定後，React 只更新有變的文字節點，不再整段重建，捲動和效能都比較穩。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念二：selectionchange —— 不管用什麼方式選，都會通知</h2>
+    <p>現在只在 AI 泡泡的 <code>onMouseUp</code> 檢查選取。這只涵蓋「滑鼠拖曳」：</p>
+    <table>
+      <tr><th>選取方式</th><th>mouseup</th><th>selectionchange</th></tr>
+      <tr><td>電腦：滑鼠拖曳</td><td>✅</td><td>✅</td></tr>
+      <tr><td>電腦：shift＋方向鍵調整</td><td>❌</td><td>✅</td></tr>
+      <tr><td>手機：長按選字</td><td>❌</td><td>✅</td></tr>
+      <tr><td>手機：拖控制棒調整</td><td>❌</td><td>✅</td></tr>
+    </table>
+    <p><code>selectionchange</code> 掛在 <code>document</code> 上，選取範圍只要有變就觸發：</p>
+    <pre><code>useEffect(() =&gt; {
+  const onSelectionChange = () =&gt; {
+    clearTimeout(timer);
+    timer = setTimeout(updateBranchButton, 300);   <span class="cm">// 防抖：停手 0.3 秒才更新</span>
+  };
+  document.addEventListener('selectionchange', onSelectionChange);
+  return () =&gt; { ...移除監聽、清計時器... };
+}, []);</code></pre>
+    <p><code>updateBranchButton</code> 做的事跟原本 mouseup 版一樣：確認選取完全落在同一則 AI 泡泡內、算 source offset（F7 的 <code>selectionOffsets</code>）、決定按鈕位置。差別只是「誰來呼叫它」。</p>
+    <p>要知道選取落在哪一則訊息：從選取的節點往上找 <code>data-message-id</code>（F1b 已經掛在每則訊息上）。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>概念三：防抖（debounce）</h2>
+    <p>拖控制棒或按住 shift＋方向鍵時，<code>selectionchange</code> 一秒會觸發幾十次。每次都重算位置、重新渲染，按鈕會一直閃。</p>
+    <p>防抖的意思是：<strong>每次事件都把計時器重設，只有「停下來 300ms 沒有新事件」才真正執行</strong>。</p>
+    <div class="flow">
+      <div class="box">變 變 變 變</div>
+      <div class="arrow">→</div>
+      <div class="box">停手 300ms</div>
+      <div class="arrow">→</div>
+      <div class="box">更新按鈕一次</div>
+    </div>
+    <p>「隱藏」也走同一個防抖。這剛好解決一個手機陷阱：手指點按鈕時，瀏覽器會先清掉選取（觸發 <code>selectionchange</code>），如果立刻隱藏按鈕，點擊就落空了。有 300ms 緩衝，點擊會在按鈕消失前送達；而按鈕要用的文字和 offset 在顯示時就已存進 state，選取被清掉也不影響。</p>
+    <p>另外在按鈕上加 <code>onMouseDown={e =&gt; e.preventDefault()}</code>：電腦版點按鈕時不會先把選取清掉。只擋按鈕自己，不影響其他地方的 Ctrl+C／右鍵複製。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>按鈕放哪裡：電腦上方、手機下方</h2>
+    <p>手機選字後，系統會在選取範圍<strong>上方</strong>跳出原生工具列（複製、全選…），我們的按鈕放上方會被蓋住，所以：</p>
+    <table>
+      <tr><th></th><th>位置</th><th>理由</th></tr>
+      <tr><td>電腦（≥ 768px）</td><td>選取範圍上方（現況）</td><td>沒有原生工具列</td></tr>
+      <tr><td>手機（&lt; 768px）</td><td>選取範圍下方，再往下讓開控制棒</td><td>避開原生工具列</td></tr>
+    </table>
+    <pre><code>const rect = range.getBoundingClientRect();
+const isMobile = window.innerWidth &lt; 768;
+const y = isMobile
+  ? rect.bottom + MOBILE_BUTTON_OFFSET     <span class="cm">// 往下，避開控制棒（可調）</span>
+  : rect.top - 8;                          <span class="cm">// 往上（現況）</span></code></pre>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>決策表</h2>
+    <table>
+      <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+      <tr><td>1</td><td>B3 與 G5 是否合併</td><td>合併成一個任務（G5-B3）</td><td>✅ 已定</td></tr>
+      <tr><td>2</td><td>偵測選取的方式</td><td><code>document</code> 的 <code>selectionchange</code>，取代 AI 泡泡的 <code>onMouseUp</code></td><td>✅ 已定</td></tr>
+      <tr><td>3</td><td>按鈕位置</td><td>電腦上方；手機下方</td><td>✅ 已定</td></tr>
+      <tr><td>4</td><td>調整範圍時按鈕行為</td><td>防抖 300ms：停手後才出現／移動／隱藏</td><td>✅ 已定</td></tr>
+      <tr><td>5</td><td>電腦選取反白消失</td><td>Markdown 元件只建立一次（useMemo＋ref），重新渲染不再重建 DOM</td><td>根因為推論，實作後在瀏覽器驗證</td></tr>
+      <tr><td>6</td><td>捲動時</td><td>維持現況：捲動就隱藏按鈕；之後選取有變化才再出現</td><td>建議（實作預設）</td></tr>
+      <tr><td>7</td><td>user 訊息</td><td>不變：user 訊息選字不出現建立分支（G8 的長按選單照舊）</td><td>✅ 沿用</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>小練習</h2>
+    <ol>
+      <li>在 DevTools console 輸入 <code>document.addEventListener('selectionchange', () =&gt; console.log(String(getSelection())))</code>，分別用滑鼠拖曳、shift＋方向鍵選字，看看各印出幾次？</li>
+      <li>如果把防抖從 300ms 改成 0，手機拖控制棒時按鈕會怎樣？</li>
+      <li>第 2 節的 <code>p: ({ children }) =&gt; ...</code> 如果移到模組最外層（元件外面）定義，還會有「每次渲染都是新函式」的問題嗎？為什麼 <code>mark</code> 不能這樣做、要用 ref？</li>
+      <li>為什麼按鈕要擋 <code>mousedown</code>，卻不能在整個訊息區擋？（提示：<code>MessageList.jsx</code> 裡建立分支按鈕上方的註解）</li>
+    </ol>
+  </section>
+
+</div>
+</body>
+</html>
