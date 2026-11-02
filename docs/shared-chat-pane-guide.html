@@ -228,7 +228,7 @@ const CHAT_INPUT_VARIANTS = {
     <table>
       <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
       <tr><td>G3-1</td><td><code>be02ad3</code></td><td><code>MESSAGE_LIST_VARIANTS</code>、<code>emptyState</code>、頭像由 <code>showAvatar</code> 控制；「回到底部」改 <code>absolute bottom-4 right-4</code>，放在新的外層 relative 內、捲動層之外；<code>CHAT_INPUT_VARIANTS</code>（提示文字）與 <code>placeholder</code> prop</td><td>build 通過；使用者瀏覽器確認（2026-11-01）</td></tr>
-      <tr><td>G3-2</td><td>—</td><td>分支面板套用共用組件</td><td>待做</td></tr>
+      <tr><td>G3-2</td><td><code>433effe</code></td><td>分支面板改用 <code>&lt;MessageList key={分支 id} variant="branch"&gt;</code> 與 <code>&lt;ChatInput variant="branch"&gt;</code>；刪除自己的 Markdown／氣泡／textarea；送出時用 <code>forceScrollToken</code> 捲到底；App 傳入模型選單 props</td><td>build 通過；使用者瀏覽器驗收 7 項通過（2026-11-02）。窄面板微調（AI 氣泡 <code>mr-12</code>、內距、輸入框高度）延後</td></tr>
     </table>
   </section>
 
