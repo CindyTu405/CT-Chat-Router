@@ -46,6 +46,12 @@ Reply in the language the user writes in.
 ## Visual overlap rule
 When a floating control (⋯, buttons) covers text, fade the text with a `mask-image` gradient rather than hard-clipping or adding padding. Confirm the symptom first ("covered by the button" and "clipped too early" are different bugs).
 
+## Production deploy (EC2 VM)
+- The VM runs `docker-compose.prod.yml`, selected by `COMPOSE_FILE=docker-compose.prod.yml` in the VM's `.env`; plain `sudo docker compose ...` there uses the prod file. Local dev uses `docker-compose.yml`.
+- Prod `api` has no source volume mount: after `git pull`, rebuild (`sudo docker compose up -d --build`) for code changes to take effect.
+- Migrations are NOT run automatically. After any pull that adds `backend/alembic/versions/*`, run `sudo docker compose exec api alembic upgrade head`. Skipping it gives `UndefinedColumn` 500s on `POST /chat` (seen 2026-11-02 with `branch_id`).
+- Host shell does not have `$POSTGRES_USER`/`$POSTGRES_DB`; inspect the DB with `sudo docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`.
+
 ## Context hygiene
 Durable state lives in the skill, the PLAN docs and git. Suggest a fresh session (`/clear`) once a conversation gets very long.
 Past planning from the earlier OpenCode sessions is in `~/.local/share/opencode/opencode.db` (SQLite; `session_v2` / `session_message`).
