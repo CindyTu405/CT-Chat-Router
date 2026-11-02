@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>user 訊息換行與摺疊教學（G9）— CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 前端教學 · G9</span>
+    <h1>user 訊息：保留換行、只認程式碼、超過 10 行摺疊</h1>
+    <p>自己寫一個只認程式碼的小解析器；量測畫面上的實際行數；摺疊與漸層淡出；用 key 讓狀態跟著訊息走。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>要做成什麼樣子</h2>
+    <ul>
+      <li>user 訊息<strong>照原樣顯示</strong>：換行、空白都保留；<code>**粗體**</code> 就顯示 <code>**粗體**</code>，不轉成 markdown。</li>
+      <li>例外只有兩種程式碼：<code>```區塊```</code> 用跟 AI 一樣的深色語法高亮；<code>`行內`</code> 用 user 氣泡現有的行內樣式。</li>
+      <li>畫面上超過 <strong>10 行</strong>就摺疊：底部漸層淡出，氣泡內最下方置中一個 V（展開）；展開後變倒 V（收起）。</li>
+      <li>展開狀態不記憶；主對話與分支面板都套用（共用 <code>MessageList</code>）。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念一：為什麼不用 ReactMarkdown 擋掉其他語法</h2>
+    <p>ReactMarkdown 有 <code>allowedElements</code> 可以只允許 <code>code</code>、<code>pre</code>。但它擋掉的是<strong>解析後的結果</strong>，不是原文：</p>
+    <table>
+      <tr><th>使用者輸入</th><th>allowedElements 擋掉 strong</th><th>我們要的</th></tr>
+      <tr><td><code>**重要**</code></td><td>重要（星號已經被吃掉）</td><td>**重要**</td></tr>
+      <tr><td><code># 標題</code></td><td>標題（# 不見）</td><td># 標題</td></tr>
+      <tr><td>單一換行</td><td>被合併成空白</td><td>換行</td></tr>
+    </table>
+    <p>所以改成自己切：只認出兩種程式碼，其餘一律當純文字。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念二：只認程式碼的小解析器</h2>
+    <p>分兩層切。先切出 <code>```</code> 區塊，剩下的文字再切出 <code>`行內`</code>：</p>
+    <pre><code><span class="cm">// 1. 程式碼區塊：```語言(可省略) 換行 內容 ```</span>
+const FENCE_RE = /```([\w+-]*)\n?([\s\S]*?)```/g;
+<span class="cm">// 2. 行內程式碼：一對反引號，中間不含換行</span>
+const INLINE_RE = /`([^`\n]+)`/g;
+
+parseUserContent('看這段：\n```js\nlet a = 1;\n```\n還有 `b`')
+<span class="cm">// →</span>
+[
+  { type: 'text',  text: '看這段：\n' },
+  { type: 'fence', lang: 'js', code: 'let a = 1;\n' },
+  { type: 'text',  text: '\n還有 ' },
+  { type: 'code',  text: 'b' },
+]</code></pre>
+    <ul>
+      <li><code>[\s\S]*?</code>：任何字元（含換行），<code>?</code> 表示「盡量少」，遇到第一個收尾 <code>```</code> 就停，兩個區塊才不會被當成一個。</li>
+      <li>沒有收尾的 <code>```</code>（打到一半）不會被正規式命中，自然留在純文字裡。</li>
+    </ul>
+    <p>純文字用 <code>whitespace-pre-wrap</code> 顯示：換行與連續空白都保留，太長的行仍會自動折行。這是 CSS 而不是把 <code>\n</code> 換成 <code>&lt;br&gt;</code>，所以不用碰 HTML、沒有 XSS 風險。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>概念三：量測「畫面上」的行數</h2>
+    <p>「10 行」算的是畫面上顯示的行數（含自動折行），不是按 Enter 的次數。同一則訊息在寬螢幕可能 6 行、在手機可能 14 行，所以只能<strong>渲染後量</strong>：</p>
+    <pre><code>const lineHeight = parseFloat(getComputedStyle(el).lineHeight); <span class="cm">// 15px × 1.625 ≈ 24.4px</span>
+const maxHeight = lineHeight * 10;
+const overflowing = el.scrollHeight &gt; maxHeight + 1;           <span class="cm">// +1 容忍小數誤差</span></code></pre>
+    <ul>
+      <li><code>scrollHeight</code>：內容完整展開的高度（即使被 max-height 擋住也量得到）。</li>
+      <li>有程式碼區塊時行高不同，就以「10 行文字的高度」為準切，不一定剛好 10 行（已確認）。</li>
+    </ul>
+    <h3>寬度變了要重量：ResizeObserver</h3>
+    <p>拖曳分支面板寬度、手機轉向，折行數都會變。<code>ResizeObserver</code> 在元素尺寸改變時通知：</p>
+    <pre><code>useEffect(() =&gt; {
+  const ro = new ResizeObserver(measure);
+  ro.observe(contentRef.current);
+  measure();
+  return () =&gt; ro.disconnect();
+}, [content]);</code></pre>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>概念四：摺疊＋漸層淡出</h2>
+    <p>摺疊時：</p>
+    <pre><code>style={collapsed ? {
+  maxHeight: maxHeight,
+  overflow: 'hidden',
+  maskImage: 'linear-gradient(to bottom, black 70%, transparent)',
+  WebkitMaskImage: 'linear-gradient(to bottom, black 70%, transparent)',
+} : undefined}</code></pre>
+    <p><code>mask-image</code> 的意思是：遮罩黑色的地方顯示、透明的地方隱藏。漸層從 70% 開始變透明，最後一兩行就淡出，看得出下面還有內容。這跟專案的「浮動控制蓋到文字用 mask 淡出」是同一招（BugB 教學）。</p>
+    <p>按鈕在被遮罩的內容<strong>外面</strong>（下方兄弟元素），所以不會跟著淡掉：</p>
+    <pre><code>&lt;div ref={contentRef} style={...摺疊樣式}&gt;{segments}&lt;/div&gt;
+{overflowing &amp;&amp; (
+  &lt;button onClick={toggle} className="mx-auto block ..."&gt;
+    {expanded ? &lt;ChevronUp /&gt; : &lt;ChevronDown /&gt;}
+  &lt;/button&gt;
+)}</code></pre>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>概念五：用 key 讓狀態跟著訊息走</h2>
+    <p>展開狀態放在新元件 <code>UserMessageContent</code> 自己的 state 裡。但 <code>MessageList</code> 的訊息列表現在用 <code>key={index}</code>：切到另一個對話時，第 3 則還是 key 3，React 會<strong>沿用</strong>同一個元件，上一個對話「第 3 則已展開」的狀態會帶過去。</p>
+    <p>所以 <code>UserMessageContent</code> 要用訊息 id 當 key：</p>
+    <pre><code>&lt;UserMessageContent key={msg.id ?? `tmp-${index}`} content={msg.content} /&gt;</code></pre>
+    <p>換對話 → id 不同 → 重新建立 → 回到摺疊。這跟 G3 教學第 5 節「用 key 重置分支 tab 的捲動狀態」是同一個原理。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>決策表</h2>
+    <table>
+      <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+      <tr><td>1</td><td>user 訊息是否渲染 markdown</td><td>不渲染；只認 <code>```區塊```</code> 與 <code>`行內`</code></td><td>✅ 已定</td></tr>
+      <tr><td>2</td><td>程式碼樣式</td><td>區塊：與 AI 相同深色語法高亮；行內：user 氣泡現有樣式（半透明深藍底、白字）</td><td>✅ 已定</td></tr>
+      <tr><td>3</td><td>摺疊門檻</td><td>畫面行數（含自動折行）超過 10 行；有程式碼區塊時以 10 行文字高度為準</td><td>✅ 已定</td></tr>
+      <tr><td>4</td><td>摺疊外觀</td><td>底部漸層淡出（mask-image）</td><td>✅ 已定</td></tr>
+      <tr><td>5</td><td>按鈕</td><td>氣泡內最下方置中、白色小圖示；收合顯示 V、展開顯示倒 V</td><td>✅ 已定</td></tr>
+      <tr><td>6</td><td>展開狀態</td><td>不記憶；切換對話／重新整理恢復摺疊</td><td>✅ 已定</td></tr>
+      <tr><td>7</td><td>範圍</td><td>主對話與分支都套用；AI 訊息不變</td><td>✅ 已定</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>小練習</h2>
+    <ol>
+      <li>把 <code>FENCE_RE</code> 的 <code>*?</code> 改成 <code>*</code>，輸入兩個程式碼區塊中間夾一段文字，結果會怎樣？</li>
+      <li>在 DevTools 對一則長的 user 訊息，分別印出 <code>scrollHeight</code>、<code>clientHeight</code>，展開／收合各一次。</li>
+      <li>把 mask 的 <code>black 70%</code> 改成 <code>black 40%</code>，淡出範圍怎麼變？</li>
+      <li>拿掉 <code>UserMessageContent</code> 的 key，展開對話 A 的第 1 則，再切到對話 B，第 1 則是展開還是摺疊？</li>
+    </ol>
+  </section>
+
+</div>
+</body>
+</html>
