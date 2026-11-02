@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：BUGS B3（手機長按 AI 文字無建立分支按鈕）與 G5 一併討論 → 逐項確認 G6、G9 細節 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
+**下一步**：G5-B3 → 逐項確認 G6、G9 細節 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
 
 ---
 
@@ -232,13 +232,13 @@ chat-{root_id}-{date}/
 | G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ✅ | be02ad3（已在瀏覽器確認）；教學：`docs/20261101_(G3)shared-chat-pane-guide.html` |
 | G3-2 | 分支面板套用共用組件（含 G4 模型標籤） | ✅ | 433effe（使用者瀏覽器驗收 7 項通過；窄面板微調延後） |
 | G8 | 訊息功能列（首項：複製）＋ http 剪貼簿備援＋手機 user 長按選單 | ✅ | ff6f733（使用者驗證通過）；教學：`docs/20261102_(G8)message-actions-guide.html`；驗收見下方 |
-| BUGS B3 | 手機長按選取 AI 文字不出現「建立分支」 | ⏳ 待討論 | 見 BUGS.md；與 G5 相關 |
-| G5、G6、G9 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
+| G5-B3 | 選取保持反白（G5）＋手機選字出現建立分支按鈕（BUGS B3）：Markdown 元件固定身分、selectionchange＋防抖、手機按鈕在下方 | ⏳ 待開始 | 教學：`docs/20261102_(G5-B3)selection-change-guide.html`；驗收見下方 |
+| G6、G9 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
 
 > B2–B4／F9 的拆分以 HANDOVER 為準，尚未寫驗收指令；開工前先補（可執行指令形式）並出教學文件。
 
-### G2–G9（G5、G6、G9 為未確認需求，逐項討論前不實作）
+### G2–G9（G6、G9 為未確認需求，逐項討論前不實作）
 
 細節見 `BACKLOG.md`。G1–G4、G7 已完成。
 
@@ -247,7 +247,7 @@ chat-{root_id}-{date}/
 | G2 | 分支地圖依「位置順序」排序，不依建立時間 | ✅ 完成（1013464） |
 | G3 | 「跳至底部」按鈕不應出現在分支視窗 → 擴大為主對話／分支共用組件 | ✅ 完成（be02ad3、433effe） |
 | G4 | 分支對話顯示模型資訊 | ✅ 完成（併入 G3-2，433effe） |
-| G5 | 調整選取範圍時保持反黑（手機控制棒／桌面 shift+方向鍵） | ⏳ 待確認 |
+| G5 | 調整選取範圍時保持反黑（手機控制棒／桌面 shift+方向鍵） | ✅ 已確認，與 BUGS B3 合併為 G5-B3 |
 | G6 | 模型回傳錯誤時的重傳機制 | ⏳ 待確認 |
 | G7 | 手機版聊天區與分支對話隱藏頭像 | ✅ 完成（0665365；手機主對話無頭像、AI 氣泡無右側留白；分支本來就無頭像） |
 | G8 | 複製訊息按鈕 → 訊息功能列 | ✅ 完成（ff6f733） |
@@ -282,6 +282,24 @@ chat-{root_id}-{date}/
 4. `git show --stat HEAD` → 只有 `BranchPanel.jsx`、`App.jsx`
 5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
 6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
+
+### G5-B3 規格與驗收（2026-11-02 定稿）
+
+決策見 `docs/20261102_(G5-B3)selection-change-guide.html` 第 6 節。只動 `frontend/src/components/MessageList.jsx`。
+
+- Markdown `components` 只建立一次：依 role 用 `useMemo` 各建一份；`mark` 需要的 `branchById`、`onOpenBranch` 改由 ref 讀最新值。`renderMarkdown` 與 `renderContent` 都改用這兩份固定物件。
+- 移除 AI 泡泡的 `onMouseUp`；改在 `document` 監聽 `selectionchange`，防抖 300ms 後執行原本的判斷（選取完全在同一則有 id 的 AI 泡泡內 → `selectionOffsets` → `branchSel`），否則（選取收合／不在 AI 泡泡）隱藏按鈕。
+- 按鈕位置：視窗寬 ≥ 768 維持選取上方；< 768 放選取下方（`rect.bottom + MOBILE_BUTTON_OFFSET`，預設 28px）。
+- 按鈕加 `onMouseDown` preventDefault（只擋按鈕本身）；移除「點外面就收起」的 mousedown 監聽（改由 selectionchange 處理），保留捲動／縮放收起。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -c "selectionchange" frontend/src/components/MessageList.jsx` → ≥ 2（add＋remove）
+3. `grep -n "onMouseUp" frontend/src/components/MessageList.jsx` → 無輸出
+4. `grep -n "components={buildMarkdownComponents" frontend/src/components/MessageList.jsx` → 無輸出（不再於 JSX 內每次建立）
+5. `git show --stat HEAD` → 只有 `MessageList.jsx`
+6. 瀏覽器（桌面）：選取 AI 文字放開滑鼠 → 反白保留、上方出現「建立分支」；shift+方向鍵調整 → 反白跟著變、停手後按鈕移到新位置；按下 → 分支的選取文字是調整後的範圍；高亮點擊仍可開分支；串流中顯示正常；Ctrl+C／右鍵複製選取文字正常
+7. 瀏覽器（手機）：長按 AI 文字 → 停手後選取「下方」出現「建立分支」，不被原生工具列擋住；拖控制棒調整 → 按鈕跟著移動；點按鈕 → 開啟分支且文字正確；點空白處取消選取 → 按鈕消失；user 訊息長按仍是 G8 選單
 
 ### G8 規格與驗收（2026-11-02 定稿）
 
