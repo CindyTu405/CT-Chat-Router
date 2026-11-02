@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>正式環境部署教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 部署教學</span>
+    <h1>正式環境怎麼更新</h1>
+    <p>compose 檔怎麼選、volume 掛載是什麼、pull 之後該下哪些指令。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>為什麼會出事（2026-11-02 的事故）</h2>
+    <p>在 VM 上 <code>git pull</code> 之後 <code>docker compose up</code>，網頁送訊息回 500：</p>
+    <pre><code>psycopg2.errors.UndefinedColumn: column "branch_id" of relation "message" does not exist</code></pre>
+    <p>原因：<strong>程式碼更新了，資料庫的結構沒跟上。</strong>新版 <code>Message</code> model 有 <code>branch_id</code>，但 VM 的 Postgres 資料還是舊的（volume 保留了資料，log 才會寫 "Skipping initialization"）。<code>git pull</code> 與 <code>docker compose up</code> 都不會去執行 Alembic migration，要自己跑。</p>
+    <div class="flow">
+      <div class="box">git pull<br>(程式碼是新的)</div>
+      <div class="arrow">→</div>
+      <div class="box">DB 沒動<br>(結構還是舊的)</div>
+      <div class="arrow">→</div>
+      <div class="box">INSERT 找不到欄位<br>(500)</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>兩份 compose 檔：開發 vs 正式</h2>
+    <table>
+      <tr><th></th><th><code>docker-compose.yml</code>（本機開發）</th><th><code>docker-compose.prod.yml</code>（VM）</th></tr>
+      <tr><td>api 啟動指令</td><td><code>uvicorn ... --reload</code></td><td><code>uvicorn ...</code>（無 reload）</td></tr>
+      <tr><td>api 掛載原始碼</td><td>有（<code>./backend:/app</code>）</td><td><strong>沒有</strong></td></tr>
+      <tr><td>對外 port</td><td>db 5432、api 8000、pgadmin 5050</td><td>只開 web 的 80；db、api 只在 compose 內部網路</td></tr>
+      <tr><td>pgadmin</td><td>有</td><td>沒有</td></tr>
+      <tr><td>restart</td><td>—</td><td><code>restart: always</code>（機器重開會自動起來）</td></tr>
+    </table>
+
+    <h3>為什麼 VM 上直接打 <code>docker compose ...</code> 就是 prod？</h3>
+    <p>VM 的 <code>.env</code> 裡有這一行：</p>
+    <pre><code>COMPOSE_FILE=docker-compose.prod.yml</code></pre>
+    <p><code>COMPOSE_FILE</code> 是 Docker Compose 自己讀的環境變數，作用等同每次都加 <code>-f docker-compose.prod.yml</code>。沒有它，Compose 會預設讀 <code>docker-compose.yml</code>（開發版）。</p>
+    <div class="tip"><b>如何確認現在用哪一份：</b><code>sudo docker compose config --services</code> 看服務清單；prod 沒有 <code>pgadmin</code>。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>volume 掛載是什麼</h2>
+    <p>容器的檔案系統是「用完即丟」的：容器刪掉重建，裡面的東西就沒了。<strong>volume 掛載就是把容器外面的某個東西接進容器裡</strong>，讓兩邊看到同一份內容。這個專案用到兩種：</p>
+
+    <h3>① Bind mount（綁定目錄）：<code>./backend:/app</code></h3>
+    <p>格式 <code>主機路徑:容器路徑</code>。把主機上的 <code>./backend</code> 資料夾直接蓋在容器的 <code>/app</code> 上。</p>
+    <div class="flow">
+      <div class="box">主機 ./backend<br>(你改 main.py)</div>
+      <div class="arrow">⇄</div>
+      <div class="box">容器 /app<br>(馬上看到新的)</div>
+    </div>
+    <p>搭配 <code>--reload</code>，存檔後 uvicorn 立刻重啟，這就是開發時「改了就生效」的原因。<strong>只有開發版 compose 有這行。</strong></p>
+
+    <h3>② Named volume（具名 volume）：<code>postgres_data:/var/lib/postgresql/data</code></h3>
+    <p>冒號左邊不是路徑而是名字，資料存在 Docker 自己管理的位置。把資料庫檔案放在這裡，<strong>容器刪掉重建，資料還在</strong>。開發與正式版都有。</p>
+
+    <h3>兩種掛載對部署的影響</h3>
+    <table>
+      <tr><th>情況</th><th>開發版</th><th>正式版</th></tr>
+      <tr><td>程式碼從哪來</td><td>主機資料夾（bind mount）</td><td>build 時 <code>COPY</code> 進 image 的那一份</td></tr>
+      <tr><td><code>git pull</code> 後</td><td>容器自動看到新碼</td><td><strong>容器還是舊碼，要重新 build</strong></td></tr>
+      <tr><td>資料庫資料</td><td colspan="2">都在 <code>postgres_data</code>：重建容器不會清掉，所以<strong>舊 schema 會一直留著</strong>，必須用 migration 改</td></tr>
+    </table>
+    <div class="warn"><b>危險指令：</b><code>docker compose down -v</code> 的 <code>-v</code> 會連 named volume 一起刪，等於清空資料庫。正式環境不要加 <code>-v</code>。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>每次部署的標準流程</h2>
+    <pre><code><span class="cm"># 在 VM 的專案目錄</span>
+git pull
+sudo docker compose up -d --build
+sudo docker compose exec api alembic upgrade head
+sudo docker compose logs -f api</code></pre>
+
+    <table>
+      <tr><th>指令</th><th>意思</th></tr>
+      <tr><td><code>git pull</code></td><td>把 GitHub 上最新程式碼拉到 VM 的資料夾。只動檔案，不影響正在跑的容器。</td></tr>
+      <tr><td><code>sudo</code></td><td>以管理員身分執行。VM 上目前使用者沒加進 docker 群組，所以 docker 指令都要 sudo。</td></tr>
+      <tr><td><code>docker compose up</code></td><td>依 compose 檔建立並啟動所有服務。已在跑且設定沒變的容器不會被動到。</td></tr>
+      <tr><td><code>-d</code></td><td>detached，背景執行。不加的話終端機會被 log 佔住，Ctrl+C 就把服務停了。</td></tr>
+      <tr><td><code>--build</code></td><td>啟動前先重新 build image。prod 的程式碼在 image 裡，pull 後<strong>一定要加</strong>，否則跑的還是舊碼。</td></tr>
+      <tr><td><code>docker compose exec api ...</code></td><td>在<strong>已經在跑</strong>的 <code>api</code> 容器裡執行指令（<code>api</code> 是 compose 的服務名）。對比 <code>run</code>：run 會另開一個新容器。</td></tr>
+      <tr><td><code>alembic upgrade head</code></td><td>讀 DB 的 <code>alembic_version</code> 表，把還沒套用的 migration 依序執行到最新版（<code>head</code>）。已是最新就什麼也不做，可以重複執行。</td></tr>
+      <tr><td><code>alembic current</code></td><td>只看 DB 目前在哪一版，不改任何東西。</td></tr>
+      <tr><td><code>docker compose logs -f api</code></td><td>看 api 的 log。<code>-f</code> follow，持續輸出；Ctrl+C 離開，不會停掉服務。</td></tr>
+      <tr><td><code>docker compose ps</code></td><td>列出各容器狀態（Up / Exited / healthy）。</td></tr>
+      <tr><td><code>docker compose down</code></td><td>停止並移除容器與網路。<strong>不加 <code>-v</code> 就不會刪資料。</strong></td></tr>
+    </table>
+    <div class="tip"><b>順序有道理：</b>先 <code>--build</code> 讓新碼上線，再 migration。新碼若在 migration 前被呼叫會 500，所以兩步之間盡量別拖；沒有新 migration 檔就可以跳過第三步。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>驗證資料庫欄位</h2>
+    <pre><code>sudo docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\d message"'</code></pre>
+    <p>為什麼要包一層 <code>sh -c '...'</code>、還要單引號？</p>
+    <ul>
+      <li><code>$POSTGRES_USER</code> 是 db <strong>容器</strong>的環境變數，由 compose 傳進去。</li>
+      <li>如果直接寫 <code>... psql -U $POSTGRES_USER ...</code>，變數會先被 <strong>VM 的 shell</strong> 展開；VM 沒設這個變數，結果變空字串，psql 就把 <code>-d</code> 當成使用者名稱，才會看到 <code>role "-d" does not exist</code>。</li>
+      <li>單引號讓外層 shell 不展開，留給容器內的 <code>sh</code> 展開。</li>
+    </ul>
+    <p><code>\d message</code> 是 psql 的內建指令，列出 <code>message</code> 表的欄位，應看到 <code>branch_id</code>、<code>anchor_message_id</code>。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>常見狀況對照</h2>
+    <table>
+      <tr><th>症狀</th><th>原因</th><th>處理</th></tr>
+      <tr><td><code>UndefinedColumn</code> / <code>UndefinedTable</code> 500</td><td>有新 migration 沒跑</td><td><code>alembic upgrade head</code></td></tr>
+      <tr><td>pull 了但行為沒變</td><td>prod 沒掛載，容器還是舊 image</td><td><code>up -d --build</code></td></tr>
+      <tr><td>啟動初期 nginx 502 <code>Connection refused</code></td><td>api 還在載入，web 先起來了</td><td>等幾十秒；持續不好才看 <code>logs api</code></td></tr>
+      <tr><td><code>alembic current</code> 沒輸出</td><td>DB 沒有版本紀錄（早期用 create_all 建的）</td><td>直接 <code>upgrade head</code>；若報「table already exists」，改用 <code>alembic stamp</code> 標記已有的版本</td></tr>
+    </table>
+    <div class="warn"><b>尚未自動化：</b>目前 migration 要手動跑。可選方案是把 <code>alembic upgrade head</code> 加進 api 的啟動指令，之後再決定。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>小練習</h2>
+    <ol>
+      <li>在 VM 跑 <code>sudo docker compose config --services</code>，確認沒有 <code>pgadmin</code>。</li>
+      <li>跑 <code>alembic current</code>，確認輸出是 <code>b1a2c3d4e5f6 (head)</code>。</li>
+      <li>用 <code>docker compose ps</code> 與 <code>docker volume ls</code> 各找出三個容器與 <code>postgres_data</code>。</li>
+      <li>說說看：如果在 prod 只 <code>git pull</code> 再 <code>docker compose restart api</code>，程式碼會更新嗎？（不會，為什麼？）</li>
+    </ol>
+  </section>
+
+</div>
+</body>
+</html>
