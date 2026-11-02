@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>訊息功能列與複製教學（G8）— CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 前端教學 · G8</span>
+    <h1>訊息功能列與複製</h1>
+    <p>一張 actions 清單產生按鈕與選單；Clipboard API 與「安全環境」；http 下怎麼複製；手機長按選單。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>要做成什麼樣子</h2>
+    <table>
+      <tr><th></th><th>電腦（≥ 768px）</th><th>手機（&lt; 768px）</th></tr>
+      <tr><td>AI 訊息</td><td colspan="2">模型名稱下方一排功能列，常態顯示</td></tr>
+      <tr><td>user 訊息</td><td>送出時間右邊一排功能列，常態顯示</td><td>不顯示功能列；<b>長按氣泡</b>跳出選單</td></tr>
+    </table>
+    <p>目前功能列只有「複製」一項，但之後還會加（例如重傳、編輯）。所以重點不是做一顆複製鈕，而是做一個<strong>能長出更多按鈕的功能列</strong>。</p>
+    <p>做在 G3 的共用 <code>MessageList</code> 裡，分支面板會自動一起有。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念一：用清單產生按鈕</h2>
+    <p>把「有哪些功能」寫成資料，畫面只負責把資料畫出來：</p>
+    <pre><code><span class="cm">// 每個功能 = 一筆資料</span>
+const buildMessageActions = (msg) =&gt; [
+  {
+    id: 'copy',
+    label: '複製',
+    icon: Copy,
+    run: () =&gt; copyText(msg.content),   <span class="cm">// 原始 markdown</span>
+  },
+  <span class="cm">// 之後加功能：在這裡多一筆，功能列和手機選單同時出現</span>
+];</code></pre>
+    <p>同一張清單有兩種畫法：</p>
+    <div class="flow">
+      <div class="box">buildMessageActions(msg)</div>
+      <div class="arrow">→</div>
+      <div class="box">MessageActions<br>一排小圖示（電腦／AI）</div>
+      <div class="arrow">＋</div>
+      <div class="box">MessageActionMenu<br>長按選單（手機 user）</div>
+    </div>
+    <div class="tip"><b>好處：</b>加一個功能只改清單一處，不會出現「功能列有、手機選單忘了加」。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念二：Clipboard API 與「安全環境」</h2>
+    <p>現代瀏覽器寫入剪貼簿的標準做法：</p>
+    <pre><code>await navigator.clipboard.writeText('要複製的文字');</code></pre>
+    <p>但它有一個限制：<strong>只在「安全環境」（secure context）可用</strong>。不是安全環境時，<code>navigator.clipboard</code> 直接是 <code>undefined</code>，呼叫就報錯。</p>
+    <table>
+      <tr><th>網址</th><th>安全環境？</th><th><code>navigator.clipboard</code></th></tr>
+      <tr><td><code>https://任何網域</code></td><td>✅</td><td>可用</td></tr>
+      <tr><td><code>http://localhost:5173</code>、<code>http://127.0.0.1</code></td><td>✅（瀏覽器特例）</td><td>可用</td></tr>
+      <tr><td><code>http://192.168.x.x:5173</code>（手機連電腦）</td><td>❌</td><td><code>undefined</code></td></tr>
+    </table>
+    <p>為什麼要限制：剪貼簿可能有密碼等敏感資料，瀏覽器不想讓「可能被中間人竄改的 http 頁面」碰它。</p>
+    <p>可以在 console 確認：<code>window.isSecureContext</code> → <code>true</code> / <code>false</code>。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>http 下怎麼辦：三種解法</h2>
+    <h3>① 備援寫法（決定採用）</h3>
+    <p>舊的 <code>document.execCommand('copy')</code> 沒有安全環境限制。做法是暫時放一個看不見的 textarea、選取它的內容、執行複製、再移除：</p>
+    <pre><code><span class="cm">// frontend/src/clipboard.js</span>
+export async function copyText(text) {
+  if (window.isSecureContext &amp;&amp; navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      <span class="cm">// 權限被拒等狀況 → 往下走備援</span>
+    }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');                 <span class="cm">// 手機不跳鍵盤</span>
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  document.body.removeChild(ta);
+  return ok;
+}</code></pre>
+    <p><code>execCommand</code> 已被標為「不建議使用」，但各大瀏覽器都還支援。這裡只當備援：換成 https 後走的是第一段，備援不會被用到，也不用拿掉。</p>
+
+    <h3>② 開發時讓 Vite 走 https</h3>
+    <p>裝 <code>@vitejs/plugin-basic-ssl</code>，<code>vite.config.js</code> 加進 plugins，開發伺服器就變 <code>https://192.168.x.x:5173</code>。缺點：自簽憑證，手機第一次要手動按「仍要前往」；後端 API 如果還是 http，會被瀏覽器擋（混合內容），要一起處理。</p>
+
+    <h3>③ 手機透過 USB 轉發成 localhost</h3>
+    <p>Android：Chrome 的 <code>chrome://inspect</code> → Port forwarding，把手機的 <code>localhost:5173</code> 轉到電腦。手機開 <code>http://localhost:5173</code> 就是安全環境。缺點：要接線、只適用 Android＋Chrome。</p>
+
+    <table>
+      <tr><th>解法</th><th>改 code</th><th>手機額外操作</th><th>上線後</th></tr>
+      <tr><td>① 備援寫法</td><td>約 10 行</td><td>無</td><td>保留無害</td></tr>
+      <tr><td>② Vite https</td><td>設定檔＋後端也要 https</td><td>信任自簽憑證</td><td>不影響</td></tr>
+      <tr><td>③ USB 轉發</td><td>無</td><td>每次接線</td><td>不影響</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>概念三：偵測長按</h2>
+    <p>瀏覽器沒有「長按」事件，要自己組：手指按下時開計時器，時間到還沒放開、也沒移動，就算長按。</p>
+    <pre><code>const LONG_PRESS_MS = 500;
+const MOVE_TOLERANCE = 10;   <span class="cm">// 手指移動超過 10px 視為在捲動，不算長按</span>
+
+onPointerDown={(e) =&gt; {
+  if (e.pointerType !== 'touch') return;      <span class="cm">// 只處理手指，滑鼠不觸發</span>
+  start = { x: e.clientX, y: e.clientY };
+  timer = setTimeout(() =&gt; openMenu(bubbleEl), LONG_PRESS_MS);
+}}
+onPointerMove={(e) =&gt; { if (移動距離 &gt; MOVE_TOLERANCE) clearTimeout(timer); }}
+onPointerUp={() =&gt; clearTimeout(timer)}
+onPointerCancel={() =&gt; clearTimeout(timer)}
+onContextMenu={(e) =&gt; e.preventDefault()}   <span class="cm">// 擋掉 Android 長按的原生選單</span></code></pre>
+    <h3>跟原生「長按選字」的衝突</h3>
+    <p>手機長按文字，瀏覽器預設會選字並跳出「複製／全選」原生選單，會跟我們的選單打架。所以 user 氣泡在手機上關掉原生選取：</p>
+    <pre><code>className="max-md:select-none max-md:[-webkit-touch-callout:none]"</code></pre>
+    <ul>
+      <li><code>max-md:</code>：只在 &lt; 768px 生效（Tailwind v4），電腦版照常可以選字。</li>
+      <li><code>select-none</code>：不能選取文字。</li>
+      <li><code>-webkit-touch-callout: none</code>：iOS 長按不跳原生選單。</li>
+    </ul>
+    <div class="warn"><b>代價（已確認接受）：</b>手機上不能只選 user 訊息的一部分，要整則複製。AI 訊息不受影響，手機長按 AI 文字仍是選字開分支。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>概念四：浮動選單與「點外面關閉」</h2>
+    <p>選單用 <code>position: fixed</code>，以氣泡的 <code>getBoundingClientRect()</code> 決定位置，放在氣泡上方。這跟現有的「建立分支」浮動按鈕是同一個模式（<code>MessageList.jsx</code> 的 <code>branchSel</code>）：</p>
+    <pre><code>useEffect(() =&gt; {
+  if (!menu) return;
+  const close = () =&gt; setMenu(null);
+  const onDown = (e) =&gt; { if (!menuRef.current?.contains(e.target)) close(); };
+  document.addEventListener('pointerdown', onDown);
+  window.addEventListener('scroll', close, true);   <span class="cm">// 捲動就關</span>
+  window.addEventListener('resize', close);
+  return () =&gt; { ...移除三個監聽... };
+}, [menu]);</code></pre>
+    <p class="muted">這裡用 fixed 是對的：選單要浮在所有東西上面，而且只在手機出現（手機的分支面板是滿版，不會有 G3 那種「跑到別的面板」問題）。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>決策表</h2>
+    <table>
+      <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+      <tr><td>1</td><td>哪些訊息可複製</td><td>user 和 AI 都可以；主對話與分支都有（共用組件）</td><td>✅ 已定</td></tr>
+      <tr><td>2</td><td>結構</td><td>「訊息功能列」，由 actions 清單產生；複製是其中一項，之後可擴充</td><td>✅ 已定</td></tr>
+      <tr><td>3</td><td>AI 訊息位置</td><td>模型名稱下方，手機與電腦都常態顯示</td><td>✅ 已定</td></tr>
+      <tr><td>4</td><td>user 訊息（電腦）</td><td>送出時間右邊，常態顯示</td><td>✅ 已定</td></tr>
+      <tr><td>5</td><td>user 訊息（手機）</td><td>長按氣泡 → 氣泡上方浮動選單（項目＝同一張清單），點外面／捲動關閉；氣泡關閉原生選取</td><td>✅ 已定</td></tr>
+      <tr><td>6</td><td>手機長按 AI 訊息</td><td>維持現狀（選字開分支），不做選單</td><td>✅ 已定</td></tr>
+      <tr><td>7</td><td>複製內容</td><td>原始 markdown（<code>msg.content</code>）</td><td>✅ 已定</td></tr>
+      <tr><td>8</td><td>回饋</td><td>功能列：圖示變 ✓ 約 2 秒。手機選單：該項變「✓ 已複製」約 1 秒後選單關閉</td><td>✅ 已定</td></tr>
+      <tr><td>9</td><td>http 開發環境</td><td>實作備援寫法（第 4 節 ①）</td><td>✅ 已定</td></tr>
+      <tr><td>10</td><td>內容為空（Thinking... 中）</td><td>不顯示功能列、不觸發長按選單</td><td>建議（實作預設）</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>小練習</h2>
+    <ol>
+      <li>用手機開 <code>http://你的電腦IP:5173</code>，在 console（或遠端偵錯）輸入 <code>window.isSecureContext</code> 和 <code>navigator.clipboard</code>，各是什麼？電腦開 <code>http://localhost:5173</code> 再試一次。</li>
+      <li>如果要加一個「重傳」功能（G6），要改 <code>buildMessageActions</code> 的哪裡？要不要改 <code>MessageActions</code> 或 <code>MessageActionMenu</code>？</li>
+      <li>長按計時器為什麼要在 <code>pointermove</code> 超過 10px 時取消？拿掉的話，手指按在 user 氣泡上往上滑捲動會發生什麼？</li>
+      <li>為什麼 <code>select-none</code> 要加 <code>max-md:</code> 前綴？</li>
+    </ol>
+  </section>
+
+</div>
+</body>
+</html>
