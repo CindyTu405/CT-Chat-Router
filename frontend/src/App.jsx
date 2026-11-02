@@ -711,6 +711,11 @@ function App() {
           branches={branches}
           activeBranchId={activeBranchId}
           model={model}
+          setModel={setModel}
+          isCustomModel={isCustomModel}
+          setIsCustomModel={setIsCustomModel}
+          freeModels={freeModels}
+          freeModelsLoading={freeModelsLoading}
           onSelectBranch={setActiveBranchId}
           onCloseBranch={closeBranch}
           onInputChange={(branchId, text) => updateBranch(branchId, b => ({ ...b, input: text }))}
