@@ -231,12 +231,13 @@ chat-{root_id}-{date}/
 | G2 | 分支地圖依錨點位置排序 | ✅ | 1013464（cherry-pick 自 1c574f1，已在瀏覽器確認） |
 | G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ✅ | be02ad3（已在瀏覽器確認）；教學：`docs/shared-chat-pane-guide.html` |
 | G3-2 | 分支面板套用共用組件（含 G4 模型標籤） | ✅ | 433effe（使用者瀏覽器驗收 7 項通過；窄面板微調延後） |
-| G5–G9 | 見下方（G7 已完成） | ⏳ 待確認 | 草稿已於 e051fec revert |
+| G8 | 訊息功能列（首項：複製）＋ http 剪貼簿備援＋手機 user 長按選單 | ⏳ 待開始 | 教學：`docs/message-actions-guide.html`；驗收見下方 |
+| G5、G6、G9 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
 
 > B2–B4／F9 的拆分以 HANDOVER 為準，尚未寫驗收指令；開工前先補（可執行指令形式）並出教學文件。
 
-### G2–G9（G5、G6、G8、G9 為未確認需求，逐項討論前不實作）
+### G2–G9（G5、G6、G9 為未確認需求，逐項討論前不實作）
 
 細節見 `BACKLOG.md`。G1–G4、G7 已完成。
 
@@ -248,7 +249,7 @@ chat-{root_id}-{date}/
 | G5 | 調整選取範圍時保持反黑（手機控制棒／桌面 shift+方向鍵） | ⏳ 待確認 |
 | G6 | 模型回傳錯誤時的重傳機制 | ⏳ 待確認 |
 | G7 | 手機版聊天區與分支對話隱藏頭像 | ✅ 完成（0665365；手機主對話無頭像、AI 氣泡無右側留白；分支本來就無頭像） |
-| G8 | 複製訊息按鈕 | ⏳ 待確認 |
+| G8 | 複製訊息按鈕 → 訊息功能列 | ✅ 已確認（2026-11-02） |
 | G9 | user 訊息顯示換行，超過 5 行摺疊 | ⏳ 待確認 |
 
 ### G3-1／G3-2 規格與驗收（2026-11-01 定稿）
@@ -280,6 +281,22 @@ chat-{root_id}-{date}/
 4. `git show --stat HEAD` → 只有 `BranchPanel.jsx`、`App.jsx`
 5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
 6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
+
+### G8 規格與驗收（2026-11-02 定稿）
+
+決策見 `docs/message-actions-guide.html` 第 7 節。
+
+- 新檔 `frontend/src/clipboard.js`：`copyText(text)`，安全環境用 `navigator.clipboard.writeText`，否則或失敗時退回隱藏 textarea＋`execCommand('copy')`；回傳 boolean。
+- 新檔 `frontend/src/components/MessageActions.jsx`：`buildMessageActions(msg)`（目前只有 copy，複製 `msg.content`）、`MessageActions`（一排小圖示，複製後圖示變 ✓ 約 2 秒）、`MessageActionMenu`（fixed 浮動選單，點外面／捲動／縮放關閉；複製後該項變「✓ 已複製」約 1 秒後關閉）。
+- `MessageList.jsx`：AI 訊息在模型標籤下方放 `MessageActions`（常態）；user 訊息把送出時間那列改成 flex，時間右邊放 `MessageActions`，僅 `md` 以上顯示；手機 user 氣泡長按（`pointerType === 'touch'`，500ms，移動 > 10px 取消）開 `MessageActionMenu`，並加 `max-md:select-none max-md:[-webkit-touch-callout:none]`、`onContextMenu` preventDefault。內容為空時不顯示功能列、不觸發長按。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `ls frontend/src/clipboard.js frontend/src/components/MessageActions.jsx` → 兩個檔案都存在
+3. `grep -c "execCommand('copy')" frontend/src/clipboard.js` → `1`；`grep -c "isSecureContext" frontend/src/clipboard.js` → ≥ 1
+4. `git show --stat HEAD` → 只有上述兩個新檔＋`MessageList.jsx`
+5. 瀏覽器（桌面）：AI 訊息模型名稱下方有複製圖示，user 訊息時間右邊有複製圖示；點擊 → 圖示變 ✓ 約 2 秒，貼上得到原始 markdown；分支面板同樣有；Thinking... 中不顯示；桌面 user 訊息仍可滑鼠選字
+6. 瀏覽器（手機，`http://區網IP:5173`）：AI 訊息模型名稱下方有複製圖示且可複製（驗證 http 備援）；user 訊息沒有圖示，長按 → 氣泡上方出現選單，點「複製」→ 顯示已複製後關閉，貼上正確；點選單外面會關閉；在 user 氣泡上滑動捲動不會誤開選單；長按 AI 文字仍是選字＋「建立分支」
 
 > BACKLOG 前三項（編輯按鈕手機版、手機收起側邊欄擠壓、分支情境重設計）已討論並轉為上表編號，不另列。第四項 Voyager 式時間軸見上表 T1。
 
