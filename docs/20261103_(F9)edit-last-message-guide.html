@@ -275,7 +275,7 @@ const handleRetry = async (aiMsg, { userMsg, content } = {}) =&gt; {
     <h2><span class="num">9</span>實作紀錄</h2>
     <table>
       <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
-      <tr><td>F9-1</td><td></td><td></td><td></td></tr>
+      <tr><td>F9-1</td><td><code>3a5bf6f</code></td><td><code>RegenerateRequest.content</code>（可選）；端點在 404 之後、403 之前擋空白 → 422；通過全部檢查後才改 <code>user_msg.content</code>，與幽靈化、AI 清空同一個 commit；生成用新內容；harness 新增 10a–10e</td><td>假 LLM harness 在 uvicorn 上 47 PASS、ALL PASS（2026-11-03，主 agent 重跑確認）</td></tr>
       <tr><td>F9-2</td><td></td><td></td><td></td></tr>
     </table>
   </section>
