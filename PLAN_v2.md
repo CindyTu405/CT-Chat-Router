@@ -234,7 +234,7 @@ chat-{root_id}-{date}/
 | G8 | 訊息功能列（首項：複製）＋ http 剪貼簿備援＋手機 user 長按選單 | ✅ | ff6f733（使用者驗證通過）；教學：`docs/20261102_(G8)message-actions-guide.html`；驗收見下方 |
 | G5-B3 | 選取保持反白（G5）＋手機選字出現建立分支按鈕（BUGS B3）：Markdown 元件固定身分、selectionchange＋防抖、手機按鈕在下方 | ✅ | 804d0fd（使用者瀏覽器驗證通過）； 教學：`docs/20261102_(G5-B3)selection-change-guide.html`；驗收見下方 |
 | G9 | user 訊息：原樣顯示（只渲染程式碼區塊／行內程式碼）＋畫面超過 10 行摺疊 | ✅ | f6b5f1a（使用者瀏覽器驗證通過）； 教學：`docs/20261103_(G9)user-message-collapse-guide.html`；驗收見下方 |
-| G6-1 | 後端：幽靈分支資料欄位 migration、`POST /messages/{id}/regenerate`（原地重新生成＋幽靈化）、`/chats/roots` 過濾、緩衝清除競態修正 | ⏳ 待開始 | 教學：`docs/20261103_(G6)regenerate-guide.html`；驗收見下方 |
+| G6-1 | 後端：幽靈分支資料欄位 migration、`POST /messages/{id}/regenerate`（原地重新生成＋幽靈化）、`/chats/roots` 過濾、緩衝清除競態修正 | ✅ | 3019e83（migration c6d7e8f9a0b1；假 LLM harness 27 PASS）； 教學：`docs/20261103_(G6)regenerate-guide.html`；驗收見下方 |
 | G6-2 | 前端：最後一則 AI 回覆的重傳鈕（主對話＋分支） | ⏳ 待開始 | 依賴 G6-1 | 草稿已於 e051fec revert |
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
 
