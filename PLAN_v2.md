@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：幽靈分支 UI＋重連（B3／F9）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
+**下一步**：分支入口＋重疊降級＋分支列表＋幽靈重連（E1–E5，branch `feat/branch-entries`，見第八節「E 規格與驗收」）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
 
 ---
 
@@ -225,7 +225,7 @@ chat-{root_id}-{date}/
 | F8 | 前端：AST offset 高亮 | ✅ | 6ab113d |
 | G1 | 新對話可直接開分支（回傳 user message id） | ✅ | 4034f55（教學：optimistic-update-guide） |
 | B2 | 後端：刪除舊一輪端點＋幽靈分支（`is_orphaned`、`attach_root_id`） | 🔶 部分 | 資料欄位與幽靈化併入 G6-1；刪除舊一輪（主題 3）暫不做 |
-| B3 | 後端：幽靈分支重連 API | ⏳ | DESIGN_P3 主題 2 |
+| B3 | 後端：幽靈分支重連 API | ➡️ 併入 E2 | 改為 DESIGN_P3 主題 6 |
 | B4 | 後端：`/chat` context 組裝（`include_main`／`context_branch_ids`、token 截斷） | ⚠️ 待重新評估 | 依賴已廢棄的 F6，需確認是否仍要做 |
 | F9 | 前端：編輯最後一則（inline regenerate）、幽靈分支重連 UI、入口管理右鍵選單 | 🔶 | 編輯最後一則拆為 F9-1／F9-2（下兩列）；幽靈分支重連 UI、入口右鍵選單（主題 5）仍待討論 |
 | F9-1 | 後端：`regenerate` body 加可選 `content`，同一個 commit 更新 user 訊息內容 | ✅ | 3a5bf6f（假 LLM harness 47 PASS，含 F9 新增 10a–10e）；規格見下方「F9 規格與驗收」；教學：`docs/20261103_(F9)edit-last-message-guide.html` |
@@ -239,6 +239,11 @@ chat-{root_id}-{date}/
 | G6-1 | 後端：幽靈分支資料欄位 migration、`POST /messages/{id}/regenerate`（原地重新生成＋幽靈化）、`/chats/roots` 過濾、緩衝清除競態修正 | ✅ | 3019e83（migration c6d7e8f9a0b1；假 LLM harness 27 PASS）； 教學：`docs/20261103_(G6)regenerate-guide.html`；驗收見下方 |
 | G6-2 | 前端：最後一則 AI 回覆的重傳鈕（主對話＋分支） | ✅ | 7d17035（使用者瀏覽器驗證通過） | 草稿已於 e051fec revert |
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
+| E1 | 後端：建立分支重疊降級（同一交易）、回傳 `title`／`reused`／`demoted_ids` | ⏳ | 規格見下方「E 規格與驗收」；DESIGN_P3 主題 6 |
+| E2 | 後端：幽靈化記原對話、`GET /branches/orphaned`、`POST /branches/{id}/relink`、刪對話前清 `attach_root_id` | ⏳ | 取代 B3 |
+| E3 | 前端：AI 回覆底部入口（橫線＋每行一個 anchor_text）、建立分支處理 `reused` | ⏳ | |
+| E4 | 前端：分支面板左上角分支列表（滿版覆蓋、依位置排序、點了開 tab＋主對話捲到位置） | ⏳ | |
+| E5 | 前端：選字時「連結幽靈分支」按鈕＋選單、列表的幽靈分支區 | ⏳ | 取代 F9 的「幽靈分支重連 UI」 |
 
 > B2–B4／F9 的拆分以 HANDOVER 為準，尚未寫驗收指令；開工前先補（可執行指令形式）並出教學文件。
 
@@ -286,6 +291,75 @@ chat-{root_id}-{date}/
 4. `git show --stat HEAD` → 只有 `BranchPanel.jsx`、`App.jsx`
 5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
 6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
+
+### E 規格與驗收：分支入口、重疊降級、分支列表、幽靈重連（2026-11-04 定稿）
+
+設計見 DESIGN_P3 主題 6；決策見 `docs/20261104_(E)branch-entries-guide.html` 決策表。在 branch `feat/branch-entries` 開發，E1–E5 全部驗收後 merge 回 main。
+波次（每波停下等使用者驗證）：W1＝E1→E2（後端，同一個 implementer 依序兩個 commit）；W2＝E3；W3＝E4；W4＝E5。前端三個任務都動 `App.jsx`，一律依序。
+
+**E1 後端：建立分支重疊降級（`backend/main.py`、新檔 `backend/dev/branch_entries_harness.py`）**
+- 抽出共用函式 `demote_overlaps(session, anchor_message_id, start, end, exclude_id=None) -> list[str]`：找同一 `anchor_message_id`、`is_orphaned=False`、`anchor_start／end` 皆非空、且 `舊.start < end and start < 舊.end` 的分支 → `anchor_start=anchor_end=None`（其他欄位不動），回傳被降級的 id。不 commit，由呼叫端統一 commit。
+- `POST /chats/{root_id}/branches`：驗證通過後，若有帶 start／end：先找「同一則、範圍完全相同、非幽靈」的分支 → 有就**不新建**，直接回傳它（`reused: true`、`demoted_ids: []`）；否則呼叫 `demote_overlaps`，再建新分支，同一個 commit。沒帶 start／end → 不檢查重疊（直接成為底部入口）。
+- 回傳加 `title`、`reused`、`demoted_ids`；原有欄位不變。
+- harness：沿用 `regenerate_harness.py` 的寫法（真 uvicorn、假 LLM、唯一 session_id 建資料、結束清掉；port 用 8766 避免和舊 harness 衝突）。
+
+驗收：
+1. `docker compose ps` → chat_db 為 running（不是就停下回報）
+2. `cd backend && uv run python dev/branch_entries_harness.py 2>&1 | grep -v sqlalchemy | tail -30` → 每項 PASS，最後一行 `ALL PASS`。涵蓋：無重疊 → `reused=false`、`demoted_ids=[]`；部分重疊 → 舊的 start／end 為 NULL、`anchor_message_id`／`anchor_text`／`title` 不變，新的有 offset，`demoted_ids` 含舊 id；同時重疊兩個 → 兩個都降級；相鄰（舊.end == 新.start）→ 不降級；範圍完全相同 → `reused=true`、`branch_id` 等於既有、branch 筆數不變；不同則訊息同樣 offset → 不降級；不帶 offset 建立 → 不降級任何分支；`GET /chats/{root}/branches` 中被降級者 `precise=false`
+3. `cd backend && uv run python dev/regenerate_harness.py 2>&1 | grep -v sqlalchemy | tail -3` → `ALL PASS`
+4. `git show --stat HEAD` → 只有 `main.py`、`branch_entries_harness.py`
+
+**E2 後端：幽靈清單與重連（`backend/main.py`、`backend/dev/branch_entries_harness.py`）**
+- `POST /messages/{id}/regenerate` 幽靈化時：`attach_root_id` = 該 AI 回覆所在對話的樹根 id（parent_id 為 NULL 的祖先）。
+- `DELETE /chats/{root_id}`：刪訊息前，把 `attach_root_id` 落在要刪的訊息 id 內的分支設為 NULL（同一個交易）。
+- `GET /branches/orphaned?session_id=`：`is_orphaned=True`，且（`attach_root_id` 那則訊息的 `session_id` 等於參數，或 `attach_root_id` 為 NULL 且分支首則訊息 `root_message_id` 的 `session_id` 等於參數）；依 `created_at` 新到舊；欄位 `id, title, anchor_text, root_message_id, created_at`。
+- `POST /branches/{branch_id}/relink`，body `{ root_id, anchor_message_id, anchor_start, anchor_end, anchor_text }`：分支不存在 → 404；`is_orphaned` 不是 True → 409；錨點不存在 → 404、不在 root 這棵樹 → 400（沿用 create_branch 的檢查）；同一則上有範圍完全相同的非幽靈分支 → 409（不寫入）。通過後同一個 commit：`demote_overlaps(..., exclude_id=branch_id)`；設 `anchor_message_id／anchor_start／anchor_end／anchor_text`、`is_orphaned=False`、`attach_root_id=None`、`title` 不變；分支首則訊息（若有）`parent_id` 與 `anchor_message_id` 設為新錨點；樹根 `has_branch=True`。回傳格式同建立分支（`reused=false`）。
+
+驗收：
+1. `docker compose ps` → chat_db running
+2. `cd backend && uv run python dev/branch_entries_harness.py 2>&1 | grep -v sqlalchemy | tail -40` → `ALL PASS`。新增涵蓋：regenerate 幽靈化後 `attach_root_id` = 樹根；`GET /branches/orphaned?session_id=<sid>` 含該幽靈，換一個 session_id → 不含；`attach_root_id` 為 NULL 但首則訊息屬於 sid 的舊資料 → 含；relink 非幽靈 → 409；錨點在別的對話 → 400；relink 成功 → 欄位如上、首則訊息 `parent_id` == 新錨點、`GET /chats/{root}/branches` 含它、`GET /branches/orphaned` 不含它；relink 時重疊 → 舊的降級；relink 範圍與既有完全相同 → 409 且幽靈欄位未變；有幽靈 `attach_root_id` 指向的對話被刪 → 200，幽靈仍存在且 `attach_root_id` 為 NULL；relink 後在分支送訊息（假 LLM）→ 收到的 history 以新錨點為上下文
+3. `cd backend && uv run python dev/regenerate_harness.py 2>&1 | grep -v sqlalchemy | tail -3` → `ALL PASS`
+4. `git show --stat HEAD` → 只有 `main.py`、`branch_entries_harness.py`
+
+**E3 前端：底部入口（`frontend/src/components/MessageList.jsx`、`frontend/src/App.jsx`）**
+- `MessageList`（只在 `variant === 'main'`）：AI 回覆內容下方、功能列上方，若有「`anchor_message_id === msg.id` 且 `precise === false`」的分支 → 一條橫線，下方每個入口一行，顯示 `anchor_text`（空則顯示 `title`），沿用 inline 高亮的顏色樣式，單行、超出截斷；依 `created_at` 排序；點擊 → `onBranchClick`（同點 inline 高亮）。入口元素掛 `data-branch-entry={id}`（E4 捲動用）。
+- `handleCreateBranch`：`data.reused` 為 true → 不建新 tab，改用 `openBranchFromHighlight`（以 `branchList` 中該 id 的物件）；新 tab 標題改用 `data.title`。其餘不變（仍 `loadBranchList`）。
+- 視覺變更：build 後先不 commit，給使用者調整參數，確認後才 commit。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -c "data-branch-entry" frontend/src/components/MessageList.jsx` → ≥ 1；`grep -c "reused" frontend/src/App.jsx` → ≥ 1
+3. `git show --stat HEAD` → 只有 `MessageList.jsx`、`App.jsx`
+4. 瀏覽器（桌面 ≥ 768）：選一段與既有高亮部分重疊的文字 → 建立分支 → 新的變 inline 高亮、舊的高亮消失並出現在該則回覆底部（橫線下一行）；點底部入口 → 右欄開舊分支；選與既有高亮完全相同的範圍 → 不新增、直接開既有分支；沒有入口的回覆沒有橫線；重新整理後狀態一致；分支面板內的回覆沒有入口區
+5. 瀏覽器（手機 < 768）：底部入口顯示一行一個、點了開分支 drawer；長按 AI 選字建立分支的重疊行為同桌面
+
+**E4 前端：分支列表（新檔 `frontend/src/components/BranchListOverlay.jsx`、`BranchPanel.jsx`、`App.jsx`）**
+- `BranchPanel` header 左上角分支圖示改成按鈕（`aria-label="分支列表"`），點了在面板內顯示 `BranchListOverlay`（`absolute inset-0` 蓋住整個面板，含 header），左上角 X 關閉。
+- 清單：App 傳入 `branchList` 與主對話 `messages`。排序鍵 `(訊息在 messages 的 index, precise ? 0 : 1, precise ? anchor_start : created_at)`；anchor 不在目前 messages 裡的排最後。每項：標題（單行）＋ `anchor_text` 前 40 字（灰色小字，單行）。
+- 點一項 → 關閉清單、`openBranchFromHighlight(branch)`，並在主對話捲動：precise → `[data-branch="id"]`，否則 → `[data-branch-entry="id"]`，`scrollIntoView({ block: 'center', behavior: 'smooth' })`。手機：分支 drawer 開著時主對話被蓋住，捲動照做（關 drawer 後看得到）。
+- 沒有分支 → 清單顯示「目前對話還沒有分支」。
+- 視覺變更：先不 commit。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -c "BranchListOverlay" frontend/src/components/BranchPanel.jsx` → ≥ 1；`grep -c "scrollIntoView" frontend/src/App.jsx frontend/src/components/*.jsx | grep -v ":0"` → 至少一行
+3. `git show --stat HEAD` → 只有上列 3 個檔案
+4. 瀏覽器（桌面 ≥ 768）：點分支面板左上角圖示 → 清單蓋滿面板、左上角有 X；順序 = 依回覆先後、同一則內 inline 依位置、底部入口在該則 inline 之後；點一項 → 清單關閉、開成 tab、主對話捲到該高亮／入口並置中；X 關閉回到原面板；拖寬分支面板後清單仍滿版；面板寬度、拖曳把手位置不變
+5. 瀏覽器（手機 < 768）：分支 drawer 內點圖示 → 清單滿版、X 可關、點一項開 tab
+
+**E5 前端：連結幽靈分支（`MessageList.jsx`、`BranchListOverlay.jsx`、`App.jsx`）**
+- App：`ghostList` state，`loadGhostList()` 打 `GET /branches/orphaned?session_id=`；在載入對話、regenerate 回傳幽靈 id、relink 成功後刷新。
+- `MessageList`（`variant === 'main'`）：選字浮動按鈕區，`ghostList.length > 0` 時「建立分支」旁多一顆「連結幽靈分支」；點了在按鈕下方展開選單（每項：標題＋`anchor_text` 前 40 字），點一項 → `onRelinkGhost(ghostId, messageId, text, start, end)`；點選單外關閉。手機放在建立分支按鈕旁（同 G5-B3 位置規則）。
+- App `handleRelinkGhost`：`POST /branches/{id}/relink`（body 見 E2）→ 成功 → `loadBranchList`、`loadGhostList`、`openBranchFromHighlight`（輸入框預填規則同既有：沒訊息才預填新的 anchor_text）；409 → `alert("這段文字已經有同範圍的分支")`；其他錯誤 → `alert("連結幽靈分支失敗")`。
+- `BranchListOverlay`：最下面「幽靈分支」區（有幽靈才顯示），依 `created_at` 新到舊；點一項 → 關閉清單、開成 tab，不捲動、無重連按鈕。
+- 視覺變更：先不 commit。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -c "relink" frontend/src/App.jsx` → ≥ 1；`grep -c "orphaned" frontend/src/App.jsx` → ≥ 1
+3. `git show --stat HEAD` → 只有上列 3 個檔案
+4. 瀏覽器（桌面 ≥ 768）：先對有分支的回覆按重傳造出幽靈；選主對話 AI 文字 → 出現「建立分支」與「連結幽靈分支」；點後者 → 選單列出幽靈；點一項 → 該段變高亮、右欄開該分支、內容是原本的訊息；分支列表幽靈區不再有它；再按一次選字 → 若已無幽靈只剩「建立分支」；連結時範圍與既有高亮重疊 → 舊的降到底部；分支列表最下面有幽靈區，點了開 tab 不捲動；重新整理後一致
+5. 瀏覽器（手機 < 768）：長按選字 → 兩顆按鈕都在選取下方、不被控制棒擋住；選單可點；其餘同桌面
 
 ### F9 規格與驗收：編輯最後一則 user 訊息（2026-11-03 定稿）
 
