@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分支入口、重疊降級、分支列表與幽靈重連（E）— CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 前後端教學 · E1–E5</span>
+    <h1>分支入口、重疊降級、分支列表與幽靈重連</h1>
+    <p>用「有沒有 offset」區分高亮與底部入口、半開區間的重疊判定、一個交易改兩筆資料、重連時把分支接回新位置、面板內的滿版覆蓋與捲到指定元素。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>要做什麼</h2>
+    <ul>
+      <li><b>底部入口</b>：沒辦法（或不再）在文章裡高亮的分支，顯示在<b>那一則 AI 回覆</b>的最下方：一條橫線，下面每個入口一行。</li>
+      <li><b>重疊降級</b>：新選取跟舊高亮重疊時，舊的降到該則回覆的底部入口，新的變成高亮。範圍完全一樣就直接開舊的。</li>
+      <li><b>分支列表</b>：分支面板左上角的圖示變成按鈕，點了用滿版清單列出目前主對話的所有分支，依位置排序；幽靈分支獨立一區在最下面。</li>
+      <li><b>連結幽靈分支</b>：有幽靈分支時，選字後多一顆「連結幽靈分支」，選一條，它就變成這段文字的高亮。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念一：三種狀態只看兩個欄位</h2>
+    <p>分支錨點有三個相關欄位：<code>anchor_message_id</code>（錨在哪一則回覆）、<code>anchor_start</code>／<code>anchor_end</code>（回覆原始文字裡的字元位置）。三種狀態就是這些欄位「有沒有值」的組合：</p>
+    <table>
+      <tr><th>狀態</th><th>anchor_message_id</th><th>start／end</th><th>is_orphaned</th><th>畫面</th></tr>
+      <tr><td>inline 高亮</td><td>有</td><td>有</td><td>False</td><td>文字內高亮</td></tr>
+      <tr><td>底部入口</td><td>有</td><td><b>空</b></td><td>False</td><td>該則回覆最下方</td></tr>
+      <tr><td>幽靈</td><td>空</td><td>空</td><td>True</td><td>分支列表的幽靈區、連結幽靈選單</td></tr>
+    </table>
+    <p>所以「降級」只是把 <code>start／end</code> 清空，其餘不動。前端現在已經有 <code>precise</code> 旗標（後端回傳 <code>start</code> 與 <code>end</code> 都有值才是 true），<code>precise === false</code> 的分支就是底部入口，不需要新欄位，也不需要 migration。</p>
+    <div class="tip"><b>附帶好處：</b>F7 之前建的分支本來就沒有 offset，現在畫面上找不到它們；照新定義它們會自動出現在各自回覆的底部入口。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念二：半開區間的重疊判定</h2>
+    <p>offset 用半開區間 <code>[start, end)</code>：包含 start 那個字，不包含 end 那個字。兩段 <code>[a, b)</code> 與 <code>[c, d)</code> 重疊的條件只有一行：</p>
+    <pre><code>overlap = a &lt; d and c &lt; b</code></pre>
+    <table>
+      <tr><th>舊</th><th>新</th><th>結果</th><th>說明</th></tr>
+      <tr><td>[10, 20)</td><td>[15, 30)</td><td>重疊 → 舊的降級</td><td>部分重疊</td></tr>
+      <tr><td>[10, 20)</td><td>[5, 40)</td><td>重疊 → 舊的降級</td><td>新的包住舊的</td></tr>
+      <tr><td>[10, 20)</td><td>[12, 18)</td><td>重疊 → 舊的降級</td><td>舊的包住新的</td></tr>
+      <tr><td>[10, 20)</td><td>[20, 30)</td><td>不重疊</td><td>相鄰：舊的最後一字是 19，新的從 20 開始</td></tr>
+      <tr><td>[10, 20)</td><td>[10, 20)</td><td>完全相同 → 不新建，開舊的</td><td>先檢查這個，再檢查重疊</td></tr>
+    </table>
+    <p class="muted">只比對「同一則回覆、有 offset、不是幽靈」的分支。同時重疊兩個舊高亮就兩個都降級。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>概念三：一個交易改兩筆資料（2d 選 A）</h2>
+    <p>建立分支時要「新增一條」並「修改舊的幾條」。放在同一個資料庫交易：最後一次 <code>commit()</code> 才真正寫入，中途任何一步出錯，全部都不生效。</p>
+    <pre><code><span class="cm"># POST /chats/{root_id}/branches（概念）</span>
+same = 找同一則、start/end 完全相同、非幽靈的分支
+if same:
+    return {..., "reused": True, "demoted_ids": []}      <span class="cm"># 不寫入任何東西</span>
+
+demoted = demote_overlaps(session, anchor_id, start, end)  <span class="cm"># 只改物件，還沒 commit</span>
+session.add(Branch(...))                                   <span class="cm"># 新分支</span>
+session.commit()                                           <span class="cm"># 兩件事一起寫入</span>
+return {..., "reused": False, "demoted_ids": demoted}</code></pre>
+    <p><code>demote_overlaps</code> 刻意不自己 commit：建立分支和連結幽靈分支（概念四）都用它，各自在最後統一 commit。前端只打一次 API，成功後照舊 <code>loadBranchList</code> 重抓清單，舊高亮自然變成底部入口。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>概念四：重連＝改錨點，並把分支接回新位置</h2>
+    <p>分支的第一則訊息用 <code>parent_id</code> 指向錨點回覆；在分支裡對話時，後端沿著 <code>parent_id</code> 往上收集上下文。G6 幽靈化時把這條線剪斷了（<code>parent_id = NULL</code>）。重連要把線接到新的錨點：</p>
+    <div class="flow">
+      <div class="box">幽靈分支<br>首則 parent_id = NULL</div>
+      <div class="arrow">→</div>
+      <div class="box">選字 → 選這條幽靈</div>
+      <div class="arrow">→</div>
+      <div class="box">anchor＝新選取<br>首則 parent_id＝新錨點</div>
+      <div class="arrow">→</div>
+      <div class="box">之後在分支裡對話<br>上下文來自新位置</div>
+    </div>
+    <pre><code><span class="cm"># POST /branches/{id}/relink（概念）</span>
+if not br.is_orphaned: 409
+檢查錨點在這個對話裡（同 create_branch）
+if 有完全相同範圍的分支: 409          <span class="cm"># 兩條分支不能疊在同一段</span>
+demote_overlaps(..., exclude_id=br.id)
+br.anchor_message_id, br.anchor_start, br.anchor_end = 新選取
+br.anchor_text = 新選取文字              <span class="cm"># title 不變</span>
+br.is_orphaned, br.attach_root_id = False, None
+首則訊息.parent_id = 首則訊息.anchor_message_id = 新錨點
+session.commit()</code></pre>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>概念五：幽靈清單只列自己的</h2>
+    <p>幽靈分支沒有錨點，也就不知道屬於哪個對話，清單要靠別的方式只列「這個瀏覽器」的（對話清單是用 <code>session_id</code> 過濾的）。</p>
+    <ul>
+      <li><code>attach_root_id</code> 原本設計給「掛在整個對話底部」，現在用不到。改成：幽靈化時記下<b>原本所屬對話的樹根</b>，清單用那則訊息的 <code>session_id</code> 過濾。</li>
+      <li>G6 已經產生的舊幽靈沒有這個值 → 改看分支首則訊息的 <code>session_id</code>。（沒送過訊息又是舊資料的幽靈會找不到，只影響開發資料。）</li>
+      <li>FK 陷阱：<code>attach_root_id</code> 是外鍵且沒有 <code>ON DELETE</code>，直接刪對話會被擋下。刪對話端點在刪訊息前先把指向它們的 <code>attach_root_id</code> 設為 NULL，幽靈分支本身保留。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>概念六：前端三個技巧</h2>
+    <h3>7.1 多鍵排序</h3>
+    <p>列表要「依回覆順序 → 同一則內高亮依位置 → 底部入口排在該則高亮之後」。把每項換成一組數字，逐項比較：</p>
+    <pre><code>const key = (b) =&gt; [
+  indexOfMessage(b.anchor_message_id),     <span class="cm">// 不在目前對話裡 → Infinity，排最後</span>
+  b.precise ? 0 : 1,                       <span class="cm">// 同一則：高亮在前、入口在後</span>
+  b.precise ? b.anchor_start : Date.parse(b.created_at),
+];
+list.sort((x, y) =&gt; {
+  const a = key(x), b = key(y);
+  for (let i = 0; i &lt; a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+});</code></pre>
+    <h3>7.2 面板內滿版覆蓋</h3>
+    <p>清單只蓋住分支面板，不蓋整個畫面：面板外框已是定位容器（<code>relative</code>），清單用 <code>absolute inset-0</code> 就會剛好貼齊面板四邊；拖寬面板時清單跟著變寬。整頁彈窗（分支地圖）才用 <code>fixed inset-0</code>。</p>
+    <h3>7.3 捲到指定元素</h3>
+    <p>高亮已經是 <code>&lt;mark data-branch="id"&gt;</code>，底部入口加上 <code>data-branch-entry="id"</code>，點列表後：</p>
+    <pre><code>const el = document.querySelector(
+  b.precise ? `[data-branch="${b.id}"]` : `[data-branch-entry="${b.id}"]`);
+el?.scrollIntoView({ block: 'center', behavior: 'smooth' });</code></pre>
+    <p class="muted">用 data 屬性而不是 ref：元素分散在每則回覆的 Markdown 裡，集中管理 ref 很麻煩，用選擇器直接找最簡單。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>步驟與驗證</h2>
+    <p>完整驗收指令在 <code>PLAN_v2.md</code>「E 規格與驗收」。每一波做完停下來等你驗證。</p>
+    <table>
+      <tr><th>波</th><th>步驟</th><th>改什麼</th><th>怎麼驗證</th></tr>
+      <tr><td>W1</td><td><b>E1</b></td><td>後端建立分支：完全相同 → reused；重疊 → 降級；同一交易</td><td>新 harness（真 uvicorn＋假 LLM）全 PASS；舊 regenerate harness 仍全 PASS</td></tr>
+      <tr><td>W1</td><td><b>E2</b></td><td>幽靈化記原對話、幽靈清單 API、重連 API、刪對話先清 attach_root_id</td><td>同上</td></tr>
+      <tr><td>W2</td><td><b>E3</b></td><td>回覆底部入口；建立分支處理 reused</td><td>build＋瀏覽器（桌面／手機）</td></tr>
+      <tr><td>W3</td><td><b>E4</b></td><td>分支列表滿版覆蓋、排序、點了開 tab＋捲動</td><td>build＋瀏覽器</td></tr>
+      <tr><td>W4</td><td><b>E5</b></td><td>連結幽靈分支按鈕＋選單、列表幽靈區</td><td>build＋瀏覽器</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>決策表</h2>
+    <table>
+      <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+      <tr><td>1</td><td>git</td><td>branch <code>feat/branch-entries</code>，全部驗收後 merge</td><td>✅ 已定</td></tr>
+      <tr><td>2</td><td>底部入口位置</td><td>單一 AI 回覆內容最下方，功能列上方；橫線＋每行一個 anchor_text</td><td>✅ 已定</td></tr>
+      <tr><td>3</td><td>分支面板內顯示入口？</td><td>不顯示</td><td>✅ 已定</td></tr>
+      <tr><td>4</td><td>重疊規則</td><td>舊的降級為底部入口、新的 inline（推翻 DESIGN 1.4）；完全相同 → 開既有</td><td>✅ 已定</td></tr>
+      <tr><td>5</td><td>降級前提示？</td><td>不提示</td><td>✅ 已定</td></tr>
+      <tr><td>6</td><td>建新＋降級怎麼寫入</td><td>A：後端同一交易，前端一次 API</td><td>✅ 已定</td></tr>
+      <tr><td>7</td><td>降級後 anchor_text</td><td>保留</td><td>✅ 已定</td></tr>
+      <tr><td>8</td><td>沒 offset 的舊分支</td><td>自動成為底部入口，不轉資料</td><td>✅ 已定</td></tr>
+      <tr><td>9</td><td>分支列表</td><td>面板左上角圖示開啟、滿版覆蓋、左上角 X、點一項後自動關</td><td>✅ 已定</td></tr>
+      <tr><td>10</td><td>列表排序</td><td>inline 與底部入口一起依位置；幽靈獨立一區在最下</td><td>✅ 已定</td></tr>
+      <tr><td>11</td><td>列表每項</td><td>標題＋所選文字前一小段</td><td>✅ 已定</td></tr>
+      <tr><td>12</td><td>點列表項目</td><td>開 tab＋主對話捲到該處；幽靈只開 tab（先看效果）</td><td>✅ 已定</td></tr>
+      <tr><td>13</td><td>對話分支地圖</td><td>保留</td><td>✅ 已定</td></tr>
+      <tr><td>14</td><td>重連方式</td><td>主對話選字 → 「連結幽靈分支」→ 選單選一條 → 變成這段的 inline 高亮</td><td>✅ 已定</td></tr>
+      <tr><td>15</td><td>重連時重疊</td><td>同樣降級舊的</td><td>✅ 已定</td></tr>
+      <tr><td>16</td><td>列表幽靈區能重連？</td><td>不行，只能看與開啟</td><td>✅ 已定</td></tr>
+      <tr><td>17</td><td>沒有幽靈時</td><td>只有「建立分支」</td><td>✅ 已定</td></tr>
+      <tr><td>18</td><td>連結選單內容</td><td>全部幽靈（同一瀏覽器 session），標題＋原本選的字</td><td>✅ 已定</td></tr>
+      <tr><td>19</td><td>重連後 anchor_text／title</td><td>anchor_text 改為新選取；title 不變</td><td>⏳ 待確認（建議）</td></tr>
+      <tr><td>20</td><td>重連範圍與既有高亮完全相同</td><td>409 並提示，不重連</td><td>⏳ 待確認（建議）</td></tr>
+      <tr><td>21</td><td>幽靈清單怎麼只列自己的</td><td>幽靈化時把原對話樹根記在 <code>attach_root_id</code>，用它的 session 過濾；刪對話前先清空該欄</td><td>⏳ 待確認（建議）</td></tr>
+      <tr><td>22</td><td>重連成功後</td><td>右欄自動開該分支</td><td>⏳ 待確認（建議）</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>實作紀錄</h2>
+    <table>
+      <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
+      <tr><td colspan="4" class="muted">尚未開始</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">11</span>小練習</h2>
+    <ol>
+      <li>舊高亮 [30, 45)，新選取 [45, 60)。會降級嗎？如果新選取是 [44, 60) 呢？</li>
+      <li>如果 <code>demote_overlaps</code> 自己先 <code>commit()</code>，接著建新分支時資料庫斷線，畫面會變成什麼樣子？</li>
+      <li>重連時如果忘了改首則訊息的 <code>parent_id</code>，在分支裡再問一句，模型看到的上下文會是什麼？</li>
+      <li>分支列表為什麼用 <code>absolute inset-0</code> 而不是 <code>fixed inset-0</code>？在桌面版拖寬分支面板時兩者有什麼差別？</li>
+    </ol>
+  </section>
+
+</div>
+</body>
+</html>
