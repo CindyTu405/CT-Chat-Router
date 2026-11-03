@@ -49,9 +49,13 @@ SLOW_TEXT = "".join(SLOW_CHUNKS)
 # 比起全域開關，這樣每個請求拿到的模式是確定的，不會因為 thread 切換而錯亂。
 MODE_QUEUE: deque = deque()
 
+# (F9-1) 記錄每次假串流收到的 user 訊息（message 參數），用來驗證編輯後生成用的是新內容
+LLM_MESSAGES: list = []
+
 
 async def fake_stream(message, history, model):
     """假的 LLM 串流：只 yield 固定文字，不連任何外部服務。"""
+    LLM_MESSAGES.append(message)
     mode = MODE_QUEUE.popleft() if MODE_QUEUE else "fast"
     if mode == "slow":
         for chunk in SLOW_CHUNKS:
@@ -102,9 +106,13 @@ def db_branch(branch_id: uuid.UUID) -> dict:
         }
 
 
-def regen_full(client: httpx.Client, msg_id, model: str):
-    """送出重新生成並把整個 body 讀完，回傳 (status, headers, text)。"""
-    with client.stream("POST", f"/messages/{msg_id}/regenerate", json={"model": model}) as r:
+def regen_full(client: httpx.Client, msg_id, model: str, content: str | None = None):
+    """送出重新生成並把整個 body 讀完，回傳 (status, headers, text)。
+    (F9-1) content 有給才放進 body（不給 = 純重傳，與 G6 測試一模一樣）。"""
+    body_json = {"model": model}
+    if content is not None:
+        body_json["content"] = content
+    with client.stream("POST", f"/messages/{msg_id}/regenerate", json=body_json) as r:
         body = r.read().decode("utf-8")
         return r.status_code, r.headers, body
 
@@ -363,6 +371,135 @@ def run_tests(client: httpx.Client, ids: dict, sid: str):
               f"body={body!r}")
     except Exception as e:
         check("9 branch AI regen", False, f"exception: {e!r}")
+
+    # ---- 10. (F9-1) 帶 content 的編輯 ----
+    run_f9_tests(client, sid, model)
+
+
+def seed_f9_pair(sid: str, tag: str, with_branch: bool = False) -> dict:
+    """(F9-1) 建立獨立的一組「user → AI」（最後一則）；with_branch 時再錨一個分支在 AI 上。"""
+    with Session(engine) as s:
+        root = Message(role="user", content=f"{tag} question", parent_id=None,
+                       session_id=sid, title="F9 harness")
+        s.add(root)
+        s.commit()
+        s.refresh(root)
+
+        ai = Message(role="assistant", content=f"{tag} old answer", parent_id=root.id,
+                     session_id=sid, model_used="gemini-2.5-flash")
+        s.add(ai)
+        s.commit()
+        s.refresh(ai)
+
+        out = {"root_id": root.id, "ai_id": ai.id, "branch_id": None, "b_root_id": None}
+        if with_branch:
+            branch = Branch(anchor_message_id=ai.id, anchor_text="OLD", anchor_start=0,
+                            anchor_end=3, title="F9 harness branch")
+            s.add(branch)
+            s.flush()
+            b_root = Message(role="user", content=f"{tag} branch question", parent_id=ai.id,
+                             branch_id=branch.id, anchor_message_id=ai.id, session_id=sid)
+            s.add(b_root)
+            s.flush()
+            branch.root_message_id = b_root.id
+            s.add(branch)
+            s.commit()
+            s.refresh(branch)
+            s.refresh(b_root)
+            out["branch_id"] = branch.id
+            out["b_root_id"] = b_root.id
+        return out
+
+
+def run_f9_tests(client: httpx.Client, sid: str, model: str):
+    # ---- 10a/10b. 帶 content → 200；user／AI 內容與模型都更新；生成用的是新內容 ----
+    p1 = seed_f9_pair(sid, "F9A")
+    try:
+        reset_limiter()
+        LLM_MESSAGES.clear()
+        status, _, body = regen_full(client, p1["ai_id"], model, content="新問題")
+        check("10a edit regen: 200", status == 200, f"status={status} body={body[:200]}")
+        row_u = db_row(p1["root_id"])
+        row_a = db_row(p1["ai_id"])
+        check("10a edit: DB user content == new content", row_u["content"] == "新問題",
+              f"content={row_u['content']!r}")
+        check("10a edit: DB AI content == mock text", row_a["content"] == FAST_TEXT,
+              f"content={row_a['content']!r}")
+        check("10a edit: model_used updated", row_a["model_used"] == model,
+              f"model_used={row_a['model_used']!r}")
+        check("10a edit: streamed body == mock text", body == FAST_TEXT, f"body={body!r}")
+        check("10b edit: LLM received the new content", LLM_MESSAGES == ["新問題"],
+              f"LLM_MESSAGES={LLM_MESSAGES!r}")
+    except Exception as e:
+        check("10a/10b edit regen", False, f"exception: {e!r}")
+
+    # ---- 10c. 編輯時錨在 AI 上的分支照樣幽靈化（與 G6 測試相同的檢查） ----
+    p2 = seed_f9_pair(sid, "F9C", with_branch=True)
+    try:
+        reset_limiter()
+        status, headers, body = regen_full(client, p2["ai_id"], model, content="分支前的新問題")
+        check("10c edit with anchored branch: 200", status == 200,
+              f"status={status} body={body[:200]}")
+        check("10c edit with anchored branch: user content == new",
+              db_row(p2["root_id"])["content"] == "分支前的新問題",
+              f"content={db_row(p2['root_id'])['content']!r}")
+        br = db_branch(p2["branch_id"])
+        check("10c branch ghosted: is_orphaned true", br["is_orphaned"] is True,
+              f"is_orphaned={br['is_orphaned']}")
+        check("10c branch ghosted: anchor_message_id/start/end NULL",
+              br["anchor_message_id"] is None and br["anchor_start"] is None and br["anchor_end"] is None,
+              f"anchor={br['anchor_message_id']} start={br['anchor_start']} end={br['anchor_end']}")
+        check("10c branch ghosted: anchor_text and title kept",
+              br["anchor_text"] == "OLD" and br["title"] == "F9 harness branch",
+              f"anchor_text={br['anchor_text']!r} title={br['title']!r}")
+        bm = db_row(p2["b_root_id"])
+        check("10c branch root: parent_id and anchor_message_id NULL",
+              bm["parent_id"] is None and bm["anchor_message_id"] is None,
+              f"parent={bm['parent_id']} anchor={bm['anchor_message_id']}")
+        check("10c X-Orphaned-Branch-Ids header contains branch id",
+              str(p2["branch_id"]) in headers.get("x-orphaned-branch-ids", ""),
+              f"header={headers.get('x-orphaned-branch-ids')!r}")
+    except Exception as e:
+        check("10c edit with anchored branch", False, f"exception: {e!r}")
+
+    # ---- 10d. content 全是空白 → 422，DB 與 LLM 都不動 ----
+    p3 = seed_f9_pair(sid, "F9D")
+    try:
+        before_u = db_row(p3["root_id"])
+        before_a = db_row(p3["ai_id"])
+        LLM_MESSAGES.clear()
+        reset_limiter()
+        status, _, body = regen_full(client, p3["ai_id"], model, content="   ")
+        check("10d whitespace content → 422", status == 422, f"status={status} body={body[:200]}")
+        check("10d whitespace content: user row unchanged", db_row(p3["root_id"]) == before_u,
+              f"before={before_u} after={db_row(p3['root_id'])}")
+        check("10d whitespace content: AI row unchanged", db_row(p3["ai_id"]) == before_a,
+              f"before={before_a} after={db_row(p3['ai_id'])}")
+        check("10d whitespace content: LLM not called", LLM_MESSAGES == [],
+              f"LLM_MESSAGES={LLM_MESSAGES!r}")
+    except Exception as e:
+        check("10d whitespace content", False, f"exception: {e!r}")
+
+    # ---- 10e. 不是最後一則（有後續訊息）→ 409，user 內容不得被改 ----
+    p4 = seed_f9_pair(sid, "F9E")
+    try:
+        with Session(engine) as s:
+            s.add(Message(role="user", content="F9E follow-up", parent_id=p4["ai_id"],
+                          session_id=sid, branch_id=None))
+            s.commit()
+        before_u = db_row(p4["root_id"])
+        before_a = db_row(p4["ai_id"])
+        reset_limiter()
+        status, _, body = regen_full(client, p4["ai_id"], model, content="不該寫入")
+        check("10e edit on non-last message → 409", status == 409,
+              f"status={status} body={body[:200]}")
+        check("10e edit on non-last message: user content unchanged",
+              db_row(p4["root_id"]) == before_u,
+              f"before={before_u} after={db_row(p4['root_id'])}")
+        check("10e edit on non-last message: AI row unchanged", db_row(p4["ai_id"]) == before_a,
+              f"before={before_a} after={db_row(p4['ai_id'])}")
+    except Exception as e:
+        check("10e edit on non-last message", False, f"exception: {e!r}")
 
 
 def start_server() -> uvicorn.Server:

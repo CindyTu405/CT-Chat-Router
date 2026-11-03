@@ -150,6 +150,7 @@ class UpdateTitleRequest(SQLModel):
 # (G6-1) 重新生成最後一則 AI 回覆：只帶新模型名稱，內容固定沿用原本的 user 訊息。
 class RegenerateRequest(SQLModel):
     model: str
+    content: Optional[str] = None  # (F9-1) 有帶 = 編輯最後一則 user 訊息；沒帶 = 純重傳（G6 原行為）
 
 
 # ===== Phase 2 (P2-3)：建立分支的請求 =====

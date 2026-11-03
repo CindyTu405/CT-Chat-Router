@@ -329,9 +329,12 @@ async def regenerate_message(
 ):
     """(G6-1) 原地重新生成一則 AI 回覆（只允許「最後一則」）。
 
-    檢查順序：404（不存在／非 AI）→ 403（模型不在白名單，改資料之前擋）→
+    (F9-1) 可選帶 content：同時編輯最後一則 user 訊息的內容，再用新內容生成。
+
+    檢查順序：404（不存在／非 AI）→ 422（content 帶了但全是空白）→
+    403（模型不在白名單，改資料之前擋）→
     409（還在生成中）→ 409（同一條線上還有子訊息，不是最後一則）→
-    幽靈化錨在此則上的分支 → 內容清空、換模型，一次 commit → 背景生成 → 串流。
+    幽靈化錨在此則上的分支 → 內容清空、換模型（有 content 則一併改 user 內容），一次 commit → 背景生成 → 串流。
     """
     # a. 404：id 格式錯、不存在、或不是 AI 回覆
     try:
@@ -344,6 +347,10 @@ async def regenerate_message(
     user_msg = session.get(Message, ai.parent_id)
     if user_msg is None:
         raise HTTPException(status_code=404, detail="not found")
+
+    # (F9-1) 422：帶了 content 但全是空白，在任何寫入之前擋掉
+    if payload.content is not None and not payload.content.strip():
+        raise HTTPException(status_code=422, detail="content is empty")
 
     # b. 403：模型白名單（跟 /chat 同一個檢查，必須在任何寫入之前）
     if not is_model_allowed(payload.model, session):
@@ -367,7 +374,12 @@ async def regenerate_message(
     if later_child is not None:
         raise HTTPException(status_code=409, detail="not the last message")
 
-    # 先把會用到的欄位取出來，commit 之後 ORM 物件會過期
+    # (F9-1) 編輯 user 訊息：與下面的幽靈化、AI 清空同一個 commit，不能分開寫
+    if payload.content is not None:
+        user_msg.content = payload.content
+        session.add(user_msg)
+
+    # 先把會用到的欄位取出來，commit 之後 ORM 物件會過期（生成要用的是新內容）
     user_content = user_msg.content
     user_parent_id = user_msg.parent_id
 
