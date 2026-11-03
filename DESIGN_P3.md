@@ -162,7 +162,9 @@ created_at: datetime
 
 ---
 
-## 主題 3：編輯最後一則的刪除交易與端點（狀態：待確認）
+## 主題 3：編輯最後一則的刪除交易與端點（狀態：⛔ 已被取代，2026-11-03）
+
+> 已改為「原地更新」：不刪訊息，沿用 `POST /messages/{ai_id}/regenerate` 並在 body 加可選 `content`，於同一個 commit 更新 user 內容。見 `PLAN_v2.md` 第八節「F9 規格與驗收」與 `docs/20261103_(F9)edit-last-message-guide.html`。以下保留作為歷史紀錄。
 
 ### 3.1 決策：單一端點（regenerate），不用「刪除＋/chat」兩步
 - 刪舊＋建新必須**原子**（同一交易），否則刪完 /chat 失敗就永久丟了舊一輪。
