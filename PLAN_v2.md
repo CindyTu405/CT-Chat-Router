@@ -324,14 +324,15 @@ chat-{root_id}-{date}/
 
 **E3 前端：底部入口（`frontend/src/components/MessageList.jsx`、`frontend/src/App.jsx`）**
 - `MessageList`（只在 `variant === 'main'`）：AI 回覆內容下方、功能列上方，若有「`anchor_message_id === msg.id` 且 `precise === false`」的分支 → 一條橫線，下方每個入口一行，顯示 `anchor_text`（空則顯示 `title`），沿用 inline 高亮的顏色樣式，單行、超出截斷；依 `created_at` 排序；點擊 → `onBranchClick`（同點 inline 高亮）。入口元素掛 `data-branch-entry={id}`（E4 捲動用）。
+- 移除舊的 `buildAnchorSegments` 切段 fallback（`renderContent` 中沒有 offset 的分支不再用 anchor_text 子字串高亮）：沒有 offset 的分支一律只出現在底部入口，否則被降級的分支會同時以子字串高亮＋底部入口出現兩次。
 - `handleCreateBranch`：`data.reused` 為 true → 不建新 tab，改用 `openBranchFromHighlight`（以 `branchList` 中該 id 的物件）；新 tab 標題改用 `data.title`。其餘不變（仍 `loadBranchList`）。
 - 視覺變更：build 後先不 commit，給使用者調整參數，確認後才 commit。
 
 驗收：
 1. `cd frontend && npm run build` → `✓ built`
-2. `grep -c "data-branch-entry" frontend/src/components/MessageList.jsx` → ≥ 1；`grep -c "reused" frontend/src/App.jsx` → ≥ 1
+2. `grep -c "data-branch-entry" frontend/src/components/MessageList.jsx` → ≥ 1；`grep -c "reused" frontend/src/App.jsx` → ≥ 1；`grep -c "buildAnchorSegments" frontend/src/components/MessageList.jsx` → 0
 3. `git show --stat HEAD` → 只有 `MessageList.jsx`、`App.jsx`
-4. 瀏覽器（桌面 ≥ 768）：選一段與既有高亮部分重疊的文字 → 建立分支 → 新的變 inline 高亮、舊的高亮消失並出現在該則回覆底部（橫線下一行）；點底部入口 → 右欄開舊分支；選與既有高亮完全相同的範圍 → 不新增、直接開既有分支；沒有入口的回覆沒有橫線；重新整理後狀態一致；分支面板內的回覆沒有入口區
+4. 瀏覽器（桌面 ≥ 768）：選一段與既有高亮部分重疊的文字 → 建立分支 → 新的變 inline 高亮、舊的高亮消失並出現在該則回覆底部（橫線下一行）；點底部入口 → 右欄開舊分支；選與既有高亮完全相同的範圍 → 不新增、直接開既有分支；沒有入口的回覆沒有橫線；被降級的舊分支文字在回覆中已無任何高亮（只在底部入口）；重新整理後狀態一致；分支面板內的回覆沒有入口區
 5. 瀏覽器（手機 < 768）：底部入口顯示一行一個、點了開分支 drawer；長按 AI 選字建立分支的重疊行為同桌面
 
 **E4 前端：分支列表（新檔 `frontend/src/components/BranchListOverlay.jsx`、`BranchPanel.jsx`、`App.jsx`）**
