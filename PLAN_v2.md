@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：編輯最後一則 user 訊息（F9 的一部分，改為原地更新、沿用 regenerate 端點、鉛筆圖示在最後一則 user 訊息的功能列；細節待逐項確認）→ 幽靈分支 UI＋重連（B3／F9）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
+**下一步**：幽靈分支 UI＋重連（B3／F9）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
 
 ---
 
@@ -227,7 +227,9 @@ chat-{root_id}-{date}/
 | B2 | 後端：刪除舊一輪端點＋幽靈分支（`is_orphaned`、`attach_root_id`） | 🔶 部分 | 資料欄位與幽靈化併入 G6-1；刪除舊一輪（主題 3）暫不做 |
 | B3 | 後端：幽靈分支重連 API | ⏳ | DESIGN_P3 主題 2 |
 | B4 | 後端：`/chat` context 組裝（`include_main`／`context_branch_ids`、token 截斷） | ⚠️ 待重新評估 | 依賴已廢棄的 F6，需確認是否仍要做 |
-| F9 | 前端：編輯最後一則（inline regenerate）、幽靈分支重連 UI、入口管理右鍵選單 | ⏳ | DESIGN_P3 主題 3、5；範圍待確認 |
+| F9 | 前端：編輯最後一則（inline regenerate）、幽靈分支重連 UI、入口管理右鍵選單 | 🔶 | 編輯最後一則拆為 F9-1／F9-2（下兩列）；幽靈分支重連 UI、入口右鍵選單（主題 5）仍待討論 |
+| F9-1 | 後端：`regenerate` body 加可選 `content`，同一個 commit 更新 user 訊息內容 | ✅ | 3a5bf6f（假 LLM harness 47 PASS，含 F9 新增 10a–10e）；規格見下方「F9 規格與驗收」；教學：`docs/20261103_(F9)edit-last-message-guide.html` |
+| F9-2 | 前端：最後一則 user 訊息 inline 編輯（主對話＋分支共用，桌面功能列＋手機長按選單） | ✅ | 7013db6（使用者瀏覽器驗證通過）；驗收中發現 BUGS B4（剛送出的 user 無 id）→ F9-B4 f5ca79e 修正 |
 | G2 | 分支地圖依錨點位置排序 | ✅ | 1013464（cherry-pick 自 1c574f1，已在瀏覽器確認） |
 | G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ✅ | be02ad3（已在瀏覽器確認）；教學：`docs/20261101_(G3)shared-chat-pane-guide.html` |
 | G3-2 | 分支面板套用共用組件（含 G4 模型標籤） | ✅ | 433effe（使用者瀏覽器驗收 7 項通過；窄面板微調延後） |
@@ -284,6 +286,38 @@ chat-{root_id}-{date}/
 4. `git show --stat HEAD` → 只有 `BranchPanel.jsx`、`App.jsx`
 5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
 6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
+
+### F9 規格與驗收：編輯最後一則 user 訊息（2026-11-03 定稿）
+
+決策見 `docs/20261103_(F9)edit-last-message-guide.html` 決策表。取代 DESIGN_P3 主題 3（不刪訊息，原地更新）。在 branch `feat/f9-edit-last-message` 開發，F9-1、F9-2 都驗收後 merge 回 main。
+
+**F9-1 後端（`backend/models.py`、`backend/main.py`、`backend/dev/regenerate_harness.py`）**
+- `RegenerateRequest` 加 `content: Optional[str] = None`。
+- `POST /messages/{ai_id}/regenerate`：有帶 `content` 時，`content.strip()` 為空 → 422（在任何寫入之前，排在 404 之後）；通過所有檢查後，`user_msg.content = content` 與幽靈化、清空 AI、換模型**同一個 commit**；生成用的 user 文字改用新內容。沒帶 `content` 時行為與 G6 完全相同。
+- 不記編輯歷史、不加 `edited_at`；user 的 `created_at` 不變。
+- harness 新增測試（同樣在真的 uvicorn＋假 LLM 上跑，不呼叫真模型）。
+
+驗收：
+1. `docker compose ps` → chat_db 為 running（不是就停下回報）
+2. `cd backend && uv run python dev/regenerate_harness.py 2>&1 | grep -v "sqlalchemy" | tail -30` → 每項 PASS，最後一行 `ALL PASS`。新增涵蓋：帶 content → user 內容已更新、AI 內容＝假串流文字、model_used 已更新；送進假 LLM 的 user 文字是新內容；帶 content 且有錨定分支 → 幽靈化同 G6；content 為 `"   "` → 422 且 user／AI 內容都沒變；帶 content 但非最後一則（409）→ user 內容沒變（證明檢查在寫入之前）；不帶 content → 原 G6 測試全部仍 PASS
+3. `git show --stat HEAD` → 只有 `models.py`、`main.py`、`regenerate_harness.py`
+
+**F9-2 前端（`MessageActions.jsx`、`MessageList.jsx`、新檔 `UserMessageEditor.jsx`、`BranchPanel.jsx`、`App.jsx`）**
+- `buildMessageActions(msg, { onRetry, onEdit })`：有 `onEdit` 時在複製右邊加 lucide `Pencil`「編輯」（run 回傳 false）。`MessageActionMenu` 也接 `onEdit`，手機長按選單出現「編輯」，點了關閉選單並開啟編輯。
+- `MessageList` 新增 `onEdit(userMsg, aiMsg, newContent)` prop 與內部 `editingId` state。鉛筆／選單「編輯」只在：有傳 `onEdit`、該則是 user 且 `index === messages.length - 2`、下一則是 assistant、兩則都有 id、非 `isLoading`。
+- 編輯中：user 氣泡原地換成 `UserMessageEditor`；該則欄寬撐到 user 欄最大寬（`w-full`，上限沿用 `max-w-[85%] md:max-w-[75%]`）；隱藏時間＋功能列；不掛長按事件。
+- `UserMessageEditor`：textarea 預填原文、自動聚焦游標在結尾、自動長高上限 10 行後框內捲動；鍵盤同 ChatInput（`window.innerWidth >= 768`：Enter 送出、Shift+Enter 換行；手機 Enter 換行）＋ Esc 取消；內容 trim 後為空或與原文相同 → 送出停用；下方先一行警語（只在 N > 0：紅色小字「此回覆上有 N 個分支，重新生成後會變成幽靈分支」，N＝`branchList` 中 `anchor_message_id === aiMsg.id` 的數量，含空分支），再一列右對齊「取消」「送出」。
+- 關閉編輯：取消、送出、`isLoading` 變 true（例如從主輸入框送出新訊息）、或該則不再是可編輯狀態。
+- App：主對話 `handleRetry(aiMsg, { content })`、分支 `retryBranchMessage(branchId, aiMsg, { content })` 擴充既有函式（不另寫一套串流）：有 content 時先把 user 那則改成新內容、body 帶 `content`；`!response.ok` 或請求未發出就失敗 → user 那則還原成舊內容，AI 那則顯示「⚠️ 連線錯誤…」（同 G6-2）；其餘（幽靈分支 tab 關閉、`loadBranchList`、切走切回）沿用 G6-2。`BranchPanel` 把 `onEdit` 傳進 `MessageList`。
+- 視覺變更：build 後先不 commit，給使用者調整參數，確認後才 commit。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -c "Pencil" frontend/src/components/MessageActions.jsx` → ≥ 1；`grep -c "onEdit" frontend/src/components/BranchPanel.jsx` → ≥ 1；`grep -A6 "/regenerate" frontend/src/App.jsx | grep -c "content"` → ≥ 2（主對話＋分支的 body 都帶 content）
+3. `git show --stat HEAD` → 只有上列 5 個檔案
+4. 瀏覽器（桌面 ≥ 768）：只有最後一則 user 訊息的時間右邊有鉛筆（複製右邊）；生成中不顯示；點鉛筆 → 泡泡原地變編輯框、撐到最大寬、游標在結尾；未改或清空時送出停用；Enter 送出、Shift+Enter 換行、Esc 取消；送出 → 泡泡顯示新內容、AI 那則 Thinking... → 新回覆，模型標籤為選單模型；重新整理後 user 與 AI 都是新內容；有分支的回覆 → 編輯框下有紅色警語且 N 正確，送出後高亮消失、分支 tab 關閉；沒分支的回覆無警語；編輯中從主輸入框送出 → 編輯框關閉；分支面板最後一則 user 同樣可編輯
+5. 瀏覽器（手機 < 768）：user 氣泡無鉛筆；長按最後一則 user → 選單有「複製」「編輯」，其他 user 訊息只有「複製」；點「編輯」→ 編輯框；Enter 換行、只能點送出；送出流程同桌面；分支面板同樣可用
+6. 生成中切走再切回 → 接續顯示（沿用 resume）
 
 ### G6 規格與驗收（2026-11-03 定稿）
 
@@ -372,8 +406,8 @@ chat-{root_id}-{date}/
 
 ### 編輯最後一則（重新生成）
 - inline 原地編輯，**不回輸入框**。
-- 送出 → **刪除舊的那輪**（舊 user + 舊 AI），主對話**保持線性**（不長分支）。
-- 輸入框顯示**警語**。
+- 送出 → **原地更新**舊 user 內容並重新生成舊 AI（2026-11-03 改，取代「刪除舊的那輪」），主對話**保持線性**（不長分支）。詳見上方 F9 規格。
+- 警語只在該回覆底下有分支時顯示（編輯框下方紅色小字）。
 - 串流中編輯**停用**（已確認：等回完才能改）；不做「中斷生成」（模型已算就無意義）。
 
 ### 幽靈分支

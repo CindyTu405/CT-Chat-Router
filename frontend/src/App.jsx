@@ -301,17 +301,21 @@ function App() {
       
       // ★ 修正 1：將 ID 的抓取移到 while 迴圈「之前」，這樣迴圈內才能使用
       const newMsgId = response.headers.get("X-Message-Id");
-      // (G1) 新對話的第一則 user 訊息是樂觀塞進來的、沒有 id，
-      // 後端把真正的 id 放在這個 header，補回去之後就能馬上建立分支。
+      // (G1)(F9-B4) 樂觀塞進來的 user 訊息沒有 id，後端把真正的 id 放在這個 header。
+      // 補到「最後一則 assistant 前面、沒有 id 的 user」（倒數第二則），
+      // 新對話時就是 index 0，涵蓋原本 G1 的情況；既有對話的後續訊息也能補上。
       const newUserMsgId = response.headers.get("X-User-Message-Id");
       if (newUserMsgId && activeRootIdRef.current === sendConvId) {
         setMessages(prev => {
           if (activeRootIdRef.current !== sendConvId) return prev;
-          if (prev.length === 0) return prev;
-          const first = prev[0];
-          if (!first || first.role !== 'user' || first.id) return prev;
+          const len = prev.length;
+          if (len < 2) return prev;
+          const last = prev[len - 1];
+          const userMsg = prev[len - 2];
+          if (last?.role !== 'assistant') return prev;
+          if (!userMsg || userMsg.role !== 'user' || userMsg.id) return prev;
           const next = [...prev];
-          next[0] = { ...first, id: newUserMsgId };
+          next[len - 2] = { ...userMsg, id: newUserMsgId };
           return next;
         });
       }
@@ -372,9 +376,13 @@ function App() {
 
   // (G6-2) 重新生成最後一則 AI 回覆（主對話）：原地清空該則、串流寫回同一個 message id
   // 後端會把舊回覆與其下的分支做「幽靈化」，成功後：重抓分支清單（高亮消失）、關掉被幽靈化的分支 tab
-  const handleRetry = async (msg) => {
+  // (F9-2) 第二參數 { userMsg, content }：編輯最後一則 user 訊息後重新生成（同一個函式，不另寫串流）
+  //        content 有值 → 先把 userMsg 改成新內容，body 帶 content；後端失敗（被拒或沒送出）→ userMsg 還原成舊內容
+  const handleRetry = async (msg, { userMsg, content } = {}) => {
     if (isLoading || !msg?.id) return;
     const retryId = msg.id;
+    const editing = content != null && !!userMsg;
+    const oldUser = userMsg?.content; // (F9-2) 先記下舊內容（失敗還原用），必須在任何 setState 之前
 
     // 同 handleSend：記下這串對話，切走就停止寫入
     const convId = messages[0]?.id ?? null;
@@ -386,18 +394,24 @@ function App() {
     streamAbortRef.current = abortController;
     setIsLoading(true);
 
-    // 先清空這則回覆，讓使用者看到它重新生成
-    setMessages(prev => prev.map(m => (m.id === retryId ? { ...m, content: '', model_used: model } : m)));
+    // 先清空這則回覆，讓使用者看到它重新生成；編輯時同時把 user 那則換成新內容（樂觀更新）
+    setMessages(prev => prev.map(m => {
+      if (editing && m.id === userMsg.id) return { ...m, content };
+      return m.id === retryId ? { ...m, content: '', model_used: model } : m;
+    }));
 
+    // (F9-2) 伺服器是否已接受（response.ok）；還沒接受前失敗 → user 還原
+    let accepted = false;
     try {
       const response = await fetch(`${API_URL}/messages/${retryId}/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: abortController.signal,
-        body: JSON.stringify({ model }),
+        body: JSON.stringify(content != null ? { model, content } : { model }),
       });
 
       if (!response.ok) throw new Error("API Error");
+      accepted = true;
 
       // (G6-2) 後端在 header 回傳這次被幽靈化的分支 id（逗號分隔，可能為空）
       const orphaned = (response.headers.get('X-Orphaned-Branch-Ids') || '').split(',').filter(Boolean);
@@ -442,6 +456,10 @@ function App() {
         }
       }
     } catch (error) {
+      // (F9-2) 請求被拒或根本沒送出（串流還沒開始）：資料庫沒改 → user 還原舊內容；串流中斷則保持新內容
+      if (editing && !accepted && activeRootIdRef.current === convId) {
+        setMessages(prev => prev.map(m => (m.id === userMsg.id ? { ...m, content: oldUser } : m)));
+      }
       // 切換對話造成的 abort 不是錯誤，靜默結束
       if (error?.name === 'AbortError' || activeRootIdRef.current !== convId) {
         // 已被切換的對話：靜默結束
@@ -620,6 +638,21 @@ function App() {
       const decoder = new TextDecoder();
       let aiResponseText = "";
       const newMsgId = response.headers.get("X-Message-Id");
+      // (F9-B4) 補回樂觀 user 訊息的 id：倒數第二則是沒有 id 的 user、最後一則是 assistant 時才補
+      const newUserMsgId = response.headers.get("X-User-Message-Id");
+      if (newUserMsgId) {
+        updateBranch(branchId, b => {
+          const len = b.messages.length;
+          if (len < 2) return b;
+          const last = b.messages[len - 1];
+          const userMsg = b.messages[len - 2];
+          if (last?.role !== 'assistant') return b;
+          if (!userMsg || userMsg.role !== 'user' || userMsg.id) return b;
+          const msgs = [...b.messages];
+          msgs[len - 2] = { ...userMsg, id: newUserMsgId };
+          return { ...b, messages: msgs };
+        });
+      }
 
       while (true) {
         const { done, value } = await reader.read();
@@ -665,26 +698,35 @@ function App() {
 
   // (G6-2) 分支面板裡重新生成一則 AI 回覆：比照 sendBranchMessage（無 abort controller），串流寫回同一個 message id
   // 注意：這裡不處理幽靈分支的 tab 關閉與高亮重抓（規格未要求）
-  const retryBranchMessage = async (branchId, msg) => {
+  // (F9-2) 第三參數 { userMsg, content }：同 handleRetry，編輯分支最後一則 user（樂觀更新、被拒時還原）
+  const retryBranchMessage = async (branchId, msg, { userMsg, content } = {}) => {
     const branch = branches.find(b => b.id === branchId);
     if (!branch || branch.isLoading || !msg?.id) return;
     const retryId = msg.id;
+    const editing = content != null && !!userMsg;
+    const oldUser = userMsg?.content; // (F9-2) 先記下舊內容，必須在任何 setState 之前
 
-    // 先清空這則回覆並標示分支忙碌中
+    // 先清空這則回覆並標示分支忙碌中；編輯時同時把 user 那則換成新內容
     updateBranch(branchId, b => ({
       ...b,
       isLoading: true,
-      messages: b.messages.map(m => (m.id === retryId ? { ...m, content: '', model_used: model } : m)),
+      messages: b.messages.map(m => {
+        if (editing && m.id === userMsg.id) return { ...m, content };
+        return m.id === retryId ? { ...m, content: '', model_used: model } : m;
+      }),
     }));
 
+    // (F9-2) 伺服器是否已接受（response.ok）；還沒接受前失敗 → user 還原
+    let accepted = false;
     try {
       const response = await fetch(`${API_URL}/messages/${retryId}/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model }),
+        body: JSON.stringify(content != null ? { model, content } : { model }),
       });
 
       if (!response.ok) throw new Error("API Error");
+      accepted = true;
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -703,6 +745,13 @@ function App() {
         }));
       }
     } catch (error) {
+      // (F9-2) 請求被拒或沒送出：user 還原舊內容
+      if (editing && !accepted) {
+        updateBranch(branchId, b => ({
+          ...b,
+          messages: b.messages.map(m => (m.id === userMsg.id ? { ...m, content: oldUser } : m)),
+        }));
+      }
       console.error("分支重新生成失敗:", error);
       updateBranch(branchId, b => ({
         ...b,
@@ -831,6 +880,8 @@ function App() {
           skipAutoScrollToken={restoreToken}
           forceScrollToken={sendScrollToken}
           onRetry={handleRetry}
+          // (F9-2) 編輯最後一則 user：把 user、AI 兩則與新內容交給 handleRetry
+          onEdit={(userMsg, aiMsg, text) => handleRetry(aiMsg, { userMsg, content: text })}
         />
 
         <ChatInput
@@ -864,6 +915,8 @@ function App() {
           onInputChange={(branchId, text) => updateBranch(branchId, b => ({ ...b, input: text }))}
           onSend={sendBranchMessage}
           onRetry={retryBranchMessage}
+          // (F9-2) 編輯分支最後一則 user：BranchPanel 已補上 branchId
+          onEdit={(branchId, userMsg, aiMsg, text) => retryBranchMessage(branchId, aiMsg, { userMsg, content: text })}
           onToggle={() => setBranchPanelOpen(false)}
         />
       )}

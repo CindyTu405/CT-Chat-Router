@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>編輯最後一則訊息教學（F9）— CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 前後端教學 · F9</span>
+    <h1>編輯最後一則 user 訊息</h1>
+    <p>沿用重新生成端點加一個可選欄位、檢查都在寫入之前、編輯狀態放在共用元件、從資料推導警語、樂觀更新與還原。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>要做成什麼樣子</h2>
+    <ul>
+      <li><strong>最後一則 user 訊息</strong>可以編輯：桌面在送出時間右邊的功能列（複製右邊）多一支鉛筆（lucide <code>Pencil</code>）；手機長按選單多一項「編輯」。</li>
+      <li>點了之後，user 泡泡<strong>原地</strong>變成編輯框（不回到底部輸入框）。</li>
+      <li>送出 → user 訊息內容換成新的，下面那則 AI 回覆用<strong>選單目前的模型</strong>重新生成。兩則訊息的 id 都不變，不刪任何訊息。</li>
+      <li>那則 AI 回覆上如果有分支：編輯框下方紅色小字「此回覆上有 N 個分支，重新生成後會變成幽靈分支」；送出後這些分支幽靈化（同 G6）。</li>
+      <li>主對話與分支面板共用同一套元件，分支面板最後一則 user 也能編輯。</li>
+      <li>在 branch <code>feat/f9-edit-last-message</code> 開發，F9-1、F9-2 都驗收後 merge 回 main。</li>
+    </ul>
+    <div class="flow">
+      <div class="box">點鉛筆／長按「編輯」</div>
+      <div class="arrow">→</div>
+      <div class="box">泡泡變編輯框<br>（有分支才有紅字）</div>
+      <div class="arrow">→</div>
+      <div class="box">送出<br>POST regenerate<br>{ model, content }</div>
+      <div class="arrow">→</div>
+      <div class="box">user 換新內容<br>AI Thinking... → 新回覆</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念一：同一個端點，多一個「可選」欄位</h2>
+    <p>原本 DESIGN_P3 主題 3 打算開新端點 <code>/messages/{id}/edit</code>，先刪舊一輪再建新的。G6 已經做好「原地重新生成」，編輯只比它多一件事：<strong>先改 user 內容</strong>。所以直接擴充 G6 的端點：</p>
+    <pre><code><span class="cm"># backend/models.py</span>
+class RegenerateRequest(SQLModel):
+    model: str
+    content: Optional[str] = None     <span class="cm"># F9：有帶 = 編輯；沒帶 = 純重傳（G6 原行為）</span></code></pre>
+    <table>
+      <tr><th></th><th>另開 /edit 端點</th><th>regenerate 加可選欄位（採用）</th></tr>
+      <tr><td>重複程式</td><td>404／403／409 檢查、幽靈化、背景生成、串流全部要再寫一份或抽函式</td><td>只多幾行</td></tr>
+      <tr><td>舊前端</td><td>不受影響</td><td>也不受影響：不帶 <code>content</code> 的請求行為完全不變</td></tr>
+      <tr><td>前端呼叫</td><td>新的 fetch 流程</td><td>G6-2 的 <code>handleRetry</code> 多傳一個參數</td></tr>
+    </table>
+    <p class="muted">「加可選欄位、預設值等於舊行為」是 API 演進的常用手法，叫<strong>向後相容</strong>（backward compatible）：舊的呼叫方不用改。</p>
+    <p>端點裡新增的部分：</p>
+    <pre><code>if payload.content is not None and not payload.content.strip():
+    raise HTTPException(422, "content is empty")       <span class="cm"># 404 之後、任何寫入之前</span>
+...（403、409、409 檢查，同 G6）...
+if payload.content is not None:
+    user_msg.content = payload.content                 <span class="cm"># ← 新增</span>
+    session.add(user_msg)
+user_content = user_msg.content                        <span class="cm"># 生成用新內容</span>
+...幽靈化、ai.content = ""、換模型...
+session.commit()                                       <span class="cm"># 全部一起</span></code></pre>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念二：檢查都在寫入之前（原子性）</h2>
+    <p>一次編輯要改三樣東西：user 內容、AI 內容與模型、分支幽靈化。這三樣必須<strong>同一個 commit</strong>：</p>
+    <table>
+      <tr><th>如果分開 commit</th><th>會發生什麼</th></tr>
+      <tr><td>先改 user、再檢查 409 失敗</td><td>user 已經是新內容，但 AI 還是回答舊問題 → 一問一答對不上</td></tr>
+      <tr><td>改了 user＋AI，幽靈化前程式出錯</td><td>分支高亮還錨在已經不存在的文字位置上</td></tr>
+    </table>
+    <p>做法跟 G6 一樣：<strong>所有會拒絕的檢查放在最前面</strong>，任何一個失敗就直接回錯誤，資料庫完全沒動；全部通過才開始改，最後一次 <code>commit()</code>。</p>
+    <table>
+      <tr><th>順序</th><th>情況</th><th>回應</th></tr>
+      <tr><td>1</td><td>id 不存在或不是 AI</td><td>404</td></tr>
+      <tr><td>2</td><td>帶了 content 但全是空白</td><td><b>422</b>（新增）</td></tr>
+      <tr><td>3</td><td>模型不在白名單</td><td>403</td></tr>
+      <tr><td>4</td><td>還在生成中</td><td>409</td></tr>
+      <tr><td>5</td><td>不是最後一則</td><td>409</td></tr>
+      <tr><td></td><td>全部通過 → 改 user、幽靈化、清空 AI → 一次 commit</td><td>200 串流</td></tr>
+    </table>
+    <p class="muted">422 Unprocessable Entity：「格式對，但內容不能用」。FastAPI 本身驗證 body 失敗也是回 422，語意一致。</p>
+    <div class="tip"><b>測試怎麼證明：</b>harness 對一則「不是最後一則」的 AI 帶 content 送出 → 期待 409，然後讀資料庫，user 內容必須還是舊的。這就證明檢查在寫入之前。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>概念三：編輯狀態放在共用元件裡</h2>
+    <p>G3 之後主對話與分支面板用同一個 <code>MessageList</code>。編輯功能放在這裡，兩邊就同時有：</p>
+    <pre><code><span class="cm">// MessageList.jsx（概念）</span>
+const [editingId, setEditingId] = useState(null);   <span class="cm">// 正在編輯哪一則 user 訊息</span>
+
+<span class="cm">// 這則能不能編輯：由資料「算出來」，不另存 state</span>
+const canEdit = (msg, index) =&gt;
+  onEdit &amp;&amp; !isLoading &amp;&amp;
+  msg.role === 'user' &amp;&amp; msg.id &amp;&amp;
+  index === messages.length - 2 &amp;&amp;
+  messages[index + 1]?.role === 'assistant' &amp;&amp; messages[index + 1]?.id;</code></pre>
+    <table>
+      <tr><th>誰管什麼</th><th>內容</th></tr>
+      <tr><td><code>MessageList</code></td><td>哪一則在編輯（<code>editingId</code>）、能不能編輯、把 user 泡泡換成編輯框</td></tr>
+      <tr><td><code>UserMessageEditor</code>（新檔）</td><td>textarea、自動長高、鍵盤、送出停用條件、紅色警語、取消／送出按鈕</td></tr>
+      <tr><td><code>MessageActions</code></td><td>功能清單多一項「編輯」（桌面圖示列與手機長按選單共用同一張清單，G8 的設計）</td></tr>
+      <tr><td><code>App</code></td><td>真正打 API、寫回 state（主對話與分支各一個函式，透過 <code>onEdit</code> prop 傳進來）</td></tr>
+    </table>
+    <h3>為什麼「最後一則 user」是 <code>length - 2</code></h3>
+    <p>對話是一問一答，最後一則是 AI 回覆，它前面那則才是最後一則 user。條件裡同時要求「下一則是 assistant 而且有 id」：前端「⚠️ 連線錯誤」那種沒有 id 的回覆，後端端點找不到它，所以不給編輯（重新整理後就有 id 了）。</p>
+    <h3>什麼時候自動關閉編輯框</h3>
+    <ul>
+      <li>按取消、按送出。</li>
+      <li><code>isLoading</code> 變成 true：例如編輯到一半，從底部輸入框送出新訊息。那則就不再是最後一則了。</li>
+      <li>該則不再符合 <code>canEdit</code>（例如切換到別的對話）。渲染時用 <code>editingId === msg.id &amp;&amp; canEdit(msg, index)</code> 判斷，不用另外清 state 也不會顯示錯的編輯框。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>概念四：編輯框的細節</h2>
+    <h3>外觀</h3>
+    <ul>
+      <li>user 欄位平常是 <code>items-end max-w-[85%] md:max-w-[75%]</code>（泡泡跟著文字長短縮放）。編輯中加 <code>w-full</code>，撐到同一個上限，短訊息也有足夠空間改。</li>
+      <li>自動長高：跟 ChatInput 一樣，先把高度設 auto 再設成 <code>scrollHeight</code>；上限 10 行（對齊 G9 摺疊行數），超過在框內捲動。</li>
+      <li>開啟時自動聚焦，游標放在文字結尾（<code>setSelectionRange(len, len)</code>）。</li>
+      <li>編輯中隱藏送出時間與功能列；不掛 G8 的長按事件，也不套 <code>select-none</code>（不然手機不能在框內選字）。</li>
+    </ul>
+    <h3>鍵盤</h3>
+    <p>沿用 <code>keyUtils.js</code> 的 <code>handleEnterKey</code>（桌面 Enter 送出、Shift+Enter 換行；手機 Enter 換行），另外加 Esc 取消：</p>
+    <pre><code>const onKeyDown = (e) =&gt; {
+  if (e.key === 'Escape') { e.preventDefault(); onCancel(); return; }
+  handleEnterKey(e, () =&gt; { if (canSubmit) onSubmit(text); });
+};</code></pre>
+    <h3>送出停用</h3>
+    <pre><code>const canSubmit = text.trim() !== '' &amp;&amp; text !== original;</code></pre>
+    <p class="muted">沒改內容就送出等於重傳，那是 G6 重傳鈕的工作。停用可以避免誤觸又打一次付費模型。後端仍然擋空白（第 3 節的 422），前端停用只是第一道。</p>
+    <h3>紅色警語：從資料推導，不另存</h3>
+    <pre><code><span class="cm">// branchList 是 App 已經抓好的「這串對話的分支」，G6 重傳後也會重抓</span>
+const branchCount = branchList.filter(b =&gt; b.anchor_message_id === aiMsg.id).length;
+
+{branchCount &gt; 0 &amp;&amp; (
+  &lt;p className="text-xs text-red-500"&gt;此回覆上有 {branchCount} 個分支，重新生成後會變成幽靈分支&lt;/p&gt;
+)}</code></pre>
+    <p class="muted">不用 <code>anchorsByMessageId</code>：那張表只收有 <code>anchor_text</code> 的分支（畫高亮用）。還沒送出訊息的空分支也會被幽靈化，所以要算進去。分支面板裡不能再開分支，<code>branchList</code> 是空的，警語自然不會出現。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>概念五：樂觀更新與還原</h2>
+    <p><strong>樂觀更新</strong>（G1 教過）：不等伺服器回應，先把畫面改成「應該會成功」的樣子。編輯送出時：</p>
+    <pre><code><span class="cm">// App.jsx：擴充 G6-2 的 handleRetry，不另寫一套串流迴圈</span>
+<span class="cm">// MessageList 呼叫 onEdit(userMsg, aiMsg, text) → App 轉成 handleRetry(aiMsg, { userMsg, content: text })</span>
+const handleRetry = async (aiMsg, { userMsg, content } = {}) =&gt; {
+  const oldUser = userMsg?.content;              <span class="cm">// 先記下舊內容，失敗時還原用</span>
+  <span class="cm">// 1. 樂觀：user 換新內容、AI 清空</span>
+  setMessages(prev =&gt; prev.map(m =&gt;
+    content != null &amp;&amp; m.id === userMsg.id ? { ...m, content } :
+    m.id === aiMsg.id ? { ...m, content: '', model_used: model } : m));
+  const res = await fetch(`.../messages/${aiMsg.id}/regenerate`,
+    { body: JSON.stringify(content != null ? { model, content } : { model }) });
+  if (!res.ok) {
+    <span class="cm">// 2. 被拒（409／403／422）：資料庫沒變 → user 還原舊內容；AI 顯示連線錯誤（同 G6-2）</span>
+  }
+  <span class="cm">// 3. 其餘照 G6-2：串流寫回同 id、loadBranchList、關掉幽靈分支 tab</span>
+};</code></pre>
+    <table>
+      <tr><th>失敗發生在</th><th>資料庫</th><th>畫面</th></tr>
+      <tr><td>請求被拒（4xx）或根本沒送出去</td><td>沒變</td><td>user 還原舊內容；AI 那則「⚠️ 連線錯誤」</td></tr>
+      <tr><td>串流中途斷線</td><td>user 已是新內容、AI 生成到一半</td><td>user 保持新內容；AI「⚠️ 連線錯誤」；可按 G6 重傳鈕</td></tr>
+    </table>
+    <div class="warn"><b>注意：</b>還原時要用「送出前記下的舊內容」，不能從畫面的 state 讀，因為 state 已經被第 1 步改掉了。這就是 <code>oldUser</code> 先存起來的原因。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>分兩步做</h2>
+    <table>
+      <tr><th>步驟</th><th>改什麼</th><th>怎麼驗證</th></tr>
+      <tr><td><b>F9-1</b> 後端</td><td><code>RegenerateRequest.content</code>、端點 422 檢查與同一 commit 改 user、harness 新測試</td><td>真的 uvicorn＋假 LLM 跑 harness，印出 ALL PASS（不打付費模型）</td></tr>
+      <tr><td><b>F9-2</b> 前端</td><td><code>MessageActions</code> 編輯項、<code>MessageList</code> 編輯狀態、新檔 <code>UserMessageEditor</code>、<code>BranchPanel</code> 傳 <code>onEdit</code>、App 擴充重傳函式</td><td>build；先不 commit，給你調整參數、瀏覽器確認後才 commit</td></tr>
+    </table>
+    <p class="muted">完整可執行驗收指令見 <code>PLAN_v2.md</code> 第八節「F9 規格與驗收」。F9-1 沒有 migration，部署只要 rebuild。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>決策表</h2>
+    <table>
+      <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+      <tr><td>1</td><td>刪除重建 vs 原地更新</td><td>原地更新，不刪訊息；取代 DESIGN_P3 主題 3</td><td>✅ 已定</td></tr>
+      <tr><td>2</td><td>端點</td><td>沿用 <code>POST /messages/{ai_id}/regenerate</code>，body 加可選 <code>content</code>；空白 → 422；同一個 commit 改 user</td><td>✅ 已定</td></tr>
+      <tr><td>3</td><td>入口</td><td>桌面：最後一則 user 的功能列，複製右邊的鉛筆；手機：長按選單加「編輯」</td><td>✅ 已定</td></tr>
+      <tr><td>4</td><td>編輯位置與樣式</td><td>泡泡原地變編輯框，撐到 user 欄最大寬；自動長高上限 10 行後框內捲動；下方右側「取消」「送出」</td><td>✅ 已定</td></tr>
+      <tr><td>5</td><td>鍵盤</td><td>同輸入框：桌面 Enter 送出、Shift+Enter 換行；手機 Enter 換行；Esc 取消</td><td>✅ 已定</td></tr>
+      <tr><td>6</td><td>送出停用</td><td>空白或內容沒改</td><td>✅ 已定</td></tr>
+      <tr><td>7</td><td>模型</td><td>選單目前的模型（同重傳）</td><td>✅ 已定</td></tr>
+      <tr><td>8</td><td>何時可編輯</td><td>最後一則 user、它與下一則 AI 都有 id、非生成中；沒 id 的「⚠️ 連線錯誤」重新整理後才可編輯</td><td>✅ 已定</td></tr>
+      <tr><td>9</td><td>編輯中從主輸入框送出</td><td>自動關閉編輯框</td><td>✅ 已定</td></tr>
+      <tr><td>10</td><td>警語</td><td>只在該回覆有分支時，編輯框下方紅色小字「此回覆上有 N 個分支，重新生成後會變成幽靈分支」；N 含空分支</td><td>✅ 已定</td></tr>
+      <tr><td>11</td><td>送出後</td><td>沿用 G6-2：Thinking... → 串流、關幽靈分支 tab、重抓分支清單、切走切回續讀</td><td>✅ 已定</td></tr>
+      <tr><td>12</td><td>失敗</td><td>被拒 → user 還原、AI 顯示連線錯誤；串流中斷 → user 保持新內容、可重傳</td><td>✅ 已定</td></tr>
+      <tr><td>13</td><td>編輯歷史</td><td>不保留；送出時間不變；不加「已編輯」標記（不需 migration）</td><td>✅ 已定</td></tr>
+      <tr><td>14</td><td>分支面板</td><td>共用元件，最後一則 user 同樣可編輯</td><td>✅ 已定</td></tr>
+      <tr><td>15</td><td>git</td><td>branch <code>feat/f9-edit-last-message</code>，完成後 merge</td><td>✅ 已定</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>實作紀錄</h2>
+    <table>
+      <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
+      <tr><td>F9-1</td><td><code>3a5bf6f</code></td><td><code>RegenerateRequest.content</code>（可選）；端點在 404 之後、403 之前擋空白 → 422；通過全部檢查後才改 <code>user_msg.content</code>，與幽靈化、AI 清空同一個 commit；生成用新內容；harness 新增 10a–10e</td><td>假 LLM harness 在 uvicorn 上 47 PASS、ALL PASS（2026-11-03，主 agent 重跑確認）</td></tr>
+      <tr><td>F9-2</td><td><code>7013db6</code></td><td><code>buildMessageActions</code> 加 <code>Pencil</code>「編輯」（複製與重新生成之間）；<code>MessageActionMenu</code> 接 <code>onEdit</code>；新檔 <code>UserMessageEditor.jsx</code>（<code>EDITOR_MAX_LINES = 10</code>、Esc＋<code>handleEnterKey</code>、紅色警語）；<code>MessageList</code> 的 <code>editingId</code>／<code>canEdit</code>，編輯中欄位與 <code>group/bubble</code> 外層都加 <code>w-full</code>（審查時補：外層是 <code>items-end</code>，不加會縮窄）；<code>BranchPanel</code> 傳 <code>onEdit</code>；App 擴充 <code>handleRetry</code>／<code>retryBranchMessage</code> 的 <code>{ userMsg, content }</code>，被拒時還原 user</td><td>build 通過；使用者瀏覽器驗證通過（2026-11-03）</td></tr>
+      <tr><td>F9-B4</td><td><code>f5ca79e</code></td><td>BUGS B4：剛送出的 user 訊息沒有 id（G1 只補新對話第一則、分支沒補）→ 鉛筆不出現。主對話與分支都把 <code>X-User-Message-Id</code> 補到倒數第二則 user</td><td>使用者瀏覽器驗證通過（2026-11-03）</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>小練習</h2>
+    <ol>
+      <li>如果把「<code>user_msg.content = payload.content</code>」移到 409 檢查之前，harness 的哪一項會失敗？資料庫會留下什麼不一致？</li>
+      <li>舊版前端（不知道 <code>content</code> 欄位）按重傳，F9-1 上線後行為有沒有變？為什麼？</li>
+      <li>為什麼警語的 N 不用 <code>anchorsByMessageId</code> 算？舉一個兩者數字不同的情況。</li>
+      <li>編輯送出被 409 拒絕時，如果從 <code>messages</code> state 讀「舊內容」來還原，會還原成什麼？</li>
+      <li>用 DevTools Network 看一次編輯送出的 request payload，確認同時有 <code>model</code> 與 <code>content</code>；再看一次純重傳，確認沒有 <code>content</code>。</li>
+    </ol>
+  </section>
+
+</div>
+</body>
+</html>

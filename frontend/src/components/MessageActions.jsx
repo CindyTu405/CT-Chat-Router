@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { Copy, Check, RefreshCw } from 'lucide-react';
+import { Copy, Check, RefreshCw, Pencil } from 'lucide-react';
 import { copyText } from '../clipboard';
 
 // (G8) 訊息功能清單：每個功能一筆資料。功能列（MessageActions）與手機長按選單（MessageActionMenu）共用這張清單，
 // 加功能只改這裡，兩邊同時出現。
 // (G6-2) 第二參數 onRetry：只有傳入時才會多出「重新生成」功能（放在複製的右邊）。
 //        run() 回傳 false → 不顯示 ✓ 回饋（重新生成是開始串流，不是完成動作）。
-const buildMessageActions = (msg, { onRetry } = {}) => [
+// (F9-2) 第二參數 onEdit：只有傳入時才會多出「編輯」功能（複製的右邊、重新生成的左邊）。
+//        run() 呼叫 onEdit(msg) 後回傳 false → 不顯示 ✓ 回饋（編輯是開啟編輯框，不是完成動作）；
+//        手機選單看到 false 會關閉選單，正好符合「點編輯 → 關選單、開編輯框」。
+const buildMessageActions = (msg, { onRetry, onEdit } = {}) => [
   { id: 'copy', label: '複製', icon: Copy, run: () => copyText(msg.content) }, // 複製原始 markdown
+  // (F9-2) 編輯：只有最後一則 user 訊息會傳入 onEdit（判斷在 MessageList 的 canEdit）
+  ...(onEdit ? [{ id: 'edit', label: '編輯', icon: Pencil, run: () => { onEdit(msg); return false; } }] : []),
   // (G6-2) 重新生成：原地重打這則 AI 回覆（只有最後一則 AI 回覆會傳入 onRetry）
   ...(onRetry ? [{ id: 'retry', label: '重新生成', icon: RefreshCw, run: () => { onRetry(msg); return false; } }] : []),
 ];
@@ -15,8 +20,9 @@ const buildMessageActions = (msg, { onRetry } = {}) => [
 // (G8) 一排小圖示按鈕。複製成功後該圖示變 ✓ 約 2 秒。
 // className 會接在基本排列 class 之後；預設 'flex'。傳入 className 會取代預設值，所以要顯示時請自行帶上 flex（例如 hidden md:flex）。
 // (G6-2) onRetry 可選：傳入才顯示「重新生成」按鈕（見 buildMessageActions）。
-export function MessageActions({ msg, className = 'flex', onRetry }) {
-  const actions = buildMessageActions(msg, { onRetry });
+// (F9-2) onEdit 可選：傳入才顯示「編輯」按鈕，呼叫 onEdit(msg)（見 buildMessageActions）。
+export function MessageActions({ msg, className = 'flex', onRetry, onEdit }) {
+  const actions = buildMessageActions(msg, { onRetry, onEdit });
   const [doneId, setDoneId] = useState(null); // 剛成功執行的功能 id
   const timerRef = useRef(null);
 
@@ -58,11 +64,12 @@ const EDGE = 8; // 離視窗邊緣至少 8px
 
 // (G8) 手機 user 氣泡長按後跳出的浮動選單：位於氣泡上方（放不下時放在下方），右緣對齊氣泡右緣。
 // 點選單外面、捲動、縮放視窗時關閉；點「複製」後該列變 ✓ 已複製，約 1 秒後關閉。
-export function MessageActionMenu({ msg, anchorRect, onClose }) {
+// (F9-2) onEdit 可選：傳入才多出「編輯」列；點了 → 關閉選單（run 回傳 false），並由父層開啟編輯框。
+export function MessageActionMenu({ msg, anchorRect, onEdit, onClose }) {
   const menuRef = useRef(null);
   const [copiedId, setCopiedId] = useState(null);
   const closeTimerRef = useRef(null);
-  const actions = buildMessageActions(msg);
+  const actions = buildMessageActions(msg, { onEdit });
 
   // 點外面 / 捲動 / 視窗縮放 → 關閉
   useEffect(() => {
