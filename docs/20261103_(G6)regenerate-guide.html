@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重傳最後一則回覆教學（G6）— CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 前後端教學 · G6</span>
+    <h1>重傳最後一則回覆</h1>
+    <p>原地重新生成、幽靈分支的資料欄位、409 防呆、緩衝清除的競態、前端把串流寫回同一則訊息。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>要做成什麼樣子</h2>
+    <ul>
+      <li>主對話與分支的<strong>最後一則 AI 回覆</strong>，功能列在「複製」右邊多一顆重傳鈕（lucide <code>RefreshCw</code>），成功或失敗都有。</li>
+      <li>按下 → 用<strong>選單目前選的模型</strong>重新生成，<strong>取代</strong>舊回覆。</li>
+      <li>舊回覆上開過的分支 → 變成<strong>幽靈分支</strong>（資料保留，暫時不顯示；之後做幽靈分支 UI 再出現）。</li>
+      <li>前端「⚠️ 連線錯誤」那種沒有訊息 id 的回覆，不顯示重傳鈕。</li>
+      <li>不做 DESIGN_P3 主題 3（刪除舊一輪的交易）；改用「原地更新」。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念一：原地重新生成，而不是刪掉重建</h2>
+    <table>
+      <tr><th></th><th>刪掉舊回覆、建一則新的</th><th>原地更新（採用）</th></tr>
+      <tr><td>訊息 id</td><td>變新的</td><td>不變</td></tr>
+      <tr><td>外鍵</td><td>分支的錨點、子訊息都指向舊 id，要先處理才能刪</td><td>沒有東西被刪，不用排順序</td></tr>
+      <tr><td>切走再切回（Bug A 續讀）</td><td>前端要換成新 id</td><td>沿用同一個 id 的緩衝，原本的續讀直接可用</td></tr>
+      <tr><td>原子性</td><td>刪＋建要包在同一交易</td><td>一次 UPDATE＋分支幽靈化，一個 commit</td></tr>
+    </table>
+    <p>流程：</p>
+    <div class="flow">
+      <div class="box">檢查<br>（第 4 節）</div>
+      <div class="arrow">→</div>
+      <div class="box">分支幽靈化<br>內容清空、換模型<br>一次 commit</div>
+      <div class="arrow">→</div>
+      <div class="box">背景 task<br>run_generation</div>
+      <div class="arrow">→</div>
+      <div class="box">串流回前端<br>（與 /chat 相同）</div>
+    </div>
+    <pre><code><span class="cm"># backend/main.py（概念）</span>
+@app.post("/messages/{message_id}/regenerate")
+@limiter.limit("10/minute")                      <span class="cm"># 跟 /chat 一樣會打付費 LLM</span>
+async def regenerate(message_id, payload: RegenerateRequest, request: Request, session=...):
+    ...檢查...
+    orphan_branches(session, ai)                 <span class="cm"># 第 3 節</span>
+    ai.content = ""
+    ai.model_used = payload.model
+    session.commit()
+
+    user_msg = session.get(Message, ai.parent_id)
+    history = get_conversation_history(session, user_msg.parent_id)
+    GENERATIONS[ai_id] = {"text": "", "done": False}
+    asyncio.create_task(run_generation(ai_id, user_msg.content, history_plain, payload.model))
+    return StreamingResponse(_read_buffer(ai_id, 0), headers={"X-Message-Id": ai_id, ...})</code></pre>
+    <p>重新生成用的上下文，跟當初 <code>/chat</code> 一樣：user 訊息之前的祖先鏈。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念二：幽靈分支的資料欄位（DESIGN_P3 主題 2）</h2>
+    <p>分支錨在一段 AI 文字上（<code>anchor_message_id</code>＋<code>anchor_start/end</code>）。文字重新生成後，那段位置就沒有意義了。主題 2 定的三種狀態：</p>
+    <table>
+      <tr><th>狀態</th><th>anchor_message_id</th><th>attach_root_id</th><th>is_orphaned</th></tr>
+      <tr><td>inline 錨定（現在全部都是）</td><td>有</td><td>空</td><td>false</td></tr>
+      <tr><td>底部入口（重連後，之後做）</td><td>空</td><td>有</td><td>false</td></tr>
+      <tr><td>幽靈</td><td>空</td><td>空</td><td>true</td></tr>
+    </table>
+    <h3>migration</h3>
+    <pre><code>alter branch.anchor_message_id drop not null
+add   branch.is_orphaned    boolean not null default false
+add   branch.attach_root_id uuid null  (FK message.id)</code></pre>
+    <h3>幽靈化要做三件事</h3>
+    <ol>
+      <li>分支：<code>anchor_message_id = NULL</code>、<code>anchor_start/end = NULL</code>、<code>is_orphaned = true</code>。<code>anchor_text</code> 保留，之後幽靈清單可以顯示「原本選的是哪段字」。</li>
+      <li>分支的第一則訊息（<code>root_message_id</code>）：<code>parent_id = NULL</code>、<code>anchor_message_id = NULL</code>。<br>
+        <span class="muted">原因：分支第一則訊息的 parent 就是那則 AI 回覆。不斷開的話，樹狀圖和「刪除整串對話」還是會把幽靈分支算進這棵樹。</span></li>
+      <li><code>/chats/roots</code>（側邊欄列表）只列 <code>branch_id IS NULL</code> 的根。<br>
+        <span class="muted">原因：斷開後，分支第一則訊息自己變成「沒有 parent 的訊息」，不加這個條件就會被側邊欄當成一個新對話。</span></li>
+    </ol>
+    <div class="warn"><b>部署：</b>這次有 migration。虛擬機 <code>git pull</code> 後要 <code>sudo docker compose up -d --build</code>，再 <code>sudo docker compose exec api alembic upgrade head</code>（CLAUDE.md Production deploy）。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>概念三：用 409 擋掉不該發生的重傳</h2>
+    <table>
+      <tr><th>情況</th><th>回應</th><th>原因</th></tr>
+      <tr><td>id 不存在或不是 AI 訊息</td><td>404</td><td></td></tr>
+      <tr><td>模型不在白名單</td><td>403</td><td>跟 <code>/chat</code> 同一個檢查，要在改資料之前</td></tr>
+      <tr><td>這則還在生成中</td><td>409</td><td>兩個 task 同時寫同一則會互相覆蓋</td></tr>
+      <tr><td>不是同一條線的最後一則（後面還有同 <code>branch_id</code> 的子訊息）</td><td>409</td><td>只允許最後一則；中間那則重新生成會讓後面的對話失去前提</td></tr>
+    </table>
+    <p class="muted">「同一條線」：主對話看 <code>branch_id IS NULL</code>，分支看同一個 <code>branch_id</code>。錨在這則回覆上的分支，其訊息也是它的子訊息，但 <code>branch_id</code> 不同，不算「後面還有對話」，而是要被幽靈化的對象。</p>
+    <p>409 Conflict 的意思是「請求本身沒錯，但跟伺服器目前的狀態衝突」。前端照理不會送出這種請求（按鈕只在最後一則、生成中不顯示），這是給雙擊、兩個分頁同時按這類情況的保險。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>概念四：緩衝清除的競態（race condition）</h2>
+    <p>Bug A 的設計：生成完成後，緩衝 <code>GENERATIONS[id]</code> 保留 60 秒，讓正在續讀的前端讀到結尾，然後清掉：</p>
+    <pre><code><span class="cm"># run_generation 的 finally（現況）</span>
+await asyncio.sleep(60)
+GENERATIONS.pop(ai_msg_id, None)      <span class="cm"># ← 不管現在裡面是誰，直接清</span></code></pre>
+    <p>以前每則 AI 只生成一次，沒問題。有了重傳，同一個 id 會生成第二次：</p>
+    <div class="flow">
+      <div class="box">第 1 次生成完成<br>開始等 60 秒</div>
+      <div class="arrow">→</div>
+      <div class="box">第 20 秒按重傳<br>放入「新」緩衝</div>
+      <div class="arrow">→</div>
+      <div class="box">第 60 秒舊 task 醒來<br>把「新」緩衝清掉</div>
+      <div class="arrow">→</div>
+      <div class="box">切走再切回<br>讀不到生成中的內容</div>
+    </div>
+    <p>修法：只清「自己放進去的那一份」。</p>
+    <pre><code>await asyncio.sleep(BUFFER_RETENTION_SECONDS)
+if GENERATIONS.get(ai_msg_id) is buf:    <span class="cm"># is：同一個物件才清</span>
+    GENERATIONS.pop(ai_msg_id, None)</code></pre>
+    <p>60 秒改成模組常數 <code>BUFFER_RETENTION_SECONDS</code>，測試時可以調短。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>概念五：前端把串流寫回「同一則」訊息</h2>
+    <h3>按鈕何時出現</h3>
+    <p><code>MessageList</code> 新增 <code>onRetry</code> prop（主對話、分支各自傳）。重傳鈕只在以下條件都成立時出現：</p>
+    <ul>
+      <li>是列表中的最後一則，而且是 AI</li>
+      <li>有 <code>id</code>（排除「⚠️ 連線錯誤」）</li>
+      <li>不在 loading 中</li>
+      <li>有傳 <code>onRetry</code></li>
+    </ul>
+    <p>G8 的 <code>buildMessageActions</code> 加第二個參數，有 <code>onRetry</code> 才加入重傳項目，排在複製右邊：</p>
+    <pre><code>const buildMessageActions = (msg, { onRetry } = {}) =&gt; [
+  { id: 'copy',  label: '複製',     icon: Copy,      run: () =&gt; copyText(msg.content) },
+  ...(onRetry ? [{ id: 'retry', label: '重新生成', icon: RefreshCw, run: () =&gt; { onRetry(msg); return false; } }] : []),
+];</code></pre>
+    <p class="muted"><code>run</code> 回傳 false：重傳不需要「✓」回饋，畫面會直接變成 Thinking...。</p>
+    <h3>寫回同一則</h3>
+    <p>跟送出訊息的流程幾乎一樣，差別是<strong>不新增訊息</strong>，而是把最後一則的內容清空、換上新模型名稱，再把串流文字寫進同一個 id：</p>
+    <pre><code>setMessages(prev =&gt; prev.map(m =&gt; m.id === msg.id ? { ...m, content: '', model_used: model } : m));
+const res = await fetch(`${API_URL}/messages/${msg.id}/regenerate`, { method: 'POST', body: { model } });
+<span class="cm">// 之後用跟 handleSend 相同的 reader 迴圈，比對 id 寫入</span></code></pre>
+    <p>切走再切回：<code>loadChat</code> 看到最後一則 AI 還在生成，就呼叫既有的 <code>resumeGeneration</code>。id 沒變，這段不用改。</p>
+    <h3>重傳後</h3>
+    <ul>
+      <li>主對話：重新抓分支清單（<code>loadBranchList</code>），被幽靈化的分支高亮就會消失。</li>
+      <li>右側面板如果開著被幽靈化的分支 tab，就關掉。後端在 header <code>X-Orphaned-Branch-Ids</code> 回傳被幽靈化的分支 id（逗號分隔）。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>分兩步做</h2>
+    <table>
+      <tr><th>步驟</th><th>改什麼</th><th>怎麼驗證</th></tr>
+      <tr><td><b>G6-1</b> 後端</td><td>migration、model 欄位、<code>/chats/roots</code> 過濾、重新生成端點、幽靈化、緩衝清除修正、假 LLM 測試腳本</td><td>在真的 uvicorn 上跑假 LLM 測試腳本（不打付費模型），印出 ALL PASS</td></tr>
+      <tr><td><b>G6-2</b> 前端</td><td><code>MessageActions</code> 重傳項、<code>MessageList</code> 的 <code>onRetry</code>、App 的主對話／分支重傳流程</td><td>build＋瀏覽器</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>決策表</h2>
+    <table>
+      <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+      <tr><td>1</td><td>按鈕位置與圖示</td><td>功能列、複製右邊（順序之後可調）；lucide <code>RefreshCw</code>（即 react-icons 的 LuRefreshCw）</td><td>✅ 已定</td></tr>
+      <tr><td>2</td><td>何時出現</td><td>只在最後一則 AI 回覆，成功或失敗都有；生成中不顯示</td><td>✅ 已定</td></tr>
+      <tr><td>3</td><td>錯誤辨識</td><td>不做；交給使用者自行重傳</td><td>✅ 已定</td></tr>
+      <tr><td>4</td><td>行為</td><td>取代舊回覆（原地更新，id 不變）</td><td>✅ 已定</td></tr>
+      <tr><td>5</td><td>模型</td><td>選單目前選的模型</td><td>✅ 已定</td></tr>
+      <tr><td>6</td><td>分支</td><td>分支面板的最後一則回覆也有</td><td>✅ 已定</td></tr>
+      <tr><td>7</td><td>舊回覆上的分支</td><td>幽靈化；主題 2 的資料欄位併入 G6-1；幽靈 UI 之後做，在那之前不顯示</td><td>✅ 已定</td></tr>
+      <tr><td>8</td><td>沒有 id 的「⚠️ 連線錯誤」</td><td>不顯示重傳鈕</td><td>✅ 已定</td></tr>
+      <tr><td>9</td><td>DESIGN_P3 主題 3</td><td>這次不做</td><td>✅ 已定</td></tr>
+      <tr><td>10</td><td>開著的幽靈分支 tab</td><td>重傳後自動關閉</td><td>建議（實作預設）</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>小練習</h2>
+    <ol>
+      <li>第 5 節的 <code>is</code> 改成 <code>==</code> 會怎樣？（提示：兩個 dict 內容都是 <code>{"text": "...", "done": True}</code> 時）</li>
+      <li>如果幽靈化時沒有把分支第一則訊息的 <code>parent_id</code> 設成 NULL，在樹狀圖會看到什麼？</li>
+      <li>如果 <code>/chats/roots</code> 沒加 <code>branch_id IS NULL</code>，重傳一則有分支的回覆後，側邊欄會多出什麼？</li>
+      <li>用瀏覽器 DevTools 的 Network 分頁看一次重傳請求，找出 <code>X-Message-Id</code> 和 <code>X-Orphaned-Branch-Ids</code>。</li>
+    </ol>
+  </section>
+
+</div>
+</body>
+</html>
