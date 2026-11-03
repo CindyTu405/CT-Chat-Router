@@ -301,17 +301,21 @@ function App() {
       
       // ★ 修正 1：將 ID 的抓取移到 while 迴圈「之前」，這樣迴圈內才能使用
       const newMsgId = response.headers.get("X-Message-Id");
-      // (G1) 新對話的第一則 user 訊息是樂觀塞進來的、沒有 id，
-      // 後端把真正的 id 放在這個 header，補回去之後就能馬上建立分支。
+      // (G1)(F9-B4) 樂觀塞進來的 user 訊息沒有 id，後端把真正的 id 放在這個 header。
+      // 補到「最後一則 assistant 前面、沒有 id 的 user」（倒數第二則），
+      // 新對話時就是 index 0，涵蓋原本 G1 的情況；既有對話的後續訊息也能補上。
       const newUserMsgId = response.headers.get("X-User-Message-Id");
       if (newUserMsgId && activeRootIdRef.current === sendConvId) {
         setMessages(prev => {
           if (activeRootIdRef.current !== sendConvId) return prev;
-          if (prev.length === 0) return prev;
-          const first = prev[0];
-          if (!first || first.role !== 'user' || first.id) return prev;
+          const len = prev.length;
+          if (len < 2) return prev;
+          const last = prev[len - 1];
+          const userMsg = prev[len - 2];
+          if (last?.role !== 'assistant') return prev;
+          if (!userMsg || userMsg.role !== 'user' || userMsg.id) return prev;
           const next = [...prev];
-          next[0] = { ...first, id: newUserMsgId };
+          next[len - 2] = { ...userMsg, id: newUserMsgId };
           return next;
         });
       }
@@ -634,6 +638,21 @@ function App() {
       const decoder = new TextDecoder();
       let aiResponseText = "";
       const newMsgId = response.headers.get("X-Message-Id");
+      // (F9-B4) 補回樂觀 user 訊息的 id：倒數第二則是沒有 id 的 user、最後一則是 assistant 時才補
+      const newUserMsgId = response.headers.get("X-User-Message-Id");
+      if (newUserMsgId) {
+        updateBranch(branchId, b => {
+          const len = b.messages.length;
+          if (len < 2) return b;
+          const last = b.messages[len - 1];
+          const userMsg = b.messages[len - 2];
+          if (last?.role !== 'assistant') return b;
+          if (!userMsg || userMsg.role !== 'user' || userMsg.id) return b;
+          const msgs = [...b.messages];
+          msgs[len - 2] = { ...userMsg, id: newUserMsgId };
+          return { ...b, messages: msgs };
+        });
+      }
 
       while (true) {
         const { done, value } = await reader.read();
