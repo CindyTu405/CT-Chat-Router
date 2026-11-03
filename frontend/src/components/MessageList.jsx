@@ -10,6 +10,8 @@ import rehypeSourceOffsets from '../rehypeSourceOffsets';
 import rehypeHighlight from '../rehypeHighlight';
 import { selectionOffsets } from '../selectionOffset';
 import { MessageActions, MessageActionMenu } from './MessageActions';
+// (G9) user 訊息：原樣顯示＋超過 10 行摺疊
+import UserMessageContent from './UserMessageContent';
 
 // 錨點高亮的可點擊樣式（與先前 split 版一致）
 const ANCHOR_MARK_CLASS =
@@ -541,7 +543,10 @@ function MessageList({
                           : {})}
                         className="whitespace-normal break-words text-[15px] overflow-x-auto"
                       >
-                        {msg.content ? (
+                        {/* (G9) user 訊息不走 markdown，改用 UserMessageContent（key 用 id，切換對話時重置摺疊） */}
+                        {msg.content && msg.role === 'user' ? (
+                          <UserMessageContent key={msg.id ?? `tmp-${index}`} content={msg.content} />
+                        ) : msg.content ? (
                           renderContent(msg)
                         ) : (
                           <span className="animate-pulse text-gray-400">Thinking...</span>
