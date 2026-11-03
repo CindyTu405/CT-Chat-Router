@@ -228,7 +228,7 @@ chat-{root_id}-{date}/
 | B3 | 後端：幽靈分支重連 API | ⏳ | DESIGN_P3 主題 2 |
 | B4 | 後端：`/chat` context 組裝（`include_main`／`context_branch_ids`、token 截斷） | ⚠️ 待重新評估 | 依賴已廢棄的 F6，需確認是否仍要做 |
 | F9 | 前端：編輯最後一則（inline regenerate）、幽靈分支重連 UI、入口管理右鍵選單 | 🔶 | 編輯最後一則拆為 F9-1／F9-2（下兩列）；幽靈分支重連 UI、入口右鍵選單（主題 5）仍待討論 |
-| F9-1 | 後端：`regenerate` body 加可選 `content`，同一個 commit 更新 user 訊息內容 | ⏳ | 規格見下方「F9 規格與驗收」；教學：`docs/20261103_(F9)edit-last-message-guide.html` |
+| F9-1 | 後端：`regenerate` body 加可選 `content`，同一個 commit 更新 user 訊息內容 | ✅ | 3a5bf6f（假 LLM harness 47 PASS，含 F9 新增 10a–10e）；規格見下方「F9 規格與驗收」；教學：`docs/20261103_(F9)edit-last-message-guide.html` |
 | F9-2 | 前端：最後一則 user 訊息 inline 編輯（主對話＋分支共用，桌面功能列＋手機長按選單） | ⏳ | 同上 |
 | G2 | 分支地圖依錨點位置排序 | ✅ | 1013464（cherry-pick 自 1c574f1，已在瀏覽器確認） |
 | G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ✅ | be02ad3（已在瀏覽器確認）；教學：`docs/20261101_(G3)shared-chat-pane-guide.html` |
