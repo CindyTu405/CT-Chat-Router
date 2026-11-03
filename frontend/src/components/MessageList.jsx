@@ -12,6 +12,8 @@ import { selectionOffsets } from '../selectionOffset';
 import { MessageActions, MessageActionMenu } from './MessageActions';
 // (G9) user 訊息：原樣顯示＋超過 10 行摺疊
 import UserMessageContent from './UserMessageContent';
+// (F9-2) 最後一則 user 訊息的原地編輯框
+import UserMessageEditor from './UserMessageEditor';
 
 // 錨點高亮的可點擊樣式（與先前 split 版一致）
 const ANCHOR_MARK_CLASS =
@@ -156,6 +158,8 @@ function MessageList({
   emptyState,
   // (G6-2) 重新生成：傳入時，「最後一則 AI 回覆」且非串流中才會顯示重新生成鈕（見下方 AI 功能列）
   onRetry,
+  // (F9-2) 編輯最後一則 user 訊息：傳入時才可能出現編輯入口（見 canEdit）；送出時呼叫 onEdit(userMsg, aiMsg, text)
+  onEdit,
 }) {
   const v = MESSAGE_LIST_VARIANTS[variant] || MESSAGE_LIST_VARIANTS.main;
   const messagesEndRef = useRef(null);
@@ -290,7 +294,7 @@ function MessageList({
     setBranchSel(null);
   };
 
-  // (G8) 手機 user 氣泡長按 → 浮動功能選單：{ msg, rect } | null
+  // (G8) 手機 user 氣泡長按 → 浮動功能選單：{ msg, index, rect } | null（index 用來算 canEdit）
   const [actionMenu, setActionMenu] = useState(null);
   const pressRef = useRef({ timer: null, x: 0, y: 0 });
 
@@ -298,7 +302,7 @@ function MessageList({
   useEffect(() => () => clearTimeout(pressRef.current.timer), []);
 
   // (G8) 只有 user 且有內容的氣泡才掛長按事件；回傳要 spread 到氣泡 div 上的 props
-  const longPressProps = (msg) => {
+  const longPressProps = (msg, index) => {
     if (msg.role !== 'user' || !msg.content) return {};
     return {
       onPointerDown: (e) => {
@@ -308,7 +312,7 @@ function MessageList({
         pressRef.current.y = e.clientY;
         clearTimeout(pressRef.current.timer);
         pressRef.current.timer = setTimeout(() => {
-          setActionMenu({ msg, rect: el.getBoundingClientRect() });
+          setActionMenu({ msg, index, rect: el.getBoundingClientRect() });
         }, LONG_PRESS_MS);
       },
       onPointerMove: (e) => {
@@ -414,6 +418,28 @@ function MessageList({
     );
   };
 
+  // (F9-2) 正在編輯哪一則 user 訊息（id）；null = 沒有在編輯
+  const [editingId, setEditingId] = useState(null);
+
+  // (F9-2) 開始生成（例如編輯到一半從底部輸入框送出新訊息）→ 關掉編輯框，那則已經不是最後一則了
+  useEffect(() => {
+    if (isLoading) setEditingId(null);
+  }, [isLoading]);
+
+  // (F9-2) 這則 user 能不能編輯：由資料算出，不另存 state。
+  // 條件：父層有傳 onEdit、非生成中、是 user、有 id、是倒數第二則（後面接的是最後一則 AI），且那則 AI 也有 id。
+  const canEdit = (msg, index) =>
+    !!onEdit &&
+    !isLoading &&
+    msg.role === 'user' &&
+    !!msg.id &&
+    index === messages.length - 2 &&
+    messages[index + 1]?.role === 'assistant' &&
+    !!messages[index + 1]?.id;
+
+  // (F9-2) 這則現在是否顯示編輯框（editingId 對上，且仍符合 canEdit；切換對話等情況會自動不符合）
+  const isEditingMsg = (msg, index) => editingId === msg.id && canEdit(msg, index);
+
   // 自動捲動到底部（只有在使用者已經接近底部時才捲，避免打斷往上讀歷史訊息）
   // (P3b-F1a-fix) 「是否在底部」改由 onScroll 持續維護（isAtBottom），
   //   並且一律「瞬間」貼底，避免 smooth 動畫在快速串流時永遠追不上。
@@ -506,9 +532,11 @@ function MessageList({
           // --- 對話列表 (Chat List) ---
           // 修正重點 1: 使用 Fragment (<>...</>) 包裹多個元素
           <>
-            {messages.map((msg, index) => (
-              <div 
-                key={index} 
+            {messages.map((msg, index) => {
+              const isEditing = isEditingMsg(msg, index); // (F9-2) 這則 user 是否正在編輯
+              return (
+              <div
+                key={index}
                 // (P3b-F1b) scrollToMessage 靠這個屬性定位訊息；樂觀訊息還沒有 id 就不掛
                 {...(msg.id ? { 'data-message-id': msg.id } : {})}
                 className={`flex gap-4 max-w-4xl mx-auto group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
@@ -523,15 +551,30 @@ function MessageList({
 
                 {/* 訊息內容區塊 */}
                 <div className={`flex flex-col ${
-                  msg.role === 'user' 
-                    ? 'items-end max-w-[85%] md:max-w-[75%]' // User 保持原本的泡泡寬度限制
+                  msg.role === 'user'
+                    // User 保持原本的泡泡寬度限制；(F9-2) 編輯中加 w-full，撐到同一個上限，短訊息也有足夠空間改
+                    ? `items-end max-w-[85%] md:max-w-[75%]${isEditing ? ' w-full' : ''}`
                     : 'items-start flex-1 min-w-0 md:mr-12' // AI 使用 flex-1 填滿右側所有剩餘空間，min-w-0 防止文字溢出破版（G7）手機不留右側空白
                 }`}>
                 
-                  <div className="relative group/bubble">
+                  {/* (F9-2) 編輯中撐滿 user 欄，讓編輯框的 w-full 有寬度可撐 */}
+                  <div className={`relative group/bubble${isEditing ? ' w-full' : ''}`}>
                     {/* 對話框 */}
-                    {/* (G8) user 氣泡：手機長按開選單，關閉原生選取與長按選單（max-md 只在手機生效） */}
-                    <div {...longPressProps(msg)} className={`
+                    {/* (F9-2) 編輯中：泡泡原地換成編輯框；不掛長按事件、不套 select-none（手機才能在框內選字） */}
+                    {isEditing ? (
+                      <UserMessageEditor
+                        original={msg.content}
+                        // (F9-2) 分支數：只算 branchList 裡掛在下一則 AI 上的（含空分支；不用 anchorsByMessageId）
+                        branchCount={(branchList || []).filter((b) => b.anchor_message_id === messages[index + 1].id).length}
+                        onSubmit={(text) => {
+                          setEditingId(null);
+                          onEdit(msg, messages[index + 1], text);
+                        }}
+                        onCancel={() => setEditingId(null)}
+                      />
+                    ) : (
+                    /* (G8) user 氣泡：手機長按開選單，關閉原生選取與長按選單（max-md 只在手機生效） */
+                    <div {...longPressProps(msg, index)} className={`
                       px-5 py-3.5 rounded-2xl leading-relaxed shadow-md border-1
                       ${msg.role === 'user'
                         ? 'bg-[#51A8DD] text-white rounded-tr-none border-[#51A8DD] max-md:select-none max-md:[-webkit-touch-callout:none]'
@@ -555,15 +598,24 @@ function MessageList({
                         )}
                       </div>
                     </div>
+                    )}
 
                     {/* ★★★ 新增：發送時間 (只有 User 顯示) ★★★ */}
                     {/* (G8) 時間右邊放功能列；電腦版常態顯示，手機版隱藏（手機改用長按選單） */}
-                    {msg.role === 'user' && (
+                    {/* (F9-2) 編輯中隱藏時間與功能列 */}
+                    {msg.role === 'user' && !isEditing && (
                       <div className="mt-1.5 mr-1 flex items-center justify-end gap-2">
                         <span className="text-[11px] text-gray-400 select-none">
                           {formatShortDateTime(msg.created_at) || '剛剛發送'}
                         </span>
-                        {!!msg.content && <MessageActions msg={msg} className="hidden md:flex" />}
+                        {/* (F9-2) 編輯入口：只有可編輯的那則才傳 onEdit（桌面功能列，複製的右邊） */}
+                        {!!msg.content && (
+                          <MessageActions
+                            msg={msg}
+                            className="hidden md:flex"
+                            onEdit={canEdit(msg, index) ? () => setEditingId(msg.id) : undefined}
+                          />
+                        )}
                       </div>
                     )}
                   </div>
@@ -591,7 +643,8 @@ function MessageList({
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             {/* 自動捲動定位點 */}
             <div ref={messagesEndRef} />
@@ -618,10 +671,16 @@ function MessageList({
         )}
 
         {/* (G8) 手機 user 氣泡長按後的浮動功能選單 */}
+        {/* (F9-2) 「編輯」只在這則可編輯時才出現；點了由 MessageActionMenu 先關選單，這裡開編輯框 */}
         {actionMenu && (
           <MessageActionMenu
             msg={actionMenu.msg}
             anchorRect={actionMenu.rect}
+            onEdit={
+              canEdit(actionMenu.msg, actionMenu.index)
+                ? () => setEditingId(actionMenu.msg.id)
+                : undefined
+            }
             onClose={() => setActionMenu(null)}
           />
         )}
