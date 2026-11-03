@@ -194,7 +194,15 @@ const overflowing = el.scrollHeight &gt; maxHeight + 1;           <span class="c
   </section>
 
   <section class="card">
-    <h2><span class="num">8</span>小練習</h2>
+    <h2><span class="num">8</span>實作紀錄</h2>
+    <table>
+      <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
+      <tr><td>G9</td><td><code>f6b5f1a</code></td><td><code>userContent.js</code>（<code>parseUserContent</code>）；<code>UserMessageContent.jsx</code>（片段渲染、<code>MAX_LINES = 10</code> 量測＋ResizeObserver、mask 淡出 <code>FADE_START = '70%'</code>、Chevron 按鈕擋 pointerdown 不觸發 G8 長按）；程式碼區塊前後各去掉一個換行避免多餘空行；<code>MessageList.jsx</code> user 訊息改用此元件，key 用訊息 id</td><td>build＋解析器 node 檢查通過；使用者瀏覽器驗證通過（2026-11-03）</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>小練習</h2>
     <ol>
       <li>把 <code>FENCE_RE</code> 的 <code>*?</code> 改成 <code>*</code>，輸入兩個程式碼區塊中間夾一段文字，結果會怎樣？</li>
       <li>在 DevTools 對一則長的 user 訊息，分別印出 <code>scrollHeight</code>、<code>clientHeight</code>，展開／收合各一次。</li>
