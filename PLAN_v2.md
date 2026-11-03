@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：確認 G6 細節 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
+**下一步**：G6-1 → G6-2 → 編輯最後一則 user 訊息（F9 的一部分，改為原地更新，細節待確認） → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
 
 ---
 
@@ -224,7 +224,7 @@ chat-{root_id}-{date}/
 | F7 | 前端：選取 → source offset 對映 | ✅ | 2898163 |
 | F8 | 前端：AST offset 高亮 | ✅ | 6ab113d |
 | G1 | 新對話可直接開分支（回傳 user message id） | ✅ | 4034f55（教學：optimistic-update-guide） |
-| B2 | 後端：刪除舊一輪端點＋幽靈分支（`is_orphaned`、`attach_root_id`） | ⏳ | DESIGN_P3 主題 2、3 |
+| B2 | 後端：刪除舊一輪端點＋幽靈分支（`is_orphaned`、`attach_root_id`） | 🔶 部分 | 資料欄位與幽靈化併入 G6-1；刪除舊一輪（主題 3）暫不做 |
 | B3 | 後端：幽靈分支重連 API | ⏳ | DESIGN_P3 主題 2 |
 | B4 | 後端：`/chat` context 組裝（`include_main`／`context_branch_ids`、token 截斷） | ⚠️ 待重新評估 | 依賴已廢棄的 F6，需確認是否仍要做 |
 | F9 | 前端：編輯最後一則（inline regenerate）、幽靈分支重連 UI、入口管理右鍵選單 | ⏳ | DESIGN_P3 主題 3、5；範圍待確認 |
@@ -234,12 +234,13 @@ chat-{root_id}-{date}/
 | G8 | 訊息功能列（首項：複製）＋ http 剪貼簿備援＋手機 user 長按選單 | ✅ | ff6f733（使用者驗證通過）；教學：`docs/20261102_(G8)message-actions-guide.html`；驗收見下方 |
 | G5-B3 | 選取保持反白（G5）＋手機選字出現建立分支按鈕（BUGS B3）：Markdown 元件固定身分、selectionchange＋防抖、手機按鈕在下方 | ✅ | 804d0fd（使用者瀏覽器驗證通過）； 教學：`docs/20261102_(G5-B3)selection-change-guide.html`；驗收見下方 |
 | G9 | user 訊息：原樣顯示（只渲染程式碼區塊／行內程式碼）＋畫面超過 10 行摺疊 | ✅ | f6b5f1a（使用者瀏覽器驗證通過）； 教學：`docs/20261103_(G9)user-message-collapse-guide.html`；驗收見下方 |
-| G6 | 見下方 | ⏳ 待確認 | 草稿已於 e051fec revert |
+| G6-1 | 後端：幽靈分支資料欄位 migration、`POST /messages/{id}/regenerate`（原地重新生成＋幽靈化）、`/chats/roots` 過濾、緩衝清除競態修正 | ⏳ 待開始 | 教學：`docs/20261103_(G6)regenerate-guide.html`；驗收見下方 |
+| G6-2 | 前端：最後一則 AI 回覆的重傳鈕（主對話＋分支） | ⏳ 待開始 | 依賴 G6-1 | 草稿已於 e051fec revert |
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
 
 > B2–B4／F9 的拆分以 HANDOVER 為準，尚未寫驗收指令；開工前先補（可執行指令形式）並出教學文件。
 
-### G2–G9（G6 為未確認需求，逐項討論前不實作）
+### G2–G9（全部已確認）
 
 細節見 `BACKLOG.md`。G1–G4、G7 已完成。
 
@@ -249,7 +250,7 @@ chat-{root_id}-{date}/
 | G3 | 「跳至底部」按鈕不應出現在分支視窗 → 擴大為主對話／分支共用組件 | ✅ 完成（be02ad3、433effe） |
 | G4 | 分支對話顯示模型資訊 | ✅ 完成（併入 G3-2，433effe） |
 | G5 | 調整選取範圍時保持反黑（手機控制棒／桌面 shift+方向鍵） | ✅ 完成（G5-B3，804d0fd） |
-| G6 | 模型回傳錯誤時的重傳機制 | ⏳ 待確認 |
+| G6 | 模型回傳錯誤時的重傳機制 → 最後一則回覆一律可重傳 | ✅ 已確認（G6-1、G6-2） |
 | G7 | 手機版聊天區與分支對話隱藏頭像 | ✅ 完成（0665365；手機主對話無頭像、AI 氣泡無右側留白；分支本來就無頭像） |
 | G8 | 複製訊息按鈕 → 訊息功能列 | ✅ 完成（ff6f733） |
 | G9 | user 訊息顯示換行，超過 5 行摺疊 → 改為 10 行，只渲染程式碼 | ✅ 完成（f6b5f1a） |
@@ -283,6 +284,33 @@ chat-{root_id}-{date}/
 4. `git show --stat HEAD` → 只有 `BranchPanel.jsx`、`App.jsx`
 5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
 6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
+
+### G6 規格與驗收（2026-11-03 定稿）
+
+決策見 `docs/20261103_(G6)regenerate-guide.html` 第 8 節。
+
+**G6-1 後端（`backend/models.py`、`backend/main.py`、新 migration、新 `backend/dev/regenerate_harness.py`）**
+- migration：`branch.anchor_message_id` 改 nullable；新增 `branch.is_orphaned boolean not null default false`、`branch.attach_root_id uuid null`（FK message.id）。
+- `run_generation`：保留時間改為模組常數 `BUFFER_RETENTION_SECONDS = 60`；清除時 `if GENERATIONS.get(id) is buf` 才 pop。
+- `/chats/roots` 兩種排序的根都加 `branch_id IS NULL`。
+- `POST /messages/{message_id}/regenerate`，body `{ model }`，`@limiter.limit("10/minute")`：404（非 AI）→ 403（白名單）→ 409（生成中）→ 409（同 `branch_id` 線上還有子訊息）→ 幽靈化錨在此則的分支（anchor_message_id／anchor_start／anchor_end 設 NULL、is_orphaned=true；其 root 訊息 parent_id、anchor_message_id 設 NULL）＋ 內容清空、model_used 改為新模型，一次 commit → 背景 `run_generation` → 串流，headers 含 `X-Message-Id`、`X-Orphaned-Branch-Ids`（逗號分隔，可為空）。
+- 測試腳本：連 docker chat_db、建測試資料、把 LLM 換成假串流、在真的 uvicorn（埠 8765）上打 API、最後清掉測試資料；不呼叫真模型。
+
+驗收：
+1. `docker compose ps` → chat_db 為 running（不是就停下回報）
+2. `cd backend && uv run alembic upgrade head` → 成功；`uv run alembic current` → 新 revision 為 head
+3. `cd backend && uv run python dev/regenerate_harness.py 2>&1 | grep -v "sqlalchemy" | tail -20` → 每項 PASS，最後一行 `ALL PASS`。涵蓋：重傳後內容＝假串流文字且 model_used 已更新；錨定分支 is_orphaned=true、anchor 為 NULL、其 root 訊息 parent_id 為 NULL；`X-Orphaned-Branch-Ids` 含該分支；`/chats/roots` 不含幽靈分支 root；非最後一則 → 409；生成中再按 → 409；非 AI → 404；不在白名單 → 403；`BUFFER_RETENTION_SECONDS` 調短後連續重傳兩次，第二次的緩衝不會被第一次的清除動作清掉
+4. `git show --stat HEAD` → 只有 models.py、main.py、新 migration、harness
+
+**G6-2 前端（`MessageActions.jsx`、`MessageList.jsx`、`BranchPanel.jsx`、`App.jsx`）**
+- `buildMessageActions(msg, { onRetry })`：有 onRetry 時在複製右邊加 `RefreshCw`「重新生成」。
+- `MessageList` 新增 `onRetry` prop；只在最後一則、AI、有 id、非 loading 時傳給該則的 `MessageActions`。
+- App：主對話 `handleRetry(msg)`、分支 `retryBranchMessage(branchId, msg)`：清空該則內容、model_used 換成選單模型、loading、POST regenerate、串流寫回同 id；主對話完成後 `loadBranchList`；依 `X-Orphaned-Branch-Ids` 關閉對應分支 tab；失敗時顯示「⚠️ 連線錯誤」於該則。切走再切回沿用 `resumeGeneration`。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -c "RefreshCw" frontend/src/components/MessageActions.jsx` → ≥ 1；`grep -c "/regenerate" frontend/src/App.jsx` → ≥ 2（主對話＋分支）
+3. 瀏覽器（桌面＋手機）：只有最後一則 AI 回覆有重傳鈕、在複製右邊；生成中不顯示；按下 → Thinking... → 新內容取代，模型標籤為選單模型；重新整理後內容是新的；分支面板同樣可重傳；有分支高亮的回覆重傳後高亮消失、該分支 tab 關閉、側邊欄沒有多出對話；重傳中切走再切回能接續顯示；「⚠️ 連線錯誤」那則沒有重傳鈕
 
 ### G9 規格與驗收（2026-11-03 定稿）
 
