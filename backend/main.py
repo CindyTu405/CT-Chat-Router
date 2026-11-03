@@ -602,6 +602,54 @@ def get_chat_tree(root_id: uuid.UUID, session: Session = Depends(get_session)):
     return results
 
 
+def demote_overlaps(
+    session: Session,
+    anchor_message_id: uuid.UUID,
+    start: int,
+    end: int,
+    exclude_id: uuid.UUID | None = None,
+) -> list[str]:
+    """(E1) 把同一則回覆上、與 [start, end) 重疊的 inline 分支降級為底部入口。
+
+    重疊判定（半開區間）：舊.start < end 且 start < 舊.end；相鄰不算重疊。
+    降級 = anchor_start／anchor_end 清空，其他欄位（anchor_message_id、anchor_text、title）不動。
+    不 commit：由呼叫端與建新／重連放在同一個交易。回傳被降級的 branch id（str）。
+    """
+    query = select(Branch).where(
+        Branch.anchor_message_id == anchor_message_id,
+        Branch.is_orphaned == False,  # noqa: E712
+        Branch.anchor_start.is_not(None),
+        Branch.anchor_end.is_not(None),
+        Branch.anchor_start < end,
+        Branch.anchor_end > start,
+    )
+    if exclude_id is not None:
+        query = query.where(Branch.id != exclude_id)
+    demoted: list[str] = []
+    for br in session.exec(query).all():
+        br.anchor_start = None
+        br.anchor_end = None
+        session.add(br)
+        demoted.append(str(br.id))
+    return demoted
+
+
+def _branch_response(branch: Branch, reused: bool, demoted_ids: list[str]) -> dict:
+    """(E1) 建立分支的回傳格式（新建與重用共用）。"""
+    return {
+        "branch_id": str(branch.id),
+        "anchor_message_id": str(branch.anchor_message_id) if branch.anchor_message_id else None,
+        "anchor_text": branch.anchor_text,
+        "anchor_start": branch.anchor_start,
+        "anchor_end": branch.anchor_end,
+        "precise": branch.anchor_start is not None and branch.anchor_end is not None,
+        "root_message_id": str(branch.root_message_id) if branch.root_message_id else None,
+        "title": branch.title,
+        "reused": reused,
+        "demoted_ids": demoted_ids,
+    }
+
+
 @app.post("/chats/{root_id}/branches")
 def create_branch(
     root_id: uuid.UUID,
@@ -646,11 +694,41 @@ def create_branch(
             status_code=400, detail="Anchor message does not belong to this chat"
         )
 
+    # --- 1b. offset 驗證（E1）：在任何寫入之前；start／end 必須成對，且 0 <= start < end <= 回覆長度 ---
+    if (payload.anchor_start is None) != (payload.anchor_end is None):
+        raise HTTPException(status_code=422, detail="anchor_start and anchor_end must be given together")
+    has_offset = payload.anchor_start is not None
+    if has_offset:
+        content_len = len(anchor_msg.content or "")
+        if not (0 <= payload.anchor_start < payload.anchor_end <= content_len):
+            raise HTTPException(status_code=422, detail="anchor offsets out of range")
+
+        # 1c. 範圍完全相同的非幽靈分支已存在 → 不新建、不降級，直接回傳它（E1）
+        existing = session.exec(
+            select(Branch)
+            .where(
+                Branch.anchor_message_id == payload.anchor_message_id,
+                Branch.is_orphaned == False,  # noqa: E712
+                Branch.anchor_start == payload.anchor_start,
+                Branch.anchor_end == payload.anchor_end,
+            )
+            .order_by(Branch.created_at)
+        ).first()
+        if existing is not None:
+            return _branch_response(existing, reused=True, demoted_ids=[])
+
     # --- 2. Branch 本體（title 取 anchor_text 的單行前 50 字）---
     if payload.anchor_text and payload.anchor_text.strip():
         title = " ".join(payload.anchor_text.split())[:50]
     else:
         title = "新分支"
+
+    # (E1) 有 offset 才檢查重疊：重疊的舊分支降級為底部入口（與下面的建新同一個 commit）
+    demoted_ids: list[str] = []
+    if has_offset:
+        demoted_ids = demote_overlaps(
+            session, payload.anchor_message_id, payload.anchor_start, payload.anchor_end
+        )
 
     branch = Branch(
         root_message_id=None,
@@ -691,15 +769,7 @@ def create_branch(
     session.commit()
     session.refresh(branch)
 
-    return {
-        "branch_id": str(branch.id),
-        "anchor_message_id": str(branch.anchor_message_id) if branch.anchor_message_id else None,
-        "anchor_text": branch.anchor_text,
-        "anchor_start": branch.anchor_start,
-        "anchor_end": branch.anchor_end,
-        "precise": branch.anchor_start is not None and branch.anchor_end is not None,
-        "root_message_id": None,
-    }
+    return _branch_response(branch, reused=False, demoted_ids=demoted_ids)
 
 
 @app.get("/chats/{root_id}/branches")
