@@ -834,8 +834,9 @@ function App() {
   };
 
   return (
+    // (B5) 手機 100vh 比可見區高（網址列）→ 支援時改用 100dvh；舊瀏覽器退回 100vh
     // 整體背景改為白色，文字改為深色
-    <div className="flex h-screen bg-white text-gray-800 font-sans overflow-hidden">
+    <div className="flex h-screen supports-[height:100dvh]:h-dvh bg-white text-gray-800 font-sans overflow-hidden">
       
       <Sidebar
         sidebarOpen={sidebarOpen}
