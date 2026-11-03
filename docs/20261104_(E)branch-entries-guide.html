@@ -244,7 +244,8 @@ el?.scrollIntoView({ block: 'center', behavior: 'smooth' });</code></pre>
     <h2><span class="num">10</span>實作紀錄</h2>
     <table>
       <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
-      <tr><td colspan="4" class="muted">尚未開始</td></tr>
+      <tr><td>E1</td><td><code>e13be39</code></td><td><code>demote_overlaps</code>（不 commit）；<code>create_branch</code> 先驗 offset（422）→ 完全相同回傳既有（<code>reused</code>）→ 降級＋建新同一 commit；回傳加 <code>title</code>／<code>reused</code>／<code>demoted_ids</code></td><td>branch_entries_harness 34 PASS；regenerate_harness 47 PASS</td></tr>
+      <tr><td>E2</td><td><code>caeeae1</code></td><td>幽靈化寫入 <code>attach_root_id</code>＝樹根；刪對話前清空；<code>GET /branches/orphaned</code>；<code>POST /branches/{id}/relink</code>（跨 session → 404、409／400／422、降級 exclude 自己、首則訊息接回新錨點）。另加：錨點落在分支自己的訊息之下 → 400，避免 parent 形成循環</td><td>branch_entries_harness 87 PASS（含重連後 /chat 上下文來自新錨點）；regenerate_harness 47 PASS</td></tr>
     </table>
   </section>
 
