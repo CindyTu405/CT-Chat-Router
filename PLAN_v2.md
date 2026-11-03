@@ -350,7 +350,7 @@ chat-{root_id}-{date}/
 **E5 前端：連結幽靈分支（`MessageList.jsx`、`BranchListOverlay.jsx`、`App.jsx`）**
 - App：`ghostList` state，`loadGhostList()` 打 `GET /branches/orphaned?session_id=`；在載入對話、regenerate 回傳幽靈 id、relink 成功後刷新。
 - `MessageList`（`variant === 'main'`）：選字浮動按鈕區，`ghostList.length > 0` 時「建立分支」旁多一顆「連結幽靈分支」；點了在按鈕下方展開選單（每項：標題＋`anchor_text` 前 40 字），點一項 → `onRelinkGhost(ghostId, messageId, text, start, end)`；點選單外關閉。手機放在建立分支按鈕旁（同 G5-B3 位置規則）。
-- App `handleRelinkGhost`：`POST /branches/{id}/relink`（body 見 E2）→ 成功 → `loadBranchList`、`loadGhostList`、`openBranchFromHighlight`（輸入框預填規則同既有：沒訊息才預填新的 anchor_text）；409 → `alert("這段文字已經有同範圍的分支")`；其他錯誤 → `alert("連結幽靈分支失敗")`。
+- App `handleRelinkGhost`：`POST /branches/{id}/relink`（body 見 E2）→ 成功 → `loadBranchList`、`loadGhostList`，清除選取；**不**自動開右欄（之後點高亮開啟時，輸入框預填規則同既有：沒訊息才預填新的 anchor_text）；409 → `alert("這段文字已經有同範圍的分支")`；其他錯誤 → `alert("連結幽靈分支失敗")`。
 - `BranchListOverlay`：最下面「幽靈分支」區（有幽靈才顯示），依 `created_at` 新到舊；點一項 → 關閉清單、開成 tab，不捲動、無重連按鈕。
 - 視覺變更：先不 commit。
 
@@ -358,7 +358,7 @@ chat-{root_id}-{date}/
 1. `cd frontend && npm run build` → `✓ built`
 2. `grep -c "relink" frontend/src/App.jsx` → ≥ 1；`grep -c "orphaned" frontend/src/App.jsx` → ≥ 1
 3. `git show --stat HEAD` → 只有上列 3 個檔案
-4. 瀏覽器（桌面 ≥ 768）：先對有分支的回覆按重傳造出幽靈；選主對話 AI 文字 → 出現「建立分支」與「連結幽靈分支」；點後者 → 選單列出幽靈；點一項 → 該段變高亮、右欄開該分支、內容是原本的訊息；分支列表幽靈區不再有它；再按一次選字 → 若已無幽靈只剩「建立分支」；連結時範圍與既有高亮重疊 → 舊的降到底部；分支列表最下面有幽靈區，點了開 tab 不捲動；重新整理後一致
+4. 瀏覽器（桌面 ≥ 768）：先對有分支的回覆按重傳造出幽靈；選主對話 AI 文字 → 出現「建立分支」與「連結幽靈分支」；點後者 → 選單列出幽靈；點一項 → 該段變高亮、右欄沒有自動開啟；點高亮 → 右欄開該分支、內容是原本的訊息；分支列表幽靈區不再有它；再按一次選字 → 若已無幽靈只剩「建立分支」；連結時範圍與既有高亮重疊 → 舊的降到底部；分支列表最下面有幽靈區，點了開 tab 不捲動；重新整理後一致
 5. 瀏覽器（手機 < 768）：長按選字 → 兩顆按鈕都在選取下方、不被控制棒擋住；選單可點；其餘同桌面
 
 ### F9 規格與驗收：編輯最後一則 user 訊息（2026-11-03 定稿）
