@@ -154,6 +154,8 @@ function MessageList({
   forceScrollToken=0,
   variant = 'main',
   emptyState,
+  // (G6-2) 重新生成：傳入時，「最後一則 AI 回覆」且非串流中才會顯示重新生成鈕（見下方 AI 功能列）
+  onRetry,
 }) {
   const v = MESSAGE_LIST_VARIANTS[variant] || MESSAGE_LIST_VARIANTS.main;
   const messagesEndRef = useRef(null);
@@ -575,8 +577,17 @@ function MessageList({
                   )}
 
                   {/* (G8) AI 訊息功能列：模型標籤下方，手機與電腦都常態顯示（有內容才顯示） */}
+                  {/* (G6-2) 重新生成只給「最後一則 AI 回覆」：有 id、非串流中、且父層有傳 onRetry */}
                   {msg.role === 'assistant' && !!msg.content && (
-                    <MessageActions msg={msg} className="mt-1 ml-0.5 flex" />
+                    <MessageActions
+                      msg={msg}
+                      className="mt-1 ml-0.5 flex"
+                      onRetry={
+                        onRetry && index === messages.length - 1 && msg.id && !isLoading
+                          ? onRetry
+                          : undefined
+                      }
+                    />
                   )}
                 </div>
               </div>

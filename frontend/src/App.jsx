@@ -370,6 +370,96 @@ function App() {
     }
   };
 
+  // (G6-2) 重新生成最後一則 AI 回覆（主對話）：原地清空該則、串流寫回同一個 message id
+  // 後端會把舊回覆與其下的分支做「幽靈化」，成功後：重抓分支清單（高亮消失）、關掉被幽靈化的分支 tab
+  const handleRetry = async (msg) => {
+    if (isLoading || !msg?.id) return;
+    const retryId = msg.id;
+
+    // 同 handleSend：記下這串對話，切走就停止寫入
+    const convId = messages[0]?.id ?? null;
+    activeRootIdRef.current = convId;
+    if (streamAbortRef.current) {
+      try { streamAbortRef.current.abort(); } catch { /* ignore */ }
+    }
+    const abortController = new AbortController();
+    streamAbortRef.current = abortController;
+    setIsLoading(true);
+
+    // 先清空這則回覆，讓使用者看到它重新生成
+    setMessages(prev => prev.map(m => (m.id === retryId ? { ...m, content: '', model_used: model } : m)));
+
+    try {
+      const response = await fetch(`${API_URL}/messages/${retryId}/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({ model }),
+      });
+
+      if (!response.ok) throw new Error("API Error");
+
+      // (G6-2) 後端在 header 回傳這次被幽靈化的分支 id（逗號分隔，可能為空）
+      const orphaned = (response.headers.get('X-Orphaned-Branch-Ids') || '').split(',').filter(Boolean);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let aiResponseText = "";
+      let finished = false; // 串流完整讀完（沒有中途切走）才為 true
+
+      while (true) {
+        // 使用者已切換到別的對話 → 停止讀取，別把內容寫進別人的對話
+        if (activeRootIdRef.current !== convId) {
+          try { await reader.cancel(); } catch { /* ignore */ }
+          break;
+        }
+        const { done, value } = await reader.read();
+        if (done) { finished = true; break; }
+
+        // 讀取是非同步的，回來後再確認一次畫面上還是同一串對話
+        if (activeRootIdRef.current !== convId) {
+          try { await reader.cancel(); } catch { /* ignore */ }
+          break;
+        }
+
+        aiResponseText += decoder.decode(value, { stream: true });
+
+        // (G6-2) 寫回「id 等於 retryId 的那則」，不是最後一則
+        setMessages(prev => {
+          if (activeRootIdRef.current !== convId) return prev;
+          return prev.map(m => (m.id === retryId ? { ...m, content: aiResponseText } : m));
+        });
+      }
+
+      // 串流成功結束：分支高亮重抓；被幽靈化的分支 tab 關掉（若還是同一串對話才重抓清單）
+      if (finished) {
+        if (activeRootIdRef.current === convId) loadBranchList(convId);
+        if (orphaned.length > 0) {
+          // (G6-2) 用functional update 過濾，避免覆蓋串流期間其他分支狀態的變動（不用點擊當下的快照）
+          setBranches(prev => prev.filter(b => !orphaned.includes(b.id)));
+          // 被關掉的若正是目前選中的分支，就清成 null（面板顯示「尚未開啟分支」，使用者再點選其他 tab）
+          setActiveBranchId(a => (orphaned.includes(a) ? null : a));
+        }
+      }
+    } catch (error) {
+      // 切換對話造成的 abort 不是錯誤，靜默結束
+      if (error?.name === 'AbortError' || activeRootIdRef.current !== convId) {
+        // 已被切換的對話：靜默結束
+      } else {
+        console.error("重新生成失敗:", error);
+        setMessages(prev => prev.map(m => (
+          m.id === retryId ? { ...m, content: "⚠️ 連線錯誤，請檢查後端是否啟動。" } : m
+        )));
+      }
+    } finally {
+      // 只有還是「自己這條」串流時才清掉 loading
+      if (streamAbortRef.current === abortController) {
+        streamAbortRef.current = null;
+        setIsLoading(false);
+      }
+    }
+  };
+
   // ★★★ (P2-5) 分支面板：狀態操作小工具 ★★★
   const updateBranch = useCallback((branchId, updater) => {
     setBranches(prev => prev.map(b => (b.id === branchId ? updater(b) : b)));
@@ -573,6 +663,58 @@ function App() {
     }
   };
 
+  // (G6-2) 分支面板裡重新生成一則 AI 回覆：比照 sendBranchMessage（無 abort controller），串流寫回同一個 message id
+  // 注意：這裡不處理幽靈分支的 tab 關閉與高亮重抓（規格未要求）
+  const retryBranchMessage = async (branchId, msg) => {
+    const branch = branches.find(b => b.id === branchId);
+    if (!branch || branch.isLoading || !msg?.id) return;
+    const retryId = msg.id;
+
+    // 先清空這則回覆並標示分支忙碌中
+    updateBranch(branchId, b => ({
+      ...b,
+      isLoading: true,
+      messages: b.messages.map(m => (m.id === retryId ? { ...m, content: '', model_used: model } : m)),
+    }));
+
+    try {
+      const response = await fetch(`${API_URL}/messages/${retryId}/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model }),
+      });
+
+      if (!response.ok) throw new Error("API Error");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let aiResponseText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        aiResponseText += decoder.decode(value, { stream: true });
+
+        // 寫回這條分支裡 id 等於 retryId 的那則
+        updateBranch(branchId, b => ({
+          ...b,
+          messages: b.messages.map(m => (m.id === retryId ? { ...m, content: aiResponseText } : m)),
+        }));
+      }
+    } catch (error) {
+      console.error("分支重新生成失敗:", error);
+      updateBranch(branchId, b => ({
+        ...b,
+        messages: b.messages.map(m => (
+          m.id === retryId ? { ...m, content: "⚠️ 連線錯誤，請檢查後端是否啟動。" } : m
+        )),
+      }));
+    } finally {
+      updateBranch(branchId, b => ({ ...b, isLoading: false }));
+    }
+  };
+
   // (P2-5) 關閉分支 tab；關的是當前分支就切到別支，沒有就回到空狀態
   const closeBranch = (branchId) => {
     const next = branches.filter(b => b.id !== branchId);
@@ -688,6 +830,7 @@ function App() {
           scrollContainerRef={scrollContainerRef}
           skipAutoScrollToken={restoreToken}
           forceScrollToken={sendScrollToken}
+          onRetry={handleRetry}
         />
 
         <ChatInput
@@ -720,6 +863,7 @@ function App() {
           onCloseBranch={closeBranch}
           onInputChange={(branchId, text) => updateBranch(branchId, b => ({ ...b, input: text }))}
           onSend={sendBranchMessage}
+          onRetry={retryBranchMessage}
           onToggle={() => setBranchPanelOpen(false)}
         />
       )}

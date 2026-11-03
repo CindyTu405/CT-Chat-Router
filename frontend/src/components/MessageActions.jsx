@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, RefreshCw } from 'lucide-react';
 import { copyText } from '../clipboard';
 
 // (G8) 訊息功能清單：每個功能一筆資料。功能列（MessageActions）與手機長按選單（MessageActionMenu）共用這張清單，
 // 加功能只改這裡，兩邊同時出現。
-const buildMessageActions = (msg) => [
+// (G6-2) 第二參數 onRetry：只有傳入時才會多出「重新生成」功能（放在複製的右邊）。
+//        run() 回傳 false → 不顯示 ✓ 回饋（重新生成是開始串流，不是完成動作）。
+const buildMessageActions = (msg, { onRetry } = {}) => [
   { id: 'copy', label: '複製', icon: Copy, run: () => copyText(msg.content) }, // 複製原始 markdown
+  // (G6-2) 重新生成：原地重打這則 AI 回覆（只有最後一則 AI 回覆會傳入 onRetry）
+  ...(onRetry ? [{ id: 'retry', label: '重新生成', icon: RefreshCw, run: () => { onRetry(msg); return false; } }] : []),
 ];
 
 // (G8) 一排小圖示按鈕。複製成功後該圖示變 ✓ 約 2 秒。
 // className 會接在基本排列 class 之後；預設 'flex'。傳入 className 會取代預設值，所以要顯示時請自行帶上 flex（例如 hidden md:flex）。
-export function MessageActions({ msg, className = 'flex' }) {
-  const actions = buildMessageActions(msg);
+// (G6-2) onRetry 可選：傳入才顯示「重新生成」按鈕（見 buildMessageActions）。
+export function MessageActions({ msg, className = 'flex', onRetry }) {
+  const actions = buildMessageActions(msg, { onRetry });
   const [doneId, setDoneId] = useState(null); // 剛成功執行的功能 id
   const timerRef = useRef(null);
 
@@ -19,7 +24,7 @@ export function MessageActions({ msg, className = 'flex' }) {
   useEffect(() => () => clearTimeout(timerRef.current), []);
 
   const handleClick = async (action) => {
-    const ok = await action.run();
+    const ok = await action.run(); // (G6-2) run 可能回傳非 Promise 的 false，await 一樣能正確取值
     if (!ok) return;
     setDoneId(action.id);
     clearTimeout(timerRef.current);

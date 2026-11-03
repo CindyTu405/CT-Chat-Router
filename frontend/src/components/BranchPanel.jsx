@@ -19,6 +19,7 @@ import ChatInput from './ChatInput';
 //   onCloseBranch(id)
 //   onInputChange(id, text)
 //   onSend(id)
+//   onRetry(branchId, msg)  (G6-2) 重新生成分支裡的最後一則 AI 回覆；只有最後一則 AI 回覆會觸發（見 MessageList）
 //   onToggle()        收起整個面板
 function BranchPanel({
   branches,
@@ -33,6 +34,7 @@ function BranchPanel({
   onCloseBranch,
   onInputChange,
   onSend,
+  onRetry,
   onToggle,
 }) {
   // (G3-2) 自己送出訊息時強制捲到底（比照主對話 forceScrollToken）
@@ -225,6 +227,8 @@ function BranchPanel({
         isLoading={activeBranch ? activeBranch.isLoading : false}
         setInput={() => {}}
         forceScrollToken={sendScrollToken}
+        // (G6-2) 重新生成：把分支 id 補進去，父層只需要 (branchId, msg)
+        onRetry={activeBranch && onRetry ? (msg) => onRetry(activeBranch.id, msg) : undefined}
         emptyState={
           !activeBranch ? (
             // 空狀態：沒有開啟任何分支
