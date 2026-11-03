@@ -276,7 +276,8 @@ const handleRetry = async (aiMsg, { userMsg, content } = {}) =&gt; {
     <table>
       <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
       <tr><td>F9-1</td><td><code>3a5bf6f</code></td><td><code>RegenerateRequest.content</code>（可選）；端點在 404 之後、403 之前擋空白 → 422；通過全部檢查後才改 <code>user_msg.content</code>，與幽靈化、AI 清空同一個 commit；生成用新內容；harness 新增 10a–10e</td><td>假 LLM harness 在 uvicorn 上 47 PASS、ALL PASS（2026-11-03，主 agent 重跑確認）</td></tr>
-      <tr><td>F9-2</td><td></td><td></td><td></td></tr>
+      <tr><td>F9-2</td><td><code>7013db6</code></td><td><code>buildMessageActions</code> 加 <code>Pencil</code>「編輯」（複製與重新生成之間）；<code>MessageActionMenu</code> 接 <code>onEdit</code>；新檔 <code>UserMessageEditor.jsx</code>（<code>EDITOR_MAX_LINES = 10</code>、Esc＋<code>handleEnterKey</code>、紅色警語）；<code>MessageList</code> 的 <code>editingId</code>／<code>canEdit</code>，編輯中欄位與 <code>group/bubble</code> 外層都加 <code>w-full</code>（審查時補：外層是 <code>items-end</code>，不加會縮窄）；<code>BranchPanel</code> 傳 <code>onEdit</code>；App 擴充 <code>handleRetry</code>／<code>retryBranchMessage</code> 的 <code>{ userMsg, content }</code>，被拒時還原 user</td><td>build 通過；使用者瀏覽器驗證通過（2026-11-03）</td></tr>
+      <tr><td>F9-B4</td><td><code>f5ca79e</code></td><td>BUGS B4：剛送出的 user 訊息沒有 id（G1 只補新對話第一則、分支沒補）→ 鉛筆不出現。主對話與分支都把 <code>X-User-Message-Id</code> 補到倒數第二則 user</td><td>使用者瀏覽器驗證通過（2026-11-03）</td></tr>
     </table>
   </section>
 
