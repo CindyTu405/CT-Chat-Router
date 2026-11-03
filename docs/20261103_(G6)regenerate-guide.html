@@ -255,7 +255,7 @@ const res = await fetch(`${API_URL}/messages/${msg.id}/regenerate`, { method: 'P
     <table>
       <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
       <tr><td>G6-1</td><td><code>3019e83</code></td><td>migration <code>c6d7e8f9a0b1</code>（anchor nullable、<code>is_orphaned</code>、<code>attach_root_id</code>；downgrade 遇到 anchor 為 NULL 的分支會中止，不刪資料）；<code>POST /messages/{id}/regenerate</code>；<code>/chats/roots</code> 過濾 <code>branch_id IS NULL</code>；<code>BUFFER_RETENTION_SECONDS</code>＋<code>is buf</code> 才清；CORS 曝露 <code>X-Orphaned-Branch-Ids</code>；<code>backend/dev/regenerate_harness.py</code></td><td>假 LLM harness 在 uvicorn 上 27 PASS（2026-11-03）</td></tr>
-      <tr><td>G6-2</td><td>—</td><td>前端重傳鈕</td><td>待做</td></tr>
+      <tr><td>G6-2</td><td><code>7d17035</code></td><td><code>buildMessageActions(msg, { onRetry })</code> 加 <code>RefreshCw</code>；<code>MessageList</code> 只在最後一則、有 id、非 loading 的 AI 回覆傳 <code>onRetry</code>；App <code>handleRetry</code>（主對話，沿用切換對話防護）與 <code>retryBranchMessage</code>（分支）；完成後 <code>loadBranchList</code>，依 <code>X-Orphaned-Branch-Ids</code> 以函式型更新關閉幽靈分支 tab</td><td>build 通過；使用者瀏覽器驗證通過（2026-11-03）。註：驗收時分支面板一度沒有按鈕，原因是 Vite 熱更新未換到 BranchPanel，重開前端後正常</td></tr>
     </table>
   </section>
 
