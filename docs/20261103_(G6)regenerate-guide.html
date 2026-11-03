@@ -251,7 +251,16 @@ const res = await fetch(`${API_URL}/messages/${msg.id}/regenerate`, { method: 'P
   </section>
 
   <section class="card">
-    <h2><span class="num">9</span>小練習</h2>
+    <h2><span class="num">9</span>實作紀錄</h2>
+    <table>
+      <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
+      <tr><td>G6-1</td><td><code>3019e83</code></td><td>migration <code>c6d7e8f9a0b1</code>（anchor nullable、<code>is_orphaned</code>、<code>attach_root_id</code>；downgrade 遇到 anchor 為 NULL 的分支會中止，不刪資料）；<code>POST /messages/{id}/regenerate</code>；<code>/chats/roots</code> 過濾 <code>branch_id IS NULL</code>；<code>BUFFER_RETENTION_SECONDS</code>＋<code>is buf</code> 才清；CORS 曝露 <code>X-Orphaned-Branch-Ids</code>；<code>backend/dev/regenerate_harness.py</code></td><td>假 LLM harness 在 uvicorn 上 27 PASS（2026-11-03）</td></tr>
+      <tr><td>G6-2</td><td>—</td><td>前端重傳鈕</td><td>待做</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>小練習</h2>
     <ol>
       <li>第 5 節的 <code>is</code> 改成 <code>==</code> 會怎樣？（提示：兩個 dict 內容都是 <code>{"text": "...", "done": True}</code> 時）</li>
       <li>如果幽靈化時沒有把分支第一則訊息的 <code>parent_id</code> 設成 NULL，在樹狀圖會看到什麼？</li>
