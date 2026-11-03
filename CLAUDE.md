@@ -1,7 +1,7 @@
 # CT-Chat-Router: working rules
 
 Repo root = the directory containing this file (git, branch main). All paths below are relative to it.
-Before starting work read `PLAN_v2.md`, `BUGS.md`, `BACKLOG.md`, and for Phase 3b also `HANDOVER.md` + `DESIGN_P3.md`.
+Before starting work read `PLAN_v2.md`, `BUGS.md`, `BACKLOG.md`, and for Phase 3b also `DESIGN_P3.md`. `HANDOVER.md` is stale (2026-10-22); `PLAN_v2.md` is authoritative.
 The `ct-chat-router` skill holds the project map, key code facts and known pitfalls.
 
 ## Tone
@@ -41,7 +41,7 @@ Reply in the language the user writes in.
 ## Phase 3b rules
 - Stop after EACH wave for the user's manual verification before releasing the next. Task ids are `P3b-x`.
 - B1-B4 / F7-F9 subagent tasks must read `PLAN_v2.md` + `DESIGN_P3.md` first.
-- G2-G9 are still unconfirmed requirements (see BACKLOG.md). Do NOT implement any until its details are confirmed one by one.
+- G1-G9 are all done. Any new requirement (e.g. editing the last user message) is unconfirmed until its details are discussed and confirmed one by one; do NOT implement before that.
 
 ## Visual overlap rule
 When a floating control (⋯, buttons) covers text, fade the text with a `mask-image` gradient rather than hard-clipping or adding padding. Confirm the symptom first ("covered by the button" and "clipped too early" are different bugs).
