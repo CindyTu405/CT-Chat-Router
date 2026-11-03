@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：編輯最後一則 user 訊息（F9-1 後端、F9-2 前端；規格已定，見第八節「F9 規格與驗收」；在 branch `feat/f9-edit-last-message` 完成後 merge）→ 幽靈分支 UI＋重連（B3／F9）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
+**下一步**：幽靈分支 UI＋重連（B3／F9）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → 後端 B2–B4 + 前端 F9（實作前先出教學文件）→ Phase 4。
 
 ---
 
@@ -229,7 +229,7 @@ chat-{root_id}-{date}/
 | B4 | 後端：`/chat` context 組裝（`include_main`／`context_branch_ids`、token 截斷） | ⚠️ 待重新評估 | 依賴已廢棄的 F6，需確認是否仍要做 |
 | F9 | 前端：編輯最後一則（inline regenerate）、幽靈分支重連 UI、入口管理右鍵選單 | 🔶 | 編輯最後一則拆為 F9-1／F9-2（下兩列）；幽靈分支重連 UI、入口右鍵選單（主題 5）仍待討論 |
 | F9-1 | 後端：`regenerate` body 加可選 `content`，同一個 commit 更新 user 訊息內容 | ✅ | 3a5bf6f（假 LLM harness 47 PASS，含 F9 新增 10a–10e）；規格見下方「F9 規格與驗收」；教學：`docs/20261103_(F9)edit-last-message-guide.html` |
-| F9-2 | 前端：最後一則 user 訊息 inline 編輯（主對話＋分支共用，桌面功能列＋手機長按選單） | ⏳ | 同上 |
+| F9-2 | 前端：最後一則 user 訊息 inline 編輯（主對話＋分支共用，桌面功能列＋手機長按選單） | ✅ | 7013db6（使用者瀏覽器驗證通過）；驗收中發現 BUGS B4（剛送出的 user 無 id）→ F9-B4 f5ca79e 修正 |
 | G2 | 分支地圖依錨點位置排序 | ✅ | 1013464（cherry-pick 自 1c574f1，已在瀏覽器確認） |
 | G3-1 | 共用組件抽取：`MessageList`／`ChatInput` 加 `variant`；「回到底部」改 absolute | ✅ | be02ad3（已在瀏覽器確認）；教學：`docs/20261101_(G3)shared-chat-pane-guide.html` |
 | G3-2 | 分支面板套用共用組件（含 G4 模型標籤） | ✅ | 433effe（使用者瀏覽器驗收 7 項通過；窄面板微調延後） |
