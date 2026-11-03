@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手機可見高度教學（B5）— CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 前端教學 · B5</span>
+    <h1>手機版標題與輸入框跑出畫面</h1>
+    <p>100vh 在手機上為什麼比畫面高、dvh／svh／lvh 的差別、用 @supports 保留舊瀏覽器的退路。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>症狀與目標</h2>
+    <ul>
+      <li>手機開啟對話頁：上方標題列或下方輸入框有一部分在畫面外，要把整頁捲到最頂或最底才看得完整。</li>
+      <li>目標：整頁剛好等於「目前看得到的區域」，標題與輸入框固定在畫面內，只有訊息區捲動。</li>
+      <li>鍵盤彈出時目前正常，不在這次範圍。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念一：手機的 100vh 不是「看得到的高度」</h2>
+    <p>App 最外層是 <code>h-screen</code>，也就是 <code>height: 100vh</code>。桌面上 100vh 就是視窗高度，沒有問題。</p>
+    <p>手機瀏覽器的網址列會在捲動時收起、展開。如果 100vh 跟著變，每次網址列動一下整頁就重新排版、跳動，所以瀏覽器把 100vh 固定成<strong>網址列收起時的最大高度</strong>。</p>
+    <div class="flow">
+      <div class="box">網址列顯示中<br>可見高度 ＝ 680px</div>
+      <div class="arrow">→</div>
+      <div class="box">100vh ＝ 760px<br>（收起時的高度）</div>
+      <div class="arrow">→</div>
+      <div class="box">頁面多出 80px<br>整頁可以捲動</div>
+      <div class="arrow">→</div>
+      <div class="box">標題或輸入框<br>被推出畫面</div>
+    </div>
+    <p class="muted">數字只是示意，實際差距是網址列（和部分瀏覽器的底部工具列）的高度。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念二：三種新的高度單位</h2>
+    <table>
+      <tr><th>單位</th><th>意思</th><th>網址列顯示時</th><th>網址列收起時</th></tr>
+      <tr><td><code>lvh</code>（large）</td><td>最大可見高度，等於舊的 vh</td><td>比畫面高（現在的問題）</td><td>剛好</td></tr>
+      <tr><td><code>svh</code>（small）</td><td>最小可見高度</td><td>剛好</td><td>比畫面矮，底部空一截</td></tr>
+      <tr><td><code>dvh</code>（dynamic）</td><td>目前實際可見高度，跟著網址列變</td><td>剛好</td><td>剛好</td></tr>
+    </table>
+    <p>採用 <code>dvh</code>。它會在網址列伸縮時重新排版，但我們的頁面本身不捲動（只有訊息區捲），網址列幾乎不會收起，所以不會一直跳動。</p>
+    <p class="muted">鍵盤：多數手機瀏覽器開鍵盤時不會縮小 dvh（鍵盤蓋在頁面上，瀏覽器自己把焦點捲進可見範圍）。你回報目前鍵盤正常，所以這次不動。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>概念三：舊瀏覽器的退路（@supports）</h2>
+    <p><code>dvh</code> 支援：iOS Safari 15.4+、Chrome 108+。更舊的瀏覽器看不懂 <code>100dvh</code>，會整條忽略，高度變成 auto，版面反而會壞。所以保留 <code>h-screen</code> 當底，只有支援時才換成 <code>dvh</code>：</p>
+    <pre><code><span class="cm">{/* App.jsx 最外層（現在） */}</span>
+&lt;div className="flex h-screen ..."&gt;
+
+<span class="cm">{/* 改成 */}</span>
+&lt;div className="flex h-screen supports-[height:100dvh]:h-dvh ..."&gt;</code></pre>
+    <p>Tailwind 產生的 CSS：</p>
+    <pre><code>.h-screen { height: 100vh; }
+@supports (height: 100dvh) {
+  .supports-\[height\:100dvh\]\:h-dvh { height: 100dvh; }
+}</code></pre>
+    <p class="muted"><code>@supports</code> 是 CSS 的條件判斷：瀏覽器支援括號裡的寫法才套用裡面的規則。只寫 <code>h-screen h-dvh</code> 兩個 class 不行：兩者都設定 height，哪個生效取決於 Tailwind 產生 CSS 的順序，不是 class 的書寫順序。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>其他滿版元素要不要改</h2>
+    <table>
+      <tr><th>元素</th><th>寫法</th><th>要改嗎</th></tr>
+      <tr><td>App 最外層</td><td><code>h-screen</code></td><td>要（本次唯一改動）</td></tr>
+      <tr><td>手機側邊欄、分支面板 drawer（F5）</td><td><code>fixed inset-0</code></td><td>不用：fixed＋上下都貼 0，高度由瀏覽器依可見區域決定，不經過 vh</td></tr>
+      <tr><td>分支地圖彈窗</td><td><code>fixed inset-0</code></td><td>不用，同上</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>步驟與驗證</h2>
+    <table>
+      <tr><th>步驟</th><th>改什麼</th><th>怎麼驗證</th></tr>
+      <tr><td><b>B5</b></td><td><code>frontend/src/App.jsx</code> 最外層一個 class（在 main 上做）</td><td>build；產出的 CSS 有 <code>@supports (height:100dvh)</code>；手機實機（DevTools 模擬不會出現網址列，看不到這個問題）</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>決策表</h2>
+    <table>
+      <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+      <tr><td>1</td><td>修法</td><td>最外層 <code>h-screen supports-[height:100dvh]:h-dvh</code></td><td>✅ 已定</td></tr>
+      <tr><td>2</td><td>鍵盤</td><td>目前正常，不處理</td><td>✅ 已定</td></tr>
+      <tr><td>3</td><td>git</td><td>直接在 main</td><td>✅ 已定</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>實作紀錄</h2>
+    <table>
+      <tr><th>步驟</th><th>commit</th><th>內容</th><th>驗證</th></tr>
+      <tr><td>B5</td><td></td><td></td><td></td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>小練習</h2>
+    <ol>
+      <li>在手機上把網址列捲到收起再展開，用 <code>svh</code> 的頁面會看到什麼？</li>
+      <li>如果只寫 <code>h-dvh</code>，在不支援 dvh 的舊 iPhone 上整個 App 的高度會是多少？</li>
+      <li>手機 Chrome 開啟頁面，在 console 執行 <code>[innerHeight, document.documentElement.clientHeight]</code>，比較網址列顯示與收起時的數字。</li>
+    </ol>
+  </section>
+
+</div>
+</body>
+</html>
