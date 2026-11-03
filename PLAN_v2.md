@@ -299,13 +299,14 @@ chat-{root_id}-{date}/
 
 **E1 後端：建立分支重疊降級（`backend/main.py`、新檔 `backend/dev/branch_entries_harness.py`）**
 - 抽出共用函式 `demote_overlaps(session, anchor_message_id, start, end, exclude_id=None) -> list[str]`：找同一 `anchor_message_id`、`is_orphaned=False`、`anchor_start／end` 皆非空、且 `舊.start < end and start < 舊.end` 的分支 → `anchor_start=anchor_end=None`（其他欄位不動），回傳被降級的 id。不 commit，由呼叫端統一 commit。
-- `POST /chats/{root_id}/branches`：驗證通過後，若有帶 start／end：先找「同一則、範圍完全相同、非幽靈」的分支 → 有就**不新建**，直接回傳它（`reused: true`、`demoted_ids: []`）；否則呼叫 `demote_overlaps`，再建新分支，同一個 commit。沒帶 start／end → 不檢查重疊（直接成為底部入口）。
+- `POST /chats/{root_id}/branches`：驗證通過後（含下方 offset 驗證），若有帶 start／end：先找「同一則、範圍完全相同、非幽靈」的分支 → 有就**不新建**，直接回傳它（`reused: true`、`demoted_ids: []`）；否則呼叫 `demote_overlaps`，再建新分支，同一個 commit。沒帶 start／end → 不檢查重疊（直接成為底部入口）。
+- 輸入驗證（安全性）：`anchor_start`／`anchor_end` 只帶一個 → 422；有帶時必須 `0 <= start < end <= len(anchor 訊息 content)`，否則 422（在任何寫入之前）。
 - 回傳加 `title`、`reused`、`demoted_ids`；原有欄位不變。
 - harness：沿用 `regenerate_harness.py` 的寫法（真 uvicorn、假 LLM、唯一 session_id 建資料、結束清掉；port 用 8766 避免和舊 harness 衝突）。
 
 驗收：
 1. `docker compose ps` → chat_db 為 running（不是就停下回報）
-2. `cd backend && uv run python dev/branch_entries_harness.py 2>&1 | grep -v sqlalchemy | tail -30` → 每項 PASS，最後一行 `ALL PASS`。涵蓋：無重疊 → `reused=false`、`demoted_ids=[]`；部分重疊 → 舊的 start／end 為 NULL、`anchor_message_id`／`anchor_text`／`title` 不變，新的有 offset，`demoted_ids` 含舊 id；同時重疊兩個 → 兩個都降級；相鄰（舊.end == 新.start）→ 不降級；範圍完全相同 → `reused=true`、`branch_id` 等於既有、branch 筆數不變；不同則訊息同樣 offset → 不降級；不帶 offset 建立 → 不降級任何分支；`GET /chats/{root}/branches` 中被降級者 `precise=false`
+2. `cd backend && uv run python dev/branch_entries_harness.py 2>&1 | grep -v sqlalchemy | tail -30` → 每項 PASS，最後一行 `ALL PASS`。涵蓋：無重疊 → `reused=false`、`demoted_ids=[]`；部分重疊 → 舊的 start／end 為 NULL、`anchor_message_id`／`anchor_text`／`title` 不變，新的有 offset，`demoted_ids` 含舊 id；同時重疊兩個 → 兩個都降級；相鄰（舊.end == 新.start）→ 不降級；範圍完全相同 → `reused=true`、`branch_id` 等於既有、branch 筆數不變；不同則訊息同樣 offset → 不降級；不帶 offset 建立 → 不降級任何分支；只帶 start 不帶 end、start >= end、end 超過回覆長度 → 422 且 branch 筆數不變；`GET /chats/{root}/branches` 中被降級者 `precise=false`
 3. `cd backend && uv run python dev/regenerate_harness.py 2>&1 | grep -v sqlalchemy | tail -3` → `ALL PASS`
 4. `git show --stat HEAD` → 只有 `main.py`、`branch_entries_harness.py`
 
@@ -313,11 +314,11 @@ chat-{root_id}-{date}/
 - `POST /messages/{id}/regenerate` 幽靈化時：`attach_root_id` = 該 AI 回覆所在對話的樹根 id（parent_id 為 NULL 的祖先）。
 - `DELETE /chats/{root_id}`：刪訊息前，把 `attach_root_id` 落在要刪的訊息 id 內的分支設為 NULL（同一個交易）。
 - `GET /branches/orphaned?session_id=`：`is_orphaned=True`，且（`attach_root_id` 那則訊息的 `session_id` 等於參數，或 `attach_root_id` 為 NULL 且分支首則訊息 `root_message_id` 的 `session_id` 等於參數）；依 `created_at` 新到舊；欄位 `id, title, anchor_text, root_message_id, created_at`。
-- `POST /branches/{branch_id}/relink`，body `{ root_id, anchor_message_id, anchor_start, anchor_end, anchor_text }`：分支不存在 → 404；`is_orphaned` 不是 True → 409；錨點不存在 → 404、不在 root 這棵樹 → 400（沿用 create_branch 的檢查）；同一則上有範圍完全相同的非幽靈分支 → 409（不寫入）。通過後同一個 commit：`demote_overlaps(..., exclude_id=branch_id)`；設 `anchor_message_id／anchor_start／anchor_end／anchor_text`、`is_orphaned=False`、`attach_root_id=None`、`title` 不變；分支首則訊息（若有）`parent_id` 與 `anchor_message_id` 設為新錨點；樹根 `has_branch=True`。回傳格式同建立分支（`reused=false`）。
+- `POST /branches/{branch_id}/relink`，body `{ root_id, anchor_message_id, anchor_start, anchor_end, anchor_text }`：分支不存在，或幽靈的歸屬 session（`attach_root_id` 那則訊息的 session_id；為 NULL 時用分支首則訊息的 session_id；兩者都沒有 → 視為不屬於任何人）與 `root_id` 那則訊息的 session_id 不同 → 一律 404（不洩漏是否存在，安全性）；`is_orphaned` 不是 True → 409；offset 驗證同 E1（422）；錨點不存在 → 404、不在 root 這棵樹 → 400（沿用 create_branch 的檢查）；同一則上有範圍完全相同的非幽靈分支 → 409（不寫入）。通過後同一個 commit：`demote_overlaps(..., exclude_id=branch_id)`；設 `anchor_message_id／anchor_start／anchor_end／anchor_text`、`is_orphaned=False`、`attach_root_id=None`、`title` 不變；分支首則訊息（若有）`parent_id` 與 `anchor_message_id` 設為新錨點；樹根 `has_branch=True`。回傳格式同建立分支（`reused=false`）。
 
 驗收：
 1. `docker compose ps` → chat_db running
-2. `cd backend && uv run python dev/branch_entries_harness.py 2>&1 | grep -v sqlalchemy | tail -40` → `ALL PASS`。新增涵蓋：regenerate 幽靈化後 `attach_root_id` = 樹根；`GET /branches/orphaned?session_id=<sid>` 含該幽靈，換一個 session_id → 不含；`attach_root_id` 為 NULL 但首則訊息屬於 sid 的舊資料 → 含；relink 非幽靈 → 409；錨點在別的對話 → 400；relink 成功 → 欄位如上、首則訊息 `parent_id` == 新錨點、`GET /chats/{root}/branches` 含它、`GET /branches/orphaned` 不含它；relink 時重疊 → 舊的降級；relink 範圍與既有完全相同 → 409 且幽靈欄位未變；有幽靈 `attach_root_id` 指向的對話被刪 → 200，幽靈仍存在且 `attach_root_id` 為 NULL；relink 後在分支送訊息（假 LLM）→ 收到的 history 以新錨點為上下文
+2. `cd backend && uv run python dev/branch_entries_harness.py 2>&1 | grep -v sqlalchemy | tail -40` → `ALL PASS`。新增涵蓋：regenerate 幽靈化後 `attach_root_id` = 樹根；`GET /branches/orphaned?session_id=<sid>` 含該幽靈，換一個 session_id → 不含；`attach_root_id` 為 NULL 但首則訊息屬於 sid 的舊資料 → 含；relink 非幽靈 → 409；錨點在別的對話 → 400；別的 session 的幽靈連到自己的對話 → 404 且幽靈欄位未變；offset 超出範圍或 start >= end → 422；relink 成功 → 欄位如上、首則訊息 `parent_id` == 新錨點、`GET /chats/{root}/branches` 含它、`GET /branches/orphaned` 不含它；relink 時重疊 → 舊的降級；relink 範圍與既有完全相同 → 409 且幽靈欄位未變；有幽靈 `attach_root_id` 指向的對話被刪 → 200，幽靈仍存在且 `attach_root_id` 為 NULL；relink 後在分支送訊息（假 LLM）→ 收到的 history 以新錨點為上下文
 3. `cd backend && uv run python dev/regenerate_harness.py 2>&1 | grep -v sqlalchemy | tail -3` → `ALL PASS`
 4. `git show --stat HEAD` → 只有 `main.py`、`branch_entries_harness.py`
 
