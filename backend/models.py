@@ -36,7 +36,19 @@ class Branch(SQLModel, table=True):
     root_message_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="message.id", index=True
     )
-    anchor_message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
+    # (G6-1) 改為 nullable。DESIGN_P3 主題 2 三態：
+    #   inline 錨定：anchor 非空、attach_root_id 空、is_orphaned False
+    #   底部入口：  anchor 空、attach_root_id 非空、is_orphaned False（重連後才有）
+    #   幽靈：      anchor 空、attach_root_id 空、is_orphaned True
+    anchor_message_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="message.id", index=True
+    )
+    # (G6-1) 底部入口所屬的對話 root id（DESIGN_P3 主題 2，本次只加欄位）
+    attach_root_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="message.id"
+    )
+    # (G6-1) 幽靈分支：錨點所在的 AI 回覆被原地重新生成後設為 True
+    is_orphaned: bool = Field(default=False)
     # 分支當下的錨點文字快照 (P2-9)：anchor 訊息被編輯/刪除時仍能顯示分支來源
     anchor_text: Optional[str] = None
     # 錨點在來源 markdown 的字元位移（半開區間：[start, end)），None 代表沒有精確位置
@@ -133,6 +145,11 @@ class ChatRequest(SQLModel):
 
 class UpdateTitleRequest(SQLModel):
     title: str
+
+
+# (G6-1) 重新生成最後一則 AI 回覆：只帶新模型名稱，內容固定沿用原本的 user 訊息。
+class RegenerateRequest(SQLModel):
+    model: str
 
 
 # ===== Phase 2 (P2-3)：建立分支的請求 =====

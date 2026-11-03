@@ -23,6 +23,7 @@ from models import (
     FreeModelsCache,
     Branch,
     CreateBranchRequest,
+    RegenerateRequest,
     to_utc_iso,
 )
 # from mock_llm import mock_chat_stream
@@ -36,6 +37,9 @@ from scraper import get_free_models
 # 生成在獨立的 asyncio task 裡跑，不綁 HTTP 連線；切走對話或斷線不會停止生成。
 # 注意：只存在程序記憶體，後端重啟即遺失（D：接受遺失）。
 GENERATIONS: dict[str, dict] = {}
+
+# (G6-1) 生成完成後緩衝保留秒數（讓續讀端讀到 done）。做成模組常數，harness 可以調短來測競態。
+BUFFER_RETENTION_SECONDS = 60
 
 
 async def run_generation(ai_msg_id: str, message: str, history: list, model: str):
@@ -60,8 +64,10 @@ async def run_generation(ai_msg_id: str, message: str, history: list, model: str
                 db_session.add(msg)
                 db_session.commit()
         # 寫入完成後保留緩衝一小段時間，讓正在續讀的前端能讀到 done
-        await asyncio.sleep(60)
-        GENERATIONS.pop(ai_msg_id, None)
+        await asyncio.sleep(BUFFER_RETENTION_SECONDS)
+        # (G6-1) 只清「自己放進去的那一份」：重傳時同一個 id 可能已經有新緩衝，不能誤清
+        if GENERATIONS.get(ai_msg_id) is buf:
+            GENERATIONS.pop(ai_msg_id, None)
 
 
 # 1. Lifespan (生命週期管理器)
@@ -95,7 +101,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Message-Id", "X-User-Message-Id"],
+    expose_headers=["X-Message-Id", "X-User-Message-Id", "X-Orphaned-Branch-Ids"],
 )
 
 # 模型白名單（免費 tier）：環境變數 ALLOWED_MODELS，逗號分隔。
@@ -313,6 +319,100 @@ async def stream_message(message_id: str, offset: int = 0, session: Session = De
     return StreamingResponse(iter([msg.content[max(offset, 0):]]), media_type="text/plain",
                              headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
+@app.post("/messages/{message_id}/regenerate")
+@limiter.limit("10/minute")  # (G6-1) 跟 /chat 一樣會打付費 LLM，限流同等級
+async def regenerate_message(
+    message_id: str,
+    payload: RegenerateRequest,
+    request: Request,  # slowapi 限流需要 request 參數
+    session: Session = Depends(get_session),
+):
+    """(G6-1) 原地重新生成一則 AI 回覆（只允許「最後一則」）。
+
+    檢查順序：404（不存在／非 AI）→ 403（模型不在白名單，改資料之前擋）→
+    409（還在生成中）→ 409（同一條線上還有子訊息，不是最後一則）→
+    幽靈化錨在此則上的分支 → 內容清空、換模型，一次 commit → 背景生成 → 串流。
+    """
+    # a. 404：id 格式錯、不存在、或不是 AI 回覆
+    try:
+        ai_uuid = uuid.UUID(message_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="not found")
+    ai = session.get(Message, ai_uuid)
+    if not ai or ai.role != "assistant" or ai.parent_id is None:
+        raise HTTPException(status_code=404, detail="not found")
+    user_msg = session.get(Message, ai.parent_id)
+    if user_msg is None:
+        raise HTTPException(status_code=404, detail="not found")
+
+    # b. 403：模型白名單（跟 /chat 同一個檢查，必須在任何寫入之前）
+    if not is_model_allowed(payload.model, session):
+        raise HTTPException(status_code=403, detail=f"Model '{payload.model}' is not allowed on this plan")
+
+    ai_id = str(ai.id)
+
+    # c. 409：這則還在生成中，兩個 task 寫同一則會互相覆蓋
+    buf = GENERATIONS.get(ai_id)
+    if buf is not None and not buf["done"]:
+        raise HTTPException(status_code=409, detail="still generating")
+
+    # d. 409：只允許最後一則。同一條線（branch_id 相同）上還有子訊息就拒絕。
+    #    錨在這則上的分支其訊息 branch_id 不同，不算「後面還有對話」，會在 e 被幽靈化。
+    later_child = session.exec(
+        select(Message.id).where(
+            Message.parent_id == ai.id,
+            Message.branch_id.is_not_distinct_from(ai.branch_id),
+        )
+    ).first()
+    if later_child is not None:
+        raise HTTPException(status_code=409, detail="not the last message")
+
+    # 先把會用到的欄位取出來，commit 之後 ORM 物件會過期
+    user_content = user_msg.content
+    user_parent_id = user_msg.parent_id
+
+    # e. 幽靈化：錨在這則上的分支 → anchor 清空、is_orphaned=True；分支的 root 斷開 parent 與 anchor
+    orphaned_ids: list[str] = []
+    branches = session.exec(select(Branch).where(Branch.anchor_message_id == ai.id)).all()
+    for br in branches:
+        br.anchor_message_id = None
+        br.anchor_start = None
+        br.anchor_end = None
+        br.is_orphaned = True  # anchor_text / title 保留，之後幽靈清單可顯示原本選的字
+        session.add(br)
+        orphaned_ids.append(str(br.id))
+        if br.root_message_id:
+            branch_root = session.get(Message, br.root_message_id)
+            if branch_root:
+                branch_root.parent_id = None
+                branch_root.anchor_message_id = None
+                session.add(branch_root)
+
+    # f. 內容清空、換模型，與幽靈化同一個 commit（原子）
+    ai.content = ""
+    ai.model_used = payload.model
+    session.add(ai)
+    session.commit()
+
+    # g. 重新生成用的上下文：跟當初 /chat 一樣，取 user 訊息之前的祖先鏈
+    history = get_conversation_history(session, user_parent_id)
+    history_plain = [SimpleNamespace(role=m.role, content=m.content) for m in history]
+    GENERATIONS[ai_id] = {"text": "", "done": False}
+    asyncio.create_task(run_generation(ai_id, user_content, history_plain, payload.model))
+
+    # h. 串流：與 /chat 相同，讀緩衝直到 done
+    return StreamingResponse(
+        _read_buffer(ai_id, 0),
+        media_type="text/plain",
+        headers={
+            "X-Message-Id": ai_id,
+            "X-Orphaned-Branch-Ids": ",".join(orphaned_ids),  # 可能為空字串
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
 @app.get("/chats/roots", response_model=list[MessageWithActivity])
 def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session = Depends(get_session)):
     """
@@ -322,9 +422,11 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
     """
     if sort_by == "created":
         # 簡單模式：只看根節點的建立時間
+        # (G6-1) 只列主線根（branch_id IS NULL）：幽靈分支的 root 斷開 parent 後也沒有 parent，不能被當成新對話
         statement = select(Message).where(
             Message.parent_id == None,
-            Message.session_id == session_id
+            Message.session_id == session_id,
+            Message.branch_id == None,
         ).order_by(Message.created_at.desc())
         return session.exec(statement).all()
     else:
@@ -333,8 +435,9 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
         WITH RECURSIVE chat_tree AS (
             SELECT id AS root_id, id AS msg_id, created_at
             FROM message
-            WHERE parent_id IS NULL AND session_id = :session_id
-            
+            -- (G6-1) 同 created 模式：幽靈分支的 root 不算主線根
+            WHERE parent_id IS NULL AND session_id = :session_id AND branch_id IS NULL
+
             UNION ALL
             
             SELECT ct.root_id, m.id, m.created_at
@@ -578,7 +681,7 @@ def create_branch(
 
     return {
         "branch_id": str(branch.id),
-        "anchor_message_id": str(branch.anchor_message_id),
+        "anchor_message_id": str(branch.anchor_message_id) if branch.anchor_message_id else None,
         "anchor_text": branch.anchor_text,
         "anchor_start": branch.anchor_start,
         "anchor_end": branch.anchor_end,
@@ -618,7 +721,8 @@ def list_branches(root_id: uuid.UUID, session: Session = Depends(get_session)):
         {
             "id": str(row["id"]),
             "title": row["title"],
-            "anchor_message_id": str(row["anchor_message_id"]),
+            # (G6-1) anchor 可能為 NULL（幽靈／底部入口），不可產生字串 "None"
+            "anchor_message_id": str(row["anchor_message_id"]) if row["anchor_message_id"] else None,
             "anchor_text": row["anchor_text"],
             "anchor_start": row["anchor_start"],
             "anchor_end": row["anchor_end"],
