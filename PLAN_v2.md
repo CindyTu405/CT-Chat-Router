@@ -241,7 +241,7 @@ chat-{root_id}-{date}/
 | T1 | 對話頁時間軸，效果參考 Gemini Voyager 插件（BACKLOG 第 4 項） | ⏳ 待辦 | 細節待討論；原 Phase 3 圓點列方案與已移除的左欄時間軸（F2-fix）皆不沿用 |
 | E1 | 後端：建立分支重疊降級（同一交易）、回傳 `title`／`reused`／`demoted_ids` | ✅ | e13be39（branch_entries_harness 34 PASS、regenerate_harness 47 PASS）；規格見下方「E 規格與驗收」；DESIGN_P3 主題 6 |
 | E2 | 後端：幽靈化記原對話、`GET /branches/orphaned`、`POST /branches/{id}/relink`、刪對話前清 `attach_root_id` | ✅ | caeeae1（branch_entries_harness 87 PASS、regenerate_harness 47 PASS）；取代 B3；另加：錨點在分支自己的訊息之下 → 400（避免 parent 循環） |
-| E3 | 前端：AI 回覆底部入口（橫線＋每行一個 anchor_text）、建立分支處理 `reused` | ⏳ | |
+| E3 | 前端：AI 回覆底部入口（橫線＋每行一個 anchor_text）、建立分支處理 `reused` | ✅ | 2bbf0af（使用者確認換行；含 BUGS B8 入口改可換行）；驗收中發現 B6（873a440）、B7（待討論） |
 | E4 | 前端：分支面板左上角分支列表（滿版覆蓋、依位置排序、點了開 tab＋主對話捲到位置） | ⏳ | |
 | E5 | 前端：選字時「連結幽靈分支」按鈕＋選單、列表的幽靈分支區 | ⏳ | 取代 F9 的「幽靈分支重連 UI」 |
 
