@@ -287,6 +287,26 @@ chat-{root_id}-{date}/
 5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
 6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
 
+### H 規格與驗收：fluentbranch.com HTTPS 上線（2026-11-04 定稿）
+
+教學與決定：`docs/20261104_fluentbranch-https-guide.html`。
+
+| 編號 | 負責 | 內容 | 狀態 |
+|---|---|---|---|
+| H0 | 使用者 | Cloudflare Access 臨時門禁，白名單 Email | 待做 |
+| H1 | 使用者 | 確認 Elastic IP；Origin Certificate 放到 VM `/etc/fluentbranch/tls/`；VM `.env` 加 `SESSION_SECRET_KEY` | 待做 |
+| H2 | implementer | 新增 `frontend/nginx.prod.conf`；修改 `docker-compose.prod.yml` | 進行中 |
+| H3 | 使用者 | VM 部署；切 Full (strict)；開 Always Use HTTPS | 待做 |
+| H4 | 使用者 | Security Group：443 只開 Cloudflare IP，移除 80 對外 | 待做 |
+
+H2 驗收：
+1. nginx 以測試憑證執行 `nginx -t` → `test is successful`
+2. `SESSION_SECRET_KEY=x docker compose -f docker-compose.prod.yml config --quiet` → exit 0；移除該變數 → 非 0 並提示 `SESSION_SECRET_KEY is required`
+3. uvicorn 以 `--root-path /api --forwarded-allow-ips '*'` 啟動，`GET /auth/github/login` 帶 `Host: fluentbranch.com`、`X-Forwarded-Proto: https` → 302，`redirect_uri` 為 `https://fluentbranch.com/api/auth/github/callback`
+4. `git show --stat HEAD` → 只有 `frontend/nginx.prod.conf`、`docker-compose.prod.yml`
+
+H3／H4 驗收：教學第 6 節「驗收指令」。
+
 ### F9 規格與驗收：編輯最後一則 user 訊息（2026-11-03 定稿）
 
 決策見 `docs/20261103_(F9)edit-last-message-guide.html` 決策表。取代 DESIGN_P3 主題 3（不刪訊息，原地更新）。在 branch `feat/f9-edit-last-message` 開發，F9-1、F9-2 都驗收後 merge 回 main。
