@@ -199,6 +199,32 @@ el?.scrollIntoView({ block: 'center', behavior: 'smooth' });</code></pre>
   </section>
 
   <section class="card">
+    <h2><span class="num">7b</span>概念七（B7）：跨粗體的高亮看起來像一條</h2>
+    <p>高亮是在每個 text node 內各包一個 <code>&lt;mark&gt;</code>，粗體結構才不會被切碎。所以「最佳造訪季節**： 6–8 月白天」會變成兩段：</p>
+    <pre><code>&lt;strong&gt;&lt;mark data-branch="A"&gt;最佳造訪季節&lt;/mark&gt;&lt;/strong&gt;&lt;mark data-branch="A"&gt;： 6–8 月白天&lt;/mark&gt;</code></pre>
+    <p>每段都有 <code>rounded-sm px-0.5</code>，接縫處就出現圓角和空隙；hover 也只有滑到的那段變色。</p>
+    <h3>7b.1 只在頭尾圓角：data-first／data-last</h3>
+    <p><code>rehypeHighlight</code> 走完整棵樹後，知道每個分支的第一段和最後一段，就在那兩段加屬性：</p>
+    <pre><code>第一段 → data-first    最後一段 → data-last    只有一段 → 兩個都有</code></pre>
+    <p>樣式用 Tailwind 的屬性變體，只有帶屬性的那側才圓角與留白：</p>
+    <pre><code>data-[first]:rounded-l-sm data-[first]:pl-0.5
+data-[last]:rounded-r-sm  data-[last]:pr-0.5</code></pre>
+    <h3>7b.2 整條一起 hover：事件委派＋data-hover</h3>
+    <p>CSS 的 <code>:hover</code> 只作用在滑鼠下那一個元素，沒辦法「滑到 A 的一段，A 的每一段都變色」。做法：</p>
+    <pre><code><span class="cm">// MessageList 容器上（事件委派：一個監聽器管所有 mark）</span>
+onPointerOver={(e) =&gt; {
+  const m = e.target.closest('mark[data-branch]');
+  標記容器內所有 mark[data-branch="m 的 id"] → setAttribute('data-hover', '')
+}}
+onPointerOut={...移除 data-hover...}
+
+<span class="cm">// 樣式</span>
+data-[hover]:bg-amber-300</code></pre>
+    <div class="tip"><b>為什麼不用 React state：</b>hover 改 state 會讓整串訊息的 Markdown 重新渲染，滑鼠一動就重算；直接改 DOM 屬性只動那幾個 mark。React 不管 <code>data-hover</code>（它不在 JSX 裡），重新渲染時也不會被蓋掉。</div>
+    <p class="muted">匯出 Obsidian（Phase 4）用同一套切法：每段各自變成 <code>[[分支|片段]]</code>，格式標記留在原位（DESIGN_P3 1.3）。</p>
+  </section>
+
+  <section class="card">
     <h2><span class="num">8</span>步驟與驗證</h2>
     <p>完整驗收指令在 <code>PLAN_v2.md</code>「E 規格與驗收」。每一波做完停下來等你驗證。</p>
     <table>
@@ -237,6 +263,10 @@ el?.scrollIntoView({ block: 'center', behavior: 'smooth' });</code></pre>
       <tr><td>20</td><td>重連範圍與既有高亮完全相同</td><td>409 並提示，不重連</td><td>✅ 已定</td></tr>
       <tr><td>21</td><td>幽靈清單怎麼只列自己的</td><td>幽靈化時把原對話樹根記在 <code>attach_root_id</code>，用它的 session 過濾；刪對話前先清空該欄。之後資料綁 OAuth 使用者時改用 user 過濾</td><td>✅ 已定</td></tr>
       <tr><td>22</td><td>重連成功後</td><td><b>不</b>自動開，只變成高亮；要看再點高亮</td><td>✅ 已定</td></tr>
+      <tr><td>23</td><td>完全相同範圍</td><td>開既有分支（B6 修好後才會生效）</td><td>✅ 已定</td></tr>
+      <tr><td>24</td><td>匯出時跨格式邊界</td><td>依 text node 切成多個連結，先做出來看效果（Phase 4）</td><td>✅ 已定</td></tr>
+      <tr><td>25</td><td>跨粗體高亮外觀（B7）</td><td>只在頭尾圓角留白；hover 整個分支一起變色（先做出來看效果）</td><td>✅ 已定</td></tr>
+      <tr><td>26</td><td>分支面板 tab 列</td><td>移除；一次一條，開另一條直接換；header 顯示分支標題（併入 E4）</td><td>✅ 已定</td></tr>
     </table>
   </section>
 
