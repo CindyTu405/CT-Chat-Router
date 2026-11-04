@@ -335,10 +335,11 @@ chat-{root_id}-{date}/
 4. 瀏覽器（桌面 ≥ 768）：選一段與既有高亮部分重疊的文字 → 建立分支 → 新的變 inline 高亮、舊的高亮消失並出現在該則回覆底部（橫線下一行）；點底部入口 → 右欄開舊分支；選與既有高亮完全相同的範圍 → 不新增、直接開既有分支；沒有入口的回覆沒有橫線；被降級的舊分支文字在回覆中已無任何高亮（只在底部入口）；重新整理後狀態一致；分支面板內的回覆沒有入口區
 5. 瀏覽器（手機 < 768）：底部入口顯示一行一個、點了開分支 drawer；長按 AI 選字建立分支的重疊行為同桌面
 
-**E4 前端：分支列表（新檔 `frontend/src/components/BranchListOverlay.jsx`、`BranchPanel.jsx`、`App.jsx`）**
+**E4 前端：分支列表＋移除 tab 列（新檔 `frontend/src/components/BranchListOverlay.jsx`、`BranchPanel.jsx`、`App.jsx`）**
+- 移除 `BranchPanel` 的 tab 列（2026-11-04 使用者確認）：面板只顯示 `activeBranchId` 那一條；App 的 `branches` 陣列保留當作已載入分支的快取（背景生成照常寫入，切回來接續顯示），只是不再列成 tab。header 標題改為目前分支標題（單行截斷；沒有開分支時「分支對話」），副標只顯示模型。
 - `BranchPanel` header 左上角分支圖示改成按鈕（`aria-label="分支列表"`），點了在面板內顯示 `BranchListOverlay`（`absolute inset-0` 蓋住整個面板，含 header），左上角 X 關閉。
 - 清單：App 傳入 `branchList` 與主對話 `messages`。排序鍵 `(訊息在 messages 的 index, precise ? 0 : 1, precise ? anchor_start : created_at)`；anchor 不在目前 messages 裡的排最後。每項：標題（單行）＋ `anchor_text` 前 40 字（灰色小字，單行）。
-- 點一項 → 關閉清單、`openBranchFromHighlight(branch)`，並在主對話捲動：precise → `[data-branch="id"]`，否則 → `[data-branch-entry="id"]`，`scrollIntoView({ block: 'center', behavior: 'smooth' })`。手機：分支 drawer 開著時主對話被蓋住，捲動照做（關 drawer 後看得到）。
+- 點一項 → 關閉清單、`openBranchFromHighlight(branch)`（面板換成這條），並在主對話捲動：precise → `[data-branch="id"]`，否則 → `[data-branch-entry="id"]`，`scrollIntoView({ block: 'center', behavior: 'smooth' })`。手機：分支 drawer 開著時主對話被蓋住，捲動照做（關 drawer 後看得到）。
 - 沒有分支 → 清單顯示「目前對話還沒有分支」。
 - 視覺變更：先不 commit。
 
@@ -346,8 +347,8 @@ chat-{root_id}-{date}/
 1. `cd frontend && npm run build` → `✓ built`
 2. `grep -c "BranchListOverlay" frontend/src/components/BranchPanel.jsx` → ≥ 1；`grep -c "scrollIntoView" frontend/src/App.jsx frontend/src/components/*.jsx | grep -v ":0"` → 至少一行
 3. `git show --stat HEAD` → 只有上列 3 個檔案
-4. 瀏覽器（桌面 ≥ 768）：點分支面板左上角圖示 → 清單蓋滿面板、左上角有 X；順序 = 依回覆先後、同一則內 inline 依位置、底部入口在該則 inline 之後；點一項 → 清單關閉、開成 tab、主對話捲到該高亮／入口並置中；X 關閉回到原面板；拖寬分支面板後清單仍滿版；面板寬度、拖曳把手位置不變
-5. 瀏覽器（手機 < 768）：分支 drawer 內點圖示 → 清單滿版、X 可關、點一項開 tab
+4. 瀏覽器（桌面 ≥ 768）：分支面板沒有 tab 列；header 顯示目前分支標題；點主對話另一個高亮 → 面板換成那條、標題跟著換；分支生成中切到別條再切回 → 接續顯示；點分支面板左上角圖示 → 清單蓋滿面板、左上角有 X；順序 = 依回覆先後、同一則內 inline 依位置、底部入口在該則 inline 之後；點一項 → 清單關閉、開成 tab、主對話捲到該高亮／入口並置中；X 關閉回到原面板；拖寬分支面板後清單仍滿版；面板寬度、拖曳把手位置不變
+5. 瀏覽器（手機 < 768）：分支 drawer 沒有 tab 列、header 顯示分支標題；點圖示 → 清單滿版、X 可關、點一項換成該分支
 
 **E5 前端：連結幽靈分支（`MessageList.jsx`、`BranchListOverlay.jsx`、`App.jsx`）**
 - App：`ghostList` state，`loadGhostList()` 打 `GET /branches/orphaned?session_id=`；在載入對話、regenerate 回傳幽靈 id、relink 成功後刷新。
