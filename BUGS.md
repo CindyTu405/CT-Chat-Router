@@ -82,8 +82,8 @@
 - **重現**：建立分支 A → 選一段「結尾落在 A 高亮裡」的文字（或選跟 A 完全相同的文字）→ 建立分支 B → B 直接出現在底部入口，A 仍是高亮
 - **預期**：B 成為 inline 高亮，A 降級為底部入口；完全相同的範圍 → 開既有分支 A（E 決策 4）
 - **原因（讀程式確認，尚未在瀏覽器量測）**：`rehypeHighlight` 產生的 `<mark>` 節點帶 `data-s／data-e`，但 `MessageList` 的 `mark` 元件渲染 DOM 時沒有把這兩個屬性傳下去。`selectionOffset.js` 從選取端點往上找 `data-s`，落在 mark 裡就找不到 → 回傳 null → 前端送出沒有 offset 的建立請求 → 後端依規則當成底部入口、不做重疊檢查。端點都落在 mark 外（例如選取完整包住 A）時正常，所以看起來「有時正常」。
-- **修正方向**：`mark` 元件（可點與純高亮兩種）把 `node.properties` 的 `data-s`、`data-e` 轉到 DOM 上。
-- **狀態**：待修
+- **修正**：`mark` 元件（可點與純高亮兩種）把 `node.properties` 的 `data-s`、`data-e`、`data-branch` 轉到 DOM 上。
+- **狀態**：已修（873a440），待使用者瀏覽器驗證重疊情境
 
 ---
 
@@ -102,5 +102,5 @@
 - **發現於**：E3 瀏覽器驗收（2026-11-04）
 - **現象（使用者截圖）**：底部入口與回覆內文都沒換行，AI 泡泡比畫面寬，底部出現水平捲軸。
 - **原因（讀程式＋截圖判斷）**：E3 的 `BRANCH_ENTRY_TEXT_CLASS` 用 `truncate`（`white-space: nowrap`）。泡泡寬度依內容決定，最長的入口不換行就把泡泡撐到它的全長，內文也跟著用這個寬度排版，看起來就像內文不換行。
-- **修正**：入口改成可換行（`whitespace-normal break-words`），屬於 E3 尚未 commit 的程式，併入 E3。
-- **狀態**：修正中
+- **修正**：入口改成可換行（`whitespace-normal break-words`），併入 E3。
+- **狀態**：已完成（2bbf0af，使用者確認換行正常）
