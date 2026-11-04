@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>網域與 HTTPS 教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 部署教學</span>
+    <h1>網域與 HTTPS</h1>
+    <p>Cloudflare proxy 要不要開、521 為什麼出現，以及 fluentbranch.com 上線前要改什麼。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>先看結論</h2>
+    <ul>
+      <li><strong>Proxy 維持開啟（橘色雲朵）。</strong>Cloudflare 會擋在 EC2 前面，隱藏真實 IP，也處理瀏覽器端的憑證。</li>
+      <li><strong>SSL 模式最後要用 Full (strict)，不要選 Flexible。</strong></li>
+      <li><strong>有一件事比 HTTPS 更急：</strong>目前 API 沒有登入保護，網域又讓網站更容易被發現，請先看第 2 節。</li>
+    </ul>
+    <p>2026-11-04 檢查網域的實際結果：</p>
+    <div class="table-wrap"><table>
+      <tr><th>檢查</th><th>結果</th><th>意思</th></tr>
+      <tr><td>Nameserver</td><td><code>*.ns.cloudflare.com</code></td><td>DNS 已由 Cloudflare 管理</td></tr>
+      <tr><td>A 記錄</td><td>Cloudflare 的 IP</td><td>Proxy 已開啟，外界看不到 EC2 IP</td></tr>
+      <tr><td><code>http://fluentbranch.com</code></td><td>200</td><td>網站可連，但瀏覽器到 Cloudflare 這段沒有加密</td></tr>
+      <tr><td><code>https://fluentbranch.com</code></td><td><strong>521</strong></td><td>Cloudflare 連不上 EC2 的 443</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>上線前的安全缺口</h2>
+    <div class="warn"><b>現在任何人都可能使用這個網站。</b><code>backend/main.py</code> 沒有任何路由使用 <code>get_current_user</code>，前端也沒有登入入口。這就是 <code>BACKLOG.md</code> 的 S-U1。</div>
+    <p>HTTPS 只保護傳輸過程，不會判斷「這個人能不能用」。S-U1 完成前的風險：</p>
+    <ul>
+      <li>陌生人可以呼叫 <code>/chat</code>，消耗平台的模型額度。</li>
+      <li>知道 <code>session_id</code> 或訊息 id，就能讀寫別人的對話。</li>
+      <li>新憑證會記錄在公開的憑證透明度日誌中，自動掃描器很快就會發現新網域。</li>
+    </ul>
+    <h3>S-U1 完成前的門禁</h3>
+    <div class="table-wrap"><table>
+      <tr><th>做法</th><th>優點</th><th>缺點</th></tr>
+      <tr><td><strong>Cloudflare Access（建議）</strong></td><td>進站前要先用白名單 Email 驗證，換網路也能用，不必改程式</td><td>要設定 Zero Trust；測試者都要加入白名單</td></tr>
+      <tr><td>WAF 只允許你的 IP</td><td>設定最簡單</td><td>家用 IP 會變，手機網路也容易被擋</td></tr>
+      <tr><td>維持公開</td><td>不用設定</td><td>承擔上述全部風險，<strong>不建議</strong></td></tr>
+    </table></div>
+    <p class="muted">Access 只是臨時門禁，正式對外前仍要完成 S-U1。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>Proxy 和 SSL 模式是什麼</h2>
+    <div class="flow">
+      <div class="box">瀏覽器</div>
+      <div class="arrow">→ A 段 →</div>
+      <div class="box">Cloudflare</div>
+      <div class="arrow">→ B 段 →</div>
+      <div class="box">EC2 nginx</div>
+      <div class="arrow">→</div>
+      <div class="box">FastAPI</div>
+    </div>
+    <p>開啟 proxy 後，一次連線其實分成兩段。Cloudflare 自動處理 A 段的憑證，B 段則由 SSL 模式決定：</p>
+    <div class="table-wrap"><table>
+      <tr><th>SSL 模式</th><th>B 段</th><th>評價</th></tr>
+      <tr><td>Flexible</td><td>HTTP，未加密</td><td>❌ 網址列有鎖頭，但 Cookie 和對話內容在 B 段是明文</td></tr>
+      <tr><td>Full</td><td>HTTPS，但不驗證憑證</td><td>⚠️ 有加密，但無法確認對方真的是你的伺服器</td></tr>
+      <tr><td><strong>Full (strict)</strong></td><td>HTTPS，並驗證憑證</td><td>✅ 我們要用這個</td></tr>
+    </table></div>
+    <div class="warn"><b>別用 Flexible 消除 521。</b>它能讓錯誤立刻消失，因為 Cloudflare 改走 port 80，但 B 段會變成明文，還可能和 nginx 的 HTTP 轉 HTTPS 形成無限轉址。</div>
+    <h3>Proxy 開或關</h3>
+    <div class="table-wrap"><table>
+      <tr><th></th><th>開啟（橘色雲朵）</th><th>關閉（灰色雲朵，DNS only）</th></tr>
+      <tr><td>EC2 IP</td><td>隱藏</td><td>公開</td></tr>
+      <tr><td>DDoS 防護、WAF、Access</td><td>可用</td><td>大多不可用</td></tr>
+      <tr><td>憑證</td><td>Origin Certificate，一次可設定很多年</td><td>要自己申請並自動續期，例如 Let's Encrypt</td></tr>
+      <tr><td>長時間無回應</td><td>約 100 秒會得到 524</td><td>只受你自己的 nginx 限制（目前 300 秒）</td></tr>
+    </table></div>
+    <p>商用服務需要防護，所以選開啟。串流持續有資料時不會觸發 524，要注意的是模型遲遲不回第一個字的情況。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>程式現況的問題</h2>
+    <p>以下依 repo 內的 <code>docker-compose.prod.yml</code> 判斷。VM 上的實際內容我看不到，動工前要先核對。</p>
+    <div class="table-wrap"><table>
+      <tr><th>位置</th><th>現況</th><th>後果</th></tr>
+      <tr><td><code>docker-compose.prod.yml</code></td><td>只開 <code>80:80</code></td><td>沒有 443，因此出現 521</td></tr>
+      <tr><td>同上，<code>api.environment</code></td><td>只傳入資料庫和兩把模型金鑰</td><td>下表的設定都會退回預設值</td></tr>
+      <tr><td><code>frontend/nginx.conf</code></td><td>沒有傳 <code>X-Forwarded-For</code>、<code>X-Forwarded-Proto</code></td><td>FastAPI 不知道使用者的真實 IP，也不知道原本是 HTTPS</td></tr>
+      <tr><td><code>limiter = Limiter(get_remote_address)</code></td><td>以連線來源 IP 限流</td><td>所有使用者會被算成同一個 IP，<strong>全站共用每分鐘 10 次</strong></td></tr>
+      <tr><td><code>url_for("oauth_callback")</code></td><td>nginx 拿掉了 <code>/api</code></td><td>OAuth 回呼網址會少 <code>/api</code>，也可能變成 <code>http://</code></td></tr>
+    </table></div>
+    <h3>目前退回預設值的設定</h3>
+    <div class="table-wrap"><table>
+      <tr><th>環境變數</th><th>程式預設</th><th>正式環境應該是</th></tr>
+      <tr><td><code>SESSION_SECRET_KEY</code></td><td><code>dev-secret-change-me</code>（公開在 repo）</td><td>隨機長字串，缺少時拒絕啟動</td></tr>
+      <tr><td><code>SESSION_COOKIE_SECURE</code></td><td><code>false</code></td><td><code>true</code></td></tr>
+      <tr><td><code>FRONTEND_URL</code></td><td><code>http://localhost:5173</code></td><td><code>https://fluentbranch.com</code></td></tr>
+      <tr><td><code>CORS_ORIGINS</code></td><td>localhost</td><td><code>https://fluentbranch.com</code></td></tr>
+      <tr><td><code>GOOGLE_*</code>、<code>GITHUB_*</code></td><td>未設定（OAuth 回 503）</td><td>從 VM 的 <code>.env</code> 傳入</td></tr>
+      <tr><td><code>ALLOWED_MODELS</code></td><td><code>gemini*</code></td><td>明確傳入，避免設定了卻沒生效</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>要改的程式</h2>
+    <h3>① 憑證放在 VM，不進 git</h3>
+    <p>Origin Certificate 由 Cloudflare 簽發，只有 Cloudflare 信任，正好適合 B 段。私鑰不能 commit，也不要貼到聊天中。</p>
+    <pre><code><span class="cm"># VM 上執行；憑證與私鑰的內容從 Cloudflare 後台貼入</span>
+sudo mkdir -p /etc/fluentbranch/tls
+sudo nano /etc/fluentbranch/tls/origin.pem
+sudo nano /etc/fluentbranch/tls/origin.key
+sudo chmod 600 /etc/fluentbranch/tls/origin.key</code></pre>
+
+    <h3>② docker-compose.prod.yml</h3>
+    <pre><code>api:
+  command: uvicorn main:app --host 0.0.0.0 --port 8000 --root-path /api --forwarded-allow-ips '*'
+  environment:
+    <span class="cm"># 保留原本三項，再加上：</span>
+    - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:?SESSION_SECRET_KEY is required}
+    - SESSION_COOKIE_SECURE=true
+    - FRONTEND_URL=https://fluentbranch.com
+    - CORS_ORIGINS=https://fluentbranch.com
+    - ALLOWED_MODELS=${ALLOWED_MODELS:-gemini*}
+    - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+    - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+    - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+    - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+
+web:
+  ports:
+    - "80:80"
+    - "443:443"
+  volumes:
+    - ./frontend/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+    - /etc/fluentbranch/tls:/etc/nginx/tls:ro</code></pre>
+    <div class="tip"><b>為什麼 <code>--forwarded-allow-ips '*'</code> 在這裡可以接受：</b><code>api</code> 沒有對外開 port，只有 compose 內網的 nginx 連得到它。如果 <code>api</code> 直接對外，這個設定就會讓任何人偽造 IP。</div>
+
+    <h3>③ 新增 frontend/nginx.prod.conf</h3>
+    <p>正式環境另用一個檔案，原本的 <code>nginx.conf</code> 不動，開發環境不必準備憑證。</p>
+    <pre><code><span class="cm"># 掃描 IP 或未知網域的連線，直接拒絕</span>
+server {
+    listen 443 ssl default_server;
+    ssl_reject_handshake on;
+}
+
+<span class="cm"># HTTP 和 www 都轉到正式網址</span>
+server {
+    listen 80 default_server;
+    return 301 https://fluentbranch.com$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name www.fluentbranch.com;
+    ssl_certificate     /etc/nginx/tls/origin.pem;
+    ssl_certificate_key /etc/nginx/tls/origin.key;
+    return 301 https://fluentbranch.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name fluentbranch.com;
+    ssl_certificate     /etc/nginx/tls/origin.pem;
+    ssl_certificate_key /etc/nginx/tls/origin.key;
+
+    <span class="cm"># 只相信 Cloudflare 傳來的真實 IP；清單來自 cloudflare.com/ips</span>
+    set_real_ip_from 203.0.113.0/24;   <span class="cm"># 範例，實作時換成官方完整清單</span>
+    real_ip_header CF-Connecting-IP;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://api:8000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+}</code></pre>
+    <p class="muted"><code>X-Forwarded-For</code> 故意不用 <code>$proxy_add_x_forwarded_for</code>，避免把使用者自己送來的假 IP 一起傳下去。</p>
+    <h3>④ Cloudflare 後台</h3>
+    <ol>
+      <li>SSL/TLS → Origin Server → 建立憑證，涵蓋 <code>fluentbranch.com</code> 和 <code>*.fluentbranch.com</code>。</li>
+      <li>確認新設定可用後，把模式改成 <strong>Full (strict)</strong>。</li>
+      <li>SSL/TLS → Edge Certificates → 開啟 <strong>Always Use HTTPS</strong>。</li>
+      <li>EC2 Security Group：443 只開放 Cloudflare 的 IP，移除 80 的對外開放，SSH 維持只限你的 IP。這樣別人就無法用 IP 繞過 Cloudflare。</li>
+      <li>穩定運行一陣子後再開 HSTS，先用短時間，也先不要開 Preload。HSTS 開了之後不容易退回 HTTP。</li>
+    </ol>
+    <p class="muted">Cloudflare 的選單名稱可能和這裡略有不同，以後台為準。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>步驟與驗收</h2>
+    <p>順序很重要：先讓 443 準備好，再切換模式，網站才不會中斷。</p>
+    <div class="table-wrap"><table>
+      <tr><th>編號</th><th>誰做</th><th>內容</th></tr>
+      <tr><td>H0</td><td>你</td><td>依第 2 節設定臨時門禁</td></tr>
+      <tr><td>H1</td><td>你</td><td>確認 Elastic IP、建立 Origin Certificate、放到 VM、在 VM 的 <code>.env</code> 加入 <code>SESSION_SECRET_KEY</code></td></tr>
+      <tr><td>H2</td><td>implementer</td><td>新增 <code>nginx.prod.conf</code>，修改 <code>docker-compose.prod.yml</code></td></tr>
+      <tr><td>H3</td><td>你</td><td>VM 上 <code>git pull</code> 並 <code>sudo docker compose up -d --build</code>，切換 Full (strict)，開啟 Always Use HTTPS</td></tr>
+      <tr><td>H4</td><td>你</td><td>收緊 Security Group</td></tr>
+    </table></div>
+    <h3>產生密鑰</h3>
+    <pre><code><span class="cm"># 在 VM 上執行，把結果寫進 .env 的 SESSION_SECRET_KEY，不要貼到別處</span>
+openssl rand -hex 32</code></pre>
+    <h3>驗收指令</h3>
+    <div class="table-wrap"><table>
+      <tr><th>執行</th><th>預期結果</th></tr>
+      <tr><td><code>sudo docker compose exec web nginx -t</code></td><td><code>syntax is ok</code>、<code>test is successful</code></td></tr>
+      <tr><td><code>curl -sI https://fluentbranch.com</code></td><td><code>HTTP/2 200</code>，有 <code>cf-ray</code></td></tr>
+      <tr><td><code>curl -sI http://fluentbranch.com</code></td><td><code>301</code>，轉到 <code>https://</code></td></tr>
+      <tr><td><code>curl -sI https://www.fluentbranch.com</code></td><td><code>301</code>，轉到 <code>https://fluentbranch.com/</code></td></tr>
+      <tr><td><code>curl -sI --max-time 5 http://&lt;EC2 IP&gt;</code></td><td>逾時（H4 之後）</td></tr>
+      <tr><td><code>sudo docker compose logs api --tail 5</code></td><td>出現你的真實 IP，不是 <code>172.x</code> 的容器 IP</td></tr>
+      <tr><td>瀏覽器送出一則長訊息</td><td>文字逐步出現，沒有等全部完成才一次顯示</td></tr>
+    </table></div>
+    <p class="muted">若 Access 已開啟，<code>curl</code> 會先看到 302 轉到登入頁，那是門禁正常運作；請在瀏覽器登入後驗收，或暫時放行測試。串流如果被緩衝，下一步是在串流回應加上 <code>Cache-Control: no-transform</code>，這一點還要實測才能確定。</p>
+    <h3>之後才做</h3>
+    <p>OAuth 接上前端時，Google 和 GitHub 後台的回呼網址要設為 <code>https://fluentbranch.com/api/auth/{provider}/callback</code>，並確認實際產生的網址與它完全一致。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>待確認的決定</h2>
+    <div class="table-wrap"><table>
+      <tr><th>#</th><th>問題</th><th>建議</th><th>決定</th></tr>
+      <tr><td>1</td><td>Proxy 開或關</td><td>開啟</td><td>待確認</td></tr>
+      <tr><td>2</td><td>SSL 模式與憑證</td><td>Full (strict) + Origin Certificate</td><td>待確認</td></tr>
+      <tr><td>3</td><td>主要網址</td><td><code>fluentbranch.com</code>，<code>www</code> 轉過來</td><td>待確認</td></tr>
+      <tr><td>4</td><td>S-U1 完成前如何限制存取</td><td>Cloudflare Access</td><td>待確認</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>小練習</h2>
+    <ol>
+      <li>網站出現 521，為什麼不該改成 Flexible？</li>
+      <li>只啟用 HTTPS，能阻止陌生人呼叫 <code>/chat</code> 嗎？</li>
+      <li>如果 nginx 沒傳真實 IP，10 個使用者同時聊天時限流會怎樣？</li>
+      <li>為什麼 Security Group 只開放 Cloudflare 的 IP，不是全部開放？</li>
+      <li>為什麼 Origin Certificate 不能給 DNS only 模式的網站使用？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-04</p>
+
+</div>
+</body>
+</html>
