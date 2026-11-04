@@ -316,7 +316,21 @@ openssl rand -hex 32</code></pre>
   </section>
 
   <section class="card">
-    <h2><span class="num">8</span>小練習</h2>
+    <h2><span class="num">8</span>實作紀錄</h2>
+    <p><strong>H2（<code>7be69e3</code>，2026-11-04）：</strong>新增 <code>frontend/nginx.prod.conf</code>，修改 <code>docker-compose.prod.yml</code>。第 5 節 <code>set_real_ip_from</code> 的範例已換成 Cloudflare 官方完整清單（IPv4 15 段、IPv6 7 段）。</p>
+    <div class="table-wrap"><table>
+      <tr><th>本機驗證</th><th>結果</th></tr>
+      <tr><td>nginx 配測試憑證執行 <code>nginx -t</code></td><td><code>test is successful</code></td></tr>
+      <tr><td>有 <code>SESSION_SECRET_KEY</code> 時檢查 compose</td><td>exit 0</td></tr>
+      <tr><td>缺 <code>SESSION_SECRET_KEY</code> 時檢查 compose</td><td>失敗並提示 <code>SESSION_SECRET_KEY is required</code></td></tr>
+      <tr><td>uvicorn 正式參數，請求 <code>/auth/github/login</code></td><td>302，回呼網址為 <code>https://fluentbranch.com/api/auth/github/callback</code></td></tr>
+      <tr><td>同一請求帶 <code>X-Forwarded-For</code></td><td>uvicorn 記錄的來源是該 IP</td></tr>
+    </table></div>
+    <p class="muted">尚未驗證：實際部署到 VM、經過 Cloudflare 的完整連線，以及串流是否被緩衝。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>小練習</h2>
     <ol>
       <li>網站出現 521，為什麼不該改成 Flexible？</li>
       <li>只啟用 HTTPS，能阻止陌生人呼叫 <code>/chat</code> 嗎？</li>
