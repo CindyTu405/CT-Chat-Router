@@ -97,13 +97,18 @@ const buildMarkdownComponents = (role, branchByIdRef, onOpenBranchRef) => ({
   // 點擊即可開啟對應分支。找不到對應分支時退化為不可點擊的純高亮。
   mark: ({ node, children }) => {
     // (G5-B3) 渲染時才讀 ref.current，拿到的是最新的 branchList／onOpenBranch
-    const branchId = node?.properties?.['data-branch'];
+    // (B6) hast 的 property 名稱就是 rehypeHighlight 寫入的 kebab 形式（'data-s'、'data-e'、'data-branch'），
+    // 要原樣轉到 DOM 上，selectionOffset.js 才能從選取端點往上找到 data-s／data-e
+    const props = node?.properties || {};
+    const dataAttrs = { 'data-s': props['data-s'], 'data-e': props['data-e'], 'data-branch': props['data-branch'] };
+    const branchId = props['data-branch'];
     const branch = branchId != null ? branchByIdRef?.current?.get(String(branchId)) : null;
     if (!branch) {
-      return <mark className={ANCHOR_MARK_PLAIN_CLASS}>{children}</mark>;
+      return <mark {...dataAttrs} className={ANCHOR_MARK_PLAIN_CLASS}>{children}</mark>;
     }
     return (
       <mark
+        {...dataAttrs}
         onClick={() => onOpenBranchRef?.current?.(branch)}
         title={`開啟分支：${branch.title || '新分支'}`}
         className={ANCHOR_MARK_CLASS}
