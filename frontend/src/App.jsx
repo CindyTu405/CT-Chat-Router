@@ -564,26 +564,37 @@ function App() {
 
       const data = await res.json();
 
-      // tab 標題：選取文字前 20 字（換行壓成空白）
-      const title = selectedText.replace(/\s+/g, " ").trim().slice(0, 20) || "新分支";
+      if (data.reused) {
+        // (E3) 同範圍已有分支：不建新 tab，直接開既有的那一條
+        const existing = (branchList || []).find((b) => String(b.id) === String(data.branch_id)) || {
+          id: data.branch_id,
+          anchor_message_id: data.anchor_message_id,
+          root_message_id: data.root_message_id,
+          title: data.title,
+          anchor_text: selectedText,
+        };
+        openBranchFromHighlight(existing);
+      } else {
+        // tab 標題：後端回傳的 title（與 inline 高亮、底部入口同一份）
+        const title = data.title || "新分支";
 
-      // (P2-10) 分支還不會有任何訊息：選取文字只放進輸入框，等使用者自己送出
-      // 同一條分支已經開著就只切換，不重複開 tab
-      setBranches(prev => (
-        prev.some(b => b.id === data.branch_id)
-          ? prev
-          : [...prev, {
-              id: data.branch_id,
-              anchorMessageId: data.anchor_message_id,
-              rootMessageId: data.root_message_id, // 後端回 null，等第一則訊息送出後才回填
-              title,
-              messages: [],
-              input: selectedText,
-              isLoading: false,
-            }]
-      ));
-      setActiveBranchId(data.branch_id);
-      setBranchPanelOpen(true);
+        // (P2-10) 分支還不會有任何訊息：選取文字只放進輸入框，等使用者自己送出
+        setBranches(prev => (
+          prev.some(b => b.id === data.branch_id)
+            ? prev
+            : [...prev, {
+                id: data.branch_id,
+                anchorMessageId: data.anchor_message_id,
+                rootMessageId: data.root_message_id, // 後端回 null，等第一則訊息送出後才回填
+                title,
+                messages: [],
+                input: selectedText,
+                isLoading: false,
+              }]
+        ));
+        setActiveBranchId(data.branch_id);
+        setBranchPanelOpen(true);
+      }
 
       // (P2-12) 重新抓分支清單，讓剛建立的錨點文字立刻變成可點擊的高亮
       loadBranchList(rootId);

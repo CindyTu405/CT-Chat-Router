@@ -20,10 +20,19 @@ const ANCHOR_MARK_CLASS =
   'bg-amber-200/80 text-inherit rounded-sm px-0.5 underline decoration-amber-500/70 decoration-2 underline-offset-2 cursor-pointer transition-colors hover:bg-amber-300';
 const ANCHOR_MARK_PLAIN_CLASS = 'bg-amber-200/80 text-inherit rounded-sm px-0.5';
 
+// (E3) AI 回覆底部入口的視覺常數（沒有 offset 的分支），調外觀改這裡；入口文字顏色沿用 ANCHOR_MARK_CLASS
+// 分隔橫線：包住入口列表的外層，mt-3 是與回覆內容的距離，pt-2 是橫線與第一個入口的距離，border-t 決定線的顏色與粗細
+const BRANCH_ENTRY_RULE_CLASS = 'mt-3 pt-2 border-t border-amber-300/70';
+// 入口列表間距：space-y-1 是相鄰兩個入口之間的垂直距離
+const BRANCH_ENTRY_LIST_CLASS = 'space-y-1';
+// 入口文字版型：block w-full 撐滿寬度，whitespace-normal break-words 允許換行（長文字不撐寬泡泡，B8），min-w-0 讓 flex/grid 父層可收縮，text-left 靠左，text-sm 字級
+const BRANCH_ENTRY_TEXT_CLASS = 'block w-full min-w-0 whitespace-normal break-words text-left text-sm';
+
 // (G3) 主對話／分支面板共用此組件；差異集中在這張表（main 的頭像只在桌面顯示（G7））
+// (E3) showBranchEntries：只有主對話顯示 AI 回覆底部的分支入口（分支面板內不顯示）
 const MESSAGE_LIST_VARIANTS = {
-  main: { showAvatar: true },
-  branch: { showAvatar: false },
+  main: { showAvatar: true, showBranchEntries: true },
+  branch: { showAvatar: false, showBranchEntries: false },
 };
 
 // (G8) 手機 user 氣泡長按：按住 500ms 開選單；移動超過 10px 視為捲動，取消長按
@@ -118,32 +127,6 @@ const buildMarkdownComponents = (role, branchByIdRef, onOpenBranchRef) => ({
     );
   },
 });
-
-// (P2-12) 把訊息內容依錨點文字切成「純文字片段 / 錨點片段」交錯的陣列。
-// 錨點文字在內容裡找不到就忽略，不會壞掉。
-const buildAnchorSegments = (content, anchors) => {
-  let segments = [{ type: 'text', text: content }];
-
-  (anchors || []).forEach((branch) => {
-    const needle = branch?.anchor_text;
-    if (!needle) return;
-
-    const next = [];
-    segments.forEach((seg) => {
-      if (seg.type !== 'text' || !seg.text.includes(needle)) {
-        next.push(seg);
-        return;
-      }
-      seg.text.split(needle).forEach((piece, i) => {
-        if (i > 0) next.push({ type: 'anchor', text: needle, branch });
-        if (piece) next.push({ type: 'text', text: piece });
-      });
-    });
-    segments = next;
-  });
-
-  return segments;
-};
 
 // 中間對話視窗：空狀態提示、訊息氣泡（Markdown／程式碼高亮）、選取文字建立分支
 // (G3) variant：'main'（預設，顯示頭像）或 'branch'（無頭像）；由 MESSAGE_LIST_VARIANTS 決定差異。
@@ -369,6 +352,46 @@ function MessageList({
     </ReactMarkdown>
   );
 
+  // (E3) message id → 掛在這則 AI 回覆底部的入口（precise === false），依 created_at 排序
+  const entriesByMessageId = useMemo(() => {
+    const map = new Map();
+    (branchList || []).forEach((branch) => {
+      if (!branch?.anchor_message_id || branch.precise !== false) return;
+      const list = map.get(branch.anchor_message_id);
+      if (list) list.push(branch);
+      else map.set(branch.anchor_message_id, [branch]);
+    });
+    map.forEach((list) =>
+      list.sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0))
+    );
+    return map;
+  }, [branchList]);
+
+  // (E3) AI 回覆底部入口：只在主對話、有 id 的 AI 回覆、且掛有入口時才出現；點擊同 inline 高亮開分支
+  const renderBranchEntries = (msg) => {
+    if (!v.showBranchEntries || msg.role !== 'assistant' || !msg.id) return null;
+    const entries = entriesByMessageId.get(msg.id);
+    if (!entries?.length) return null;
+    return (
+      <div className={BRANCH_ENTRY_RULE_CLASS}>
+        <div className={BRANCH_ENTRY_LIST_CLASS}>
+          {entries.map((branch) => (
+            <button
+              key={branch.id}
+              type="button"
+              data-branch-entry={branch.id}
+              onClick={() => onOpenBranch(branch)}
+              title={`開啟分支：${branch.title || '新分支'}`}
+              className={`${ANCHOR_MARK_CLASS} ${BRANCH_ENTRY_TEXT_CLASS}`}
+            >
+              {branch.anchor_text || branch.title || '新分支'}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   // (F8) 有 offset 的錨點：整段 Markdown 只渲染一次，由 rehypeHighlight 在 AST 內精準包 mark。
   // 這取代了舊的「依 anchor_text 切段」做法：切段會打斷段落結構（高亮自成一行），
   // 且相同文字會全部命中。
@@ -395,32 +418,8 @@ function MessageList({
       );
     }
 
-    // 舊分支（沒有 offset，例如選到 code block）：退回原本的切段渲染
-    const segments = buildAnchorSegments(msg.content, anchors);
-    const hasAnchor = segments.some((seg) => seg.type === 'anchor');
-
-    if (!hasAnchor) {
-      return renderMarkdown(msg.content, msg.role);
-    }
-
-    return (
-      <div>
-        {segments.map((seg, i) =>
-          seg.type === 'anchor' ? (
-            <mark
-              key={`a-${i}`}
-              onClick={() => onOpenBranch(seg.branch)}
-              title={`開啟分支：${seg.branch.title || '新分支'}`}
-              className={ANCHOR_MARK_CLASS}
-            >
-              {seg.text}
-            </mark>
-          ) : (
-            renderMarkdown(seg.text, msg.role, `t-${i}`)
-          )
-        )}
-      </div>
-    );
+    // (E3) 沒有 offset 的分支不在內容裡高亮（不再用 anchor_text 子字串切段），只出現在底部入口
+    return renderMarkdown(msg.content, msg.role);
   };
 
   // (F9-2) 正在編輯哪一則 user 訊息（id）；null = 沒有在編輯
@@ -602,6 +601,8 @@ function MessageList({
                           <span className="animate-pulse text-gray-400">Thinking...</span>
                         )}
                       </div>
+                      {/* (E3) AI 回覆底部的分支入口（橫線＋每行一個），只在主對話顯示 */}
+                      {renderBranchEntries(msg)}
                     </div>
                     )}
 
