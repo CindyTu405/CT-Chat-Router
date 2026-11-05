@@ -27,6 +27,7 @@ sys.path.insert(0, BACKEND_DIR)
 import uvicorn  # noqa: E402
 from authlib.integrations.base_client import OAuthError  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
+from sqlalchemy.exc import IntegrityError  # noqa: E402
 from sqlmodel import Session, select  # noqa: E402
 
 import auth_routes  # noqa: E402
@@ -42,6 +43,7 @@ BASE = f"http://127.0.0.1:{PORT}"
 
 UNIQ = uuid.uuid4().hex[:12]
 FAKE_SUB = int(UNIQ, 16)
+DIRECT_SUB = f"{FAKE_SUB}-direct"
 FAKE_EMAIL = f"auth-harness-{UNIQ}@example.invalid"
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -190,11 +192,21 @@ def run_endpoint_checks():
     check("me: bogus token -> 401", hit("GET", "/auth/me", "made-up-token").status_code == 401)
 
     with Session(engine) as s:
-        user = User(oauth_provider="github", oauth_sub=str(FAKE_SUB), email=FAKE_EMAIL)
+        user = User(oauth_provider="github", oauth_sub=DIRECT_SUB, email=FAKE_EMAIL)
         s.add(user)
         s.commit()
         s.refresh(user)
         uid = user.id
+    with Session(engine) as s2:
+        try:
+            s2.add(User(oauth_provider="github", oauth_sub=DIRECT_SUB, email=FAKE_EMAIL))
+            s2.commit()
+            dup_rejected = False
+        except IntegrityError:
+            s2.rollback()
+            dup_rejected = True
+    check("duplicate (oauth_provider, oauth_sub) -> IntegrityError", dup_rejected)
+    with Session(engine) as s:
         exp_token = auth_routes.generate_session_token()
         s.add(AuthSession(user_id=uid, token_hash=auth_routes.hash_token(exp_token),
                           expires_at=auth_routes.utcnow_naive() - timedelta(minutes=1)))
@@ -283,7 +295,8 @@ def cleanup():
     try:
         with Session(engine) as s:
             users = s.exec(select(User).where(
-                User.oauth_provider == "github", User.oauth_sub == str(FAKE_SUB))).all()
+                User.oauth_provider == "github",
+                User.oauth_sub.in_([str(FAKE_SUB), DIRECT_SUB]))).all()
             for u in users:
                 for a in s.exec(select(AuthSession).where(AuthSession.user_id == u.id)).all():
                     s.delete(a)
