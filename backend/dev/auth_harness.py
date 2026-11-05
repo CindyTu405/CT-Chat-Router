@@ -676,6 +676,232 @@ def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str)
                                                                           if v[-1] == uid_b})
 
 
+# ===== (S-U1-5) 認領腳本 =====
+
+CLAIM_SID = f"claimtest-{UNIQ}"
+CLAIM_SID_OTHER = f"claimtest-{UNIQ}-other"
+CLAIM_SID_MISMATCH = f"claimtest-{UNIQ}-mismatch"
+
+
+def cmsg(sid: str, user_id, parent_id=None, branch_id=None, role: str = "user") -> uuid.UUID:
+    """建立測試訊息（指定 session_id）。一律登記到清理清單。"""
+    with Session(engine) as s:
+        m = Message(role=role, content="claim test", session_id=sid, user_id=user_id,
+                    parent_id=parent_id, branch_id=branch_id)
+        s.add(m)
+        s.commit()
+        s.refresh(m)
+        NULL_MSG_IDS.append(m.id)
+        return m.id
+
+
+def cbranch(user_id=None, anchor=None, root=None, attach=None, orphaned: bool = False) -> uuid.UUID:
+    with Session(engine) as s:
+        b = Branch(title="claim test", anchor_text="x", user_id=user_id, anchor_message_id=anchor,
+                   root_message_id=root, attach_root_id=attach, is_orphaned=orphaned)
+        s.add(b)
+        s.commit()
+        s.refresh(b)
+        NULL_BRANCH_IDS.append(b.id)
+        return b.id
+
+
+def set_root(branch_id, msg_id):
+    with Session(engine) as s:
+        b = s.get(Branch, branch_id)
+        b.root_message_id = msg_id
+        s.add(b)
+        s.commit()
+
+
+def owners(msg_ids: list, branch_ids: list) -> tuple[dict, dict]:
+    """(message id -> user_id 或 'MISSING'), (branch id -> user_id 或 'MISSING')"""
+    with Session(engine) as s:
+        mo = {}
+        for i in msg_ids:
+            m = s.get(Message, i)
+            mo[i] = m.user_id if m is not None else "MISSING"
+        bo = {}
+        for i in branch_ids:
+            b = s.get(Branch, i)
+            bo[i] = b.user_id if b is not None else "MISSING"
+        return mo, bo
+
+
+def claim_cli(*args: str) -> tuple[int, str]:
+    r = subprocess.run([sys.executable, "claim_legacy_data.py", *args], cwd=BACKEND_DIR,
+                       capture_output=True, text=True, timeout=120)
+    return r.returncode, r.stdout + r.stderr
+
+
+def claimed_nums(out: str) -> tuple[int, int]:
+    m = re.search(r"messages claimed: (\d+)", out)
+    b = re.search(r"branches claimed: (\d+)", out)
+    return (int(m.group(1)) if m else -1, int(b.group(1)) if b else -1)
+
+
+def real_ownerless_branches() -> int:
+    """唯讀：資料庫中 user_id NULL 且三個來源都是 NULL 的分支數。"""
+    with Session(engine) as s:
+        return int(s.execute(sa_text(
+            "SELECT count(*) FROM branch WHERE user_id IS NULL AND anchor_message_id IS NULL "
+            "AND root_message_id IS NULL AND attach_root_id IS NULL")).scalar())
+
+
+def run_claim_checks():
+    import claim_legacy_data as cld
+
+    real_ownerless = real_ownerless_branches()
+    print(f"info: real ownerless branches in DB before claim tests: {real_ownerless}")
+    uid_t, _ = make_user("claimT")
+    uid_o, _ = make_user("claimO")
+    email_t = f"iso-claimT-{UNIQ}@example.invalid"
+    argv = ["--provider", "github", "--email", email_t, "--session-id", CLAIM_SID]
+
+    # ---- 資料 ----
+    R = cmsg(CLAIM_SID, None)
+    A = cmsg(CLAIM_SID, None, parent_id=R, role="assistant")
+    b_inline = cbranch(anchor=A)
+    BM1 = cmsg(CLAIM_SID, None, parent_id=A, branch_id=b_inline)
+    set_root(b_inline, BM1)
+    b_bottom = cbranch(anchor=A)           # 錨點有、沒有 anchor_start/end
+    BM2 = cmsg(CLAIM_SID, None, parent_id=A, branch_id=b_bottom)
+    set_root(b_bottom, BM2)
+    b_ghost_attach = cbranch(attach=R, orphaned=True)
+    b_ghost_root = cbranch(orphaned=True)
+    BM3 = cmsg(CLAIM_SID, None, parent_id=R, branch_id=b_ghost_root)
+    set_root(b_ghost_root, BM3)
+    b_empty = cbranch(anchor=A)            # 沒有首則訊息
+    mine_msgs = [R, A, BM1, BM2, BM3]
+    mine_br = [b_inline, b_bottom, b_ghost_attach, b_ghost_root, b_empty]
+
+    # 已歸他人（同 session）與別的 session
+    OM = cmsg(CLAIM_SID, uid_o)
+    OB = cbranch(user_id=uid_o, anchor=OM)
+    X = cbranch(anchor=OM)                 # NULL 分支，錨點訊息屬於他人 -> 不能被認領
+    SM = cmsg(CLAIM_SID_OTHER, None)
+    SB = cbranch(anchor=SM)                # 別的 session 的 NULL 分支
+    others_msgs = [OM, SM]
+    others_br = [OB, X, SB]
+    all_msgs = mine_msgs + others_msgs
+    all_br = mine_br + others_br
+
+    # ---- 試算不寫入 ----
+    before = owners(all_msgs, all_br)
+    rc, out = claim_cli(*argv)
+    check("claim: dry run exit 0", rc == 0, f"{rc} {out[-300:]}")
+    check("claim: dry run prints DRY RUN: no changes", "DRY RUN: no changes" in out, out[-300:])
+    check("claim: dry run reports 5 messages / 5 branches", claimed_nums(out) == (5, 5), str(claimed_nums(out)))
+    check("claim: dry run writes nothing", owners(all_msgs, all_br) == before)
+
+    # ---- --apply ----
+    rc, out = claim_cli(*argv, "--apply")
+    check("claim: apply exit 0", rc == 0, f"{rc} {out[-300:]}")
+    check("claim: apply reports 5 messages / 5 branches", claimed_nums(out) == (5, 5), str(claimed_nums(out)))
+    mo, bo = owners(all_msgs, all_br)
+    check("claim: all session messages owned by target", all(mo[i] == uid_t for i in mine_msgs), str(mo))
+    for name, bid in [("inline-anchored", b_inline), ("bottom-entry (anchor, no offsets)", b_bottom),
+                      ("ghost with attach_root_id", b_ghost_attach), ("ghost with only root_message_id", b_ghost_root),
+                      ("empty (anchor set, no root message)", b_empty)]:
+        check(f"claim: {name} branch owned by target", bo[bid] == uid_t, str(bo[bid]))
+    check("claim: other user's message unchanged", mo[OM] == uid_o)
+    check("claim: other user's branch unchanged", bo[OB] == uid_o)
+    check("claim: NULL branch anchored on other user's message not claimed", bo[X] is None, str(bo[X]))
+    check("claim: other session's message unchanged (NULL)", mo[SM] is None)
+    check("claim: other session's branch unchanged (NULL)", bo[SB] is None)
+    after_apply = (mo, bo)
+
+    # ---- 冪等 ----
+    rc, out = claim_cli(*argv, "--apply")
+    check("claim: re-run exit 0", rc == 0, f"{rc} {out[-300:]}")
+    check("claim: re-run claims 0 / 0", claimed_nums(out) == (0, 0), str(claimed_nums(out)))
+    check("claim: re-run state identical", owners(all_msgs, all_br) == after_apply)
+
+    # ---- 使用者查找失敗 ----
+    rc, out = claim_cli("--provider", "github", "--email", f"nobody-{UNIQ}@example.invalid",
+                        "--session-id", CLAIM_SID)
+    check("claim: unknown email -> non-zero", rc == 1, f"{rc} {out[-200:]}")
+    dup_email = f"claimdup-{UNIQ}@example.invalid"
+    with Session(engine) as s:
+        for n in (1, 2):
+            u = User(oauth_provider="github", oauth_sub=f"claimdup{n}-{UNIQ}", email=dup_email)
+            s.add(u)
+            s.commit()
+            s.refresh(u)
+            ISO_UIDS.append(u.id)
+    mo0, bo0 = owners(all_msgs, all_br)
+    rc, out = claim_cli("--provider", "github", "--email", dup_email, "--session-id", CLAIM_SID_OTHER, "--apply")
+    check("claim: duplicated provider+email -> non-zero", rc == 1, f"{rc} {out[-200:]}")
+    check("claim: duplicated provider+email wrote nothing", owners(all_msgs, all_br) == (mo0, bo0))
+
+    # ---- --delete-ownerless-branches ----
+    OL1 = cbranch()
+    OL2 = cbranch()
+    OL3 = cbranch()
+    cmsg(CLAIM_SID_OTHER, None, branch_id=OL3)   # OL3 仍被訊息參照
+    rc, out = claim_cli(*argv, "--delete-ownerless-branches")
+    check("claim: delete flag without --apply -> exit 2", rc == 2, f"{rc} {out[-200:]}")
+    check("claim: delete flag without --apply deleted nothing",
+          all(v != "MISSING" for v in owners([], [OL1, OL2, OL3])[1].values()))
+    # 旗標作用於整個資料庫，所以不經 CLI 執行：in-process 呼叫 claim()，限制 branch ids，最後 rollback。
+    with Session(engine) as s:
+        t = s.get(User, uid_t)
+        rep = cld.claim(s, t, [CLAIM_SID], delete_ownerless=True, only_branch_ids=[OL1, OL3])
+        check("claim: delete restricted deleted exactly 1", rep["ownerless_deleted"] == 1, str(rep))
+        check("claim: delete skipped the referenced branch", rep["ownerless_skipped_referenced"] == 1, str(rep))
+        check("claim: delete left OL2 and real ownerless alone",
+              rep["branches_ownerless"] == real_ownerless + 2, f"{rep['branches_ownerless']} vs {real_ownerless}+2")
+        gone_in_tx = s.get(Branch, OL1) is None
+        s.rollback()
+    check("claim: OL1 deleted inside the transaction", gone_in_tx)
+    check("claim: rollback restores OL1/OL2/OL3",
+          all(v != "MISSING" for v in owners([], [OL1, OL2, OL3])[1].values()))
+    check("claim: real ownerless count unchanged after delete test",
+          real_ownerless_branches() == real_ownerless + 3,
+          f"{real_ownerless_branches()} vs {real_ownerless}+3")
+
+    # ---- 父子 / 分支擁有者不一致 -> 3 並完整 rollback ----
+    Z = cmsg(CLAIM_SID_MISMATCH, None)
+    P = cmsg(CLAIM_SID_MISMATCH + "-p", uid_o)
+    C = cmsg(CLAIM_SID_MISMATCH + "-c", uid_t, parent_id=P)
+    before = owners([Z], [])
+    try:
+        rc, out = claim_cli("--provider", "github", "--email", email_t, "--session-id", CLAIM_SID_MISMATCH, "--apply")
+        check("claim: parent/child mismatch -> exit 3", rc == 3, f"{rc} {out[-300:]}")
+        check("claim: parent/child mismatch rolled back (nothing claimed)", owners([Z], []) == before)
+    finally:
+        with Session(engine) as s:
+            for i in (C, P):
+                m = s.get(Message, i)
+                if m is not None:
+                    m.parent_id = None
+                    s.add(m)
+            s.commit()
+            for i in (C, P):
+                m = s.get(Message, i)
+                if m is not None:
+                    s.delete(m)
+            s.commit()
+    PX = cmsg(CLAIM_SID_MISMATCH + "-x", uid_o)
+    BX = cbranch(user_id=uid_t, anchor=PX)
+    try:
+        rc, out = claim_cli("--provider", "github", "--email", email_t, "--session-id", CLAIM_SID_MISMATCH, "--apply")
+        check("claim: target branch with other-owned anchor message -> exit 3", rc == 3, f"{rc} {out[-300:]}")
+        check("claim: branch mismatch rolled back", owners([Z], []) == before)
+    finally:
+        with Session(engine) as s:
+            b = s.get(Branch, BX)
+            if b is not None:
+                s.delete(b)
+            s.commit()
+            m = s.get(Message, PX)
+            if m is not None:
+                s.delete(m)
+            s.commit()
+    rc, out = claim_cli("--provider", "github", "--email", email_t, "--session-id", CLAIM_SID_MISMATCH)
+    check("claim: after removing mismatch rows, dry run passes", rc == 0, f"{rc} {out[-300:]}")
+
+
 def cleanup_iso():
     """刪除本腳本在隔離測試建立的資料：訊息、分支（含 user_id 為 NULL 的）、auth_session、使用者。"""
     try:
@@ -763,14 +989,25 @@ def start_server() -> uvicorn.Server:
     return server
 
 
+def db_totals() -> tuple:
+    with Session(engine) as s:
+        return tuple(int(s.execute(sa_text(q)).scalar()) for q in (
+            "SELECT count(*) FROM message", "SELECT count(*) FROM branch",
+            "SELECT count(*) FROM message WHERE user_id IS NULL",
+            "SELECT count(*) FROM branch WHERE user_id IS NULL"))
+
+
 def main_entry() -> int:
     server = None
+    totals0 = db_totals()
+    print(f"info: baseline messages/branches/null-messages/null-branches = {totals0}")
     try:
         server = start_server()
         run_login_flow()
         run_endpoint_checks()
         run_route_enumeration()
         run_isolation_checks()
+        run_claim_checks()
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -781,6 +1018,9 @@ def main_entry() -> int:
         GATE.set()
         cleanup_iso()
         cleanup()
+        totals1 = db_totals()
+        check("final: real rows unchanged (message/branch/NULL-message/NULL-branch counts)",
+              totals1 == totals0, f"{totals0} -> {totals1}")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     failed = [n for n, ok, _ in RESULTS if not ok]
