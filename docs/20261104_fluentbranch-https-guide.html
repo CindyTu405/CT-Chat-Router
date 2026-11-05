@@ -326,7 +326,16 @@ openssl rand -hex 32</code></pre>
       <tr><td>uvicorn 正式參數，請求 <code>/auth/github/login</code></td><td>302，回呼網址為 <code>https://fluentbranch.com/api/auth/github/callback</code></td></tr>
       <tr><td>同一請求帶 <code>X-Forwarded-For</code></td><td>uvicorn 記錄的來源是該 IP</td></tr>
     </table></div>
-    <p class="muted">尚未驗證：實際部署到 VM、經過 Cloudflare 的完整連線，以及串流是否被緩衝。</p>
+    <p><strong>H0、H1、H3、H4（2026-11-05）：</strong>Access 涵蓋主網址與 <code>www</code>；已部署到 VM，SSL 模式為 Full (strict)；Security Group 的 443 只開放 Cloudflare IPv4 範圍，並移除 80 的對外開放。</p>
+    <div class="table-wrap"><table>
+      <tr><th>上線驗證</th><th>結果</th></tr>
+      <tr><td>未登入連主網址、<code>www</code>（外部 curl）</td><td>302 到 Access 登入頁</td></tr>
+      <tr><td><code>http://fluentbranch.com</code>（外部 curl）</td><td>301 到 HTTPS</td></tr>
+      <tr><td>登入後開網站並送出長訊息（使用者）</td><td>通過</td></tr>
+      <tr><td><code>logs api</code> 的來源 IP（使用者）</td><td>使用者的公開 IPv6，不是容器 IP</td></tr>
+      <tr><td>以 EC2 IP 直連 443（使用者）</td><td>通過，無法繞過 Cloudflare</td></tr>
+    </table></div>
+    <p class="muted">尚未驗證：OAuth 正式登入流程，以及拿掉 Access 後 <code>www</code> 的 301。Access 只是臨時門禁，S-U1 仍未完成。</p>
   </section>
 
   <section class="card">
