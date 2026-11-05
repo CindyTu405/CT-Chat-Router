@@ -9,7 +9,7 @@ import { scrollToMessage } from './scrollUtils';
 
 import { apiFetch } from './api';
 
-function App() {
+function App({ user }) {
   // 清掉舊版的匿名 session id（已改用登入 cookie），只在掛載時執行一次
   useEffect(() => {
     try { localStorage.removeItem('chat_session_id'); } catch { /* 忽略 */ }
@@ -834,6 +834,7 @@ function App() {
     <div className="flex h-screen supports-[height:100dvh]:h-dvh bg-white text-gray-800 font-sans overflow-hidden">
       
       <Sidebar
+        user={user}
         sidebarOpen={sidebarOpen}
         activeChatId={messages[0]?.id ?? null}
         historyList={historyList}
