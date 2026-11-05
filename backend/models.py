@@ -145,7 +145,6 @@ class ChatRequest(SQLModel):
     message: str
     parent_id: Optional[uuid.UUID] = None
     model: str = "gpt-3.5-turbo"
-    session_id: str = "default"
     # --- Phase 2：分支 (Branch) ---
     # 這次對話要寫入哪條分支 (None = 不歸屬分支，維持舊行為)
     branch_id: Optional[uuid.UUID] = None

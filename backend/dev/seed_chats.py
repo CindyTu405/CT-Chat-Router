@@ -6,11 +6,12 @@
 
 用法：
     # 一般從 repo 根目錄或 backend/ 目錄執行皆可
-    python backend/dev/seed_chats.py --session-id <你的 session id>
+    python backend/dev/seed_chats.py --provider github --email you@example.com
 
-    # session id 從瀏覽器 devtools 取得：localStorage.chat_session_id
+    # 使用者以 (provider, email) 尋找；找不到就用 upsert_user 建立一個
+    # （oauth_sub 為 "seed-<provider>-<email>"，只供本機開發資料使用）。
 
-    # 清除所有 [SEED] 開頭的測試資料（不分 session）
+    # 清除所有 [SEED] 開頭的測試資料（不分使用者）
     python backend/dev/seed_chats.py --cleanup
 
 說明：
@@ -33,9 +34,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import text  # noqa: E402
-from sqlmodel import Session, create_engine  # noqa: E402
+from sqlmodel import Session, create_engine, select  # noqa: E402
 
-from models import Message  # noqa: E402
+from auth_routes import upsert_user  # noqa: E402
+from models import Message, User  # noqa: E402
 from database import DATABASE_URL  # noqa: E402
 
 SEED_PREFIX = "[SEED]"
@@ -120,7 +122,22 @@ def _offset_to_dt(spec: dict, minute: int = 0) -> datetime:
 # ---------------------------------------------------------------------------
 # 写入 / 清除
 # ---------------------------------------------------------------------------
-def seed(engine, session_id: str) -> None:
+def get_or_create_user(engine, provider: str, email: str) -> uuid.UUID:
+    """依 (oauth_provider, email) 找使用者；找不到就用 upsert_user 建立（開發用）。"""
+    with Session(engine) as session:
+        users = session.exec(
+            select(User).where(User.oauth_provider == provider, User.email == email)
+        ).all()
+        if len(users) > 1:
+            raise SystemExit(f"錯誤：找到多位使用者符合 provider={provider} email={email}")
+        if users:
+            return users[0].id
+        user = upsert_user(session, provider=provider, sub=f"seed-{provider}-{email}", email=email)
+        print(f"[seed] 已建立使用者 provider={provider} email={email}")
+        return user.id
+
+
+def seed(engine, user_id: uuid.UUID) -> None:
     """写入 [SEED] 测试对话（先清掉旧的，避免重复执行累积）。"""
     cleanup(engine)
 
@@ -136,7 +153,7 @@ def seed(engine, session_id: str) -> None:
                 content=f"{SEED_PREFIX} {question}",
                 role="user",
                 title=f"{SEED_PREFIX} {title}",
-                session_id=session_id,
+                user_id=user_id,
                 parent_id=None,
                 model_used=None,
                 created_at=created_at,
@@ -153,7 +170,7 @@ def seed(engine, session_id: str) -> None:
                 content=f"{SEED_PREFIX} {answer}",
                 role="assistant",
                 title=None,
-                session_id=session_id,
+                user_id=user_id,
                 parent_id=root_id,
                 model_used="seed-model",
                 created_at=reply_at,
@@ -164,7 +181,7 @@ def seed(engine, session_id: str) -> None:
 
         session.commit()
         print(f"[seed] 写入完成：{chat_count} 个对话 / {msg_count} 则訊息"
-              f"（session_id={session_id}）")
+              f"（user_id={user_id}）")
 
 
 def cleanup(engine) -> None:
@@ -219,18 +236,23 @@ def main() -> int:
         description="[T1] 开发用测试资料脚本：写入/清除 [SEED] 开头的跨日期对话",
     )
     parser.add_argument(
-        "--session-id",
-        help="要写入的 session id（浏览器 localStorage.chat_session_id）",
+        "--provider",
+        choices=("google", "github"),
+        help="要写入的使用者的登入方式（oauth_provider）",
+    )
+    parser.add_argument(
+        "--email",
+        help="要写入的使用者的 email（找不到时会建立该使用者）",
     )
     parser.add_argument(
         "--cleanup",
         action="store_true",
-        help="只删除所有 [SEED] 开头的资料后退出（不需 session-id）",
+        help="只删除所有 [SEED] 开头的资料后退出（不需 --provider/--email）",
     )
     args = parser.parse_args()
 
-    if not args.cleanup and not args.session_id:
-        parser.error("一般模式需要 --session-id；仅清除资料请使用 --cleanup")
+    if not args.cleanup and not (args.provider and args.email):
+        parser.error("一般模式需要 --provider 与 --email；仅清除资料请使用 --cleanup")
 
     engine = create_engine(DATABASE_URL, echo=False)
 
@@ -247,7 +269,8 @@ def main() -> int:
         cleanup(engine)
         return 0
 
-    seed(engine, args.session_id)
+    user_id = get_or_create_user(engine, args.provider, args.email)
+    seed(engine, user_id)
     return 0
 
 

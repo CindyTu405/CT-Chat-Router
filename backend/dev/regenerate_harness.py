@@ -3,7 +3,8 @@
 用法：cd backend && uv run python dev/regenerate_harness.py
 
 做的事：
-- 連 docker chat_db（沿用 database.py 的設定），用唯一的 session_id 建測試資料，結束時清掉。
+- 連 docker chat_db（沿用 database.py 的設定），建立測試用 User + AuthSession（Cookie: session=<token>），
+  所有測試資料都寫 user_id，結束時只清掉本腳本建立的 user／auth_session／分支／訊息。
 - 把 main.gemini_chat_stream / main.openrouter_chat_stream 換成假串流（絕不呼叫真模型）。
 - 把 main.get_free_models 換成空清單，避免白名單檢查去打 OpenRouter 的模型清單。
 - 在 127.0.0.1:8765 起真的 uvicorn（背景 thread），用 HTTP 打 API。
@@ -26,7 +27,8 @@ from sqlmodel import Session, select  # noqa: E402
 
 import main  # noqa: E402
 from database import engine  # noqa: E402
-from models import Branch, Message  # noqa: E402
+import auth_routes  # noqa: E402
+from models import AuthSession, Branch, Message, User  # noqa: E402
 
 # database.py 的 echo=True 會印出每一句 SQL，這個腳本只要看測試結果，關掉它（只影響本腳本）。
 engine.echo = False
@@ -122,35 +124,35 @@ def reset_limiter():
     main.limiter.reset()
 
 
-def seed(sid: str) -> dict:
+def seed(uid: uuid.UUID) -> dict:
     """建立：主線 root user → 主線 AI；錨在主線 AI 上的分支（root user + AI reply）。"""
     with Session(engine) as s:
         root = Message(role="user", content="G6 harness root question", parent_id=None,
-                       session_id=sid, title="G6 harness")
+                       user_id=uid, title="G6 harness")
         s.add(root)
         s.commit()
         s.refresh(root)
 
         ai = Message(role="assistant", content="ORIGINAL main reply", parent_id=root.id,
-                     session_id=sid, model_used="gemini-2.5-flash")
+                     user_id=uid, model_used="gemini-2.5-flash")
         s.add(ai)
         s.commit()
         s.refresh(ai)
 
         branch = Branch(anchor_message_id=ai.id, anchor_text="ORIGINAL", anchor_start=0,
-                        anchor_end=8, title="G6 harness branch")
+                        anchor_end=8, title="G6 harness branch", user_id=uid)
         s.add(branch)
         s.flush()
 
         b_root = Message(role="user", content="branch question", parent_id=ai.id,
-                         branch_id=branch.id, anchor_message_id=ai.id, session_id=sid)
+                         branch_id=branch.id, anchor_message_id=ai.id, user_id=uid)
         s.add(b_root)
         s.flush()
         branch.root_message_id = b_root.id
         s.add(branch)
 
         b_ai = Message(role="assistant", content="branch answer", parent_id=b_root.id,
-                       branch_id=branch.id, session_id=sid, model_used="gemini-2.5-flash")
+                       branch_id=branch.id, user_id=uid, model_used="gemini-2.5-flash")
         s.add(b_ai)
         s.commit()
         s.refresh(branch)
@@ -164,12 +166,27 @@ def seed(sid: str) -> dict:
         }
 
 
-def cleanup(sid: str):
-    """清掉測試資料。順序：先斷開 branch 指向訊息的 FK → 斷開訊息之間的 FK → 刪訊息 → 刪分支。
-    分支由這個 session 的訊息反查（即使 seed 只做到一半也能清乾淨）。"""
+def make_user() -> tuple[uuid.UUID, str]:
+    """直接建立測試 User + AuthSession，回傳 (user_id, 原始 token)。"""
+    with Session(engine) as s:
+        u = User(oauth_provider="github", oauth_sub=f"regen-harness-{uuid.uuid4()}",
+                 email="regen-harness@example.invalid")
+        s.add(u)
+        s.commit()
+        s.refresh(u)
+        token = auth_routes.create_session_token(s, u)
+        return u.id, token
+
+
+def cleanup(uid: uuid.UUID):
+    """清掉測試資料（只動這個測試 user 的列）。
+    順序：先斷開 branch 指向訊息的 FK → 斷開訊息之間的 FK → 刪訊息 → 刪分支 → 刪 auth_session → 刪 user。
+    分支由 user_id 與這個 user 的訊息反查（即使 seed 只做到一半也能清乾淨）。"""
     try:
         with Session(engine) as s:
-            branch_ids = list({m.branch_id for m in s.exec(select(Message).where(Message.session_id == sid)).all() if m.branch_id})
+            branch_ids = {m.branch_id for m in s.exec(select(Message).where(Message.user_id == uid)).all() if m.branch_id}
+            branch_ids |= set(s.exec(select(Branch.id).where(Branch.user_id == uid)).all())
+            branch_ids = list(branch_ids)
         with Session(engine) as s:
             for b in s.exec(select(Branch).where(Branch.id.in_(branch_ids))).all():
                 b.root_message_id = None
@@ -179,26 +196,34 @@ def cleanup(sid: str):
                 s.add(b)
             s.commit()
         with Session(engine) as s:
-            for m in s.exec(select(Message).where(Message.session_id == sid)).all():
+            for m in s.exec(select(Message).where(Message.user_id == uid)).all():
                 m.parent_id = None
                 m.branch_id = None
                 m.anchor_message_id = None
                 s.add(m)
             s.commit()
         with Session(engine) as s:
-            for m in s.exec(select(Message).where(Message.session_id == sid)).all():
+            for m in s.exec(select(Message).where(Message.user_id == uid)).all():
                 s.delete(m)
             s.commit()
         with Session(engine) as s:
             for b in s.exec(select(Branch).where(Branch.id.in_(branch_ids))).all():
                 s.delete(b)
             s.commit()
-        print(f"cleanup: removed session {sid}")
+        with Session(engine) as s:
+            for a in s.exec(select(AuthSession).where(AuthSession.user_id == uid)).all():
+                s.delete(a)
+            s.commit()
+            u = s.get(User, uid)
+            if u is not None:
+                s.delete(u)
+            s.commit()
+        print(f"cleanup: removed user {uid}")
     except Exception as e:  # 清理失敗要看得到，但不蓋掉測試結果
-        print(f"cleanup FAILED for {sid}: {e}")
+        print(f"cleanup FAILED for {uid}: {e}")
 
 
-def run_tests(client: httpx.Client, ids: dict, sid: str):
+def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
     ai_id = ids["ai_id"]
     root_id = ids["root_id"]
     branch_id = ids["branch_id"]
@@ -254,7 +279,7 @@ def run_tests(client: httpx.Client, ids: dict, sid: str):
     for sort_by in ["created", "updated"]:
         reset_limiter()
         try:
-            r = client.get("/chats/roots", params={"session_id": sid, "sort_by": sort_by})
+            r = client.get("/chats/roots", params={"sort_by": sort_by})
             ids_in = [item["id"] for item in r.json()] if r.status_code == 200 else []
             check(f"3 /chats/roots sort_by={sort_by}: contains main root",
                   str(root_id) in ids_in, f"status={r.status_code} ids={ids_in}")
@@ -268,7 +293,7 @@ def run_tests(client: httpx.Client, ids: dict, sid: str):
     try:
         with Session(engine) as s:
             child = Message(role="user", content="main-line follow-up", parent_id=ai_id,
-                            session_id=sid, branch_id=None)
+                            user_id=uid, branch_id=None)
             s.add(child)
             s.commit()
             s.refresh(child)
@@ -373,20 +398,20 @@ def run_tests(client: httpx.Client, ids: dict, sid: str):
         check("9 branch AI regen", False, f"exception: {e!r}")
 
     # ---- 10. (F9-1) 帶 content 的編輯 ----
-    run_f9_tests(client, sid, model)
+    run_f9_tests(client, uid, model)
 
 
-def seed_f9_pair(sid: str, tag: str, with_branch: bool = False) -> dict:
+def seed_f9_pair(uid: uuid.UUID, tag: str, with_branch: bool = False) -> dict:
     """(F9-1) 建立獨立的一組「user → AI」（最後一則）；with_branch 時再錨一個分支在 AI 上。"""
     with Session(engine) as s:
         root = Message(role="user", content=f"{tag} question", parent_id=None,
-                       session_id=sid, title="F9 harness")
+                       user_id=uid, title="F9 harness")
         s.add(root)
         s.commit()
         s.refresh(root)
 
         ai = Message(role="assistant", content=f"{tag} old answer", parent_id=root.id,
-                     session_id=sid, model_used="gemini-2.5-flash")
+                     user_id=uid, model_used="gemini-2.5-flash")
         s.add(ai)
         s.commit()
         s.refresh(ai)
@@ -394,11 +419,11 @@ def seed_f9_pair(sid: str, tag: str, with_branch: bool = False) -> dict:
         out = {"root_id": root.id, "ai_id": ai.id, "branch_id": None, "b_root_id": None}
         if with_branch:
             branch = Branch(anchor_message_id=ai.id, anchor_text="OLD", anchor_start=0,
-                            anchor_end=3, title="F9 harness branch")
+                            anchor_end=3, title="F9 harness branch", user_id=uid)
             s.add(branch)
             s.flush()
             b_root = Message(role="user", content=f"{tag} branch question", parent_id=ai.id,
-                             branch_id=branch.id, anchor_message_id=ai.id, session_id=sid)
+                             branch_id=branch.id, anchor_message_id=ai.id, user_id=uid)
             s.add(b_root)
             s.flush()
             branch.root_message_id = b_root.id
@@ -411,9 +436,9 @@ def seed_f9_pair(sid: str, tag: str, with_branch: bool = False) -> dict:
         return out
 
 
-def run_f9_tests(client: httpx.Client, sid: str, model: str):
+def run_f9_tests(client: httpx.Client, uid: uuid.UUID, model: str):
     # ---- 10a/10b. 帶 content → 200；user／AI 內容與模型都更新；生成用的是新內容 ----
-    p1 = seed_f9_pair(sid, "F9A")
+    p1 = seed_f9_pair(uid, "F9A")
     try:
         reset_limiter()
         LLM_MESSAGES.clear()
@@ -434,7 +459,7 @@ def run_f9_tests(client: httpx.Client, sid: str, model: str):
         check("10a/10b edit regen", False, f"exception: {e!r}")
 
     # ---- 10c. 編輯時錨在 AI 上的分支照樣幽靈化（與 G6 測試相同的檢查） ----
-    p2 = seed_f9_pair(sid, "F9C", with_branch=True)
+    p2 = seed_f9_pair(uid, "F9C", with_branch=True)
     try:
         reset_limiter()
         status, headers, body = regen_full(client, p2["ai_id"], model, content="分支前的新問題")
@@ -463,7 +488,7 @@ def run_f9_tests(client: httpx.Client, sid: str, model: str):
         check("10c edit with anchored branch", False, f"exception: {e!r}")
 
     # ---- 10d. content 全是空白 → 422，DB 與 LLM 都不動 ----
-    p3 = seed_f9_pair(sid, "F9D")
+    p3 = seed_f9_pair(uid, "F9D")
     try:
         before_u = db_row(p3["root_id"])
         before_a = db_row(p3["ai_id"])
@@ -481,11 +506,11 @@ def run_f9_tests(client: httpx.Client, sid: str, model: str):
         check("10d whitespace content", False, f"exception: {e!r}")
 
     # ---- 10e. 不是最後一則（有後續訊息）→ 409，user 內容不得被改 ----
-    p4 = seed_f9_pair(sid, "F9E")
+    p4 = seed_f9_pair(uid, "F9E")
     try:
         with Session(engine) as s:
             s.add(Message(role="user", content="F9E follow-up", parent_id=p4["ai_id"],
-                          session_id=sid, branch_id=None))
+                          user_id=uid, branch_id=None))
             s.commit()
         before_u = db_row(p4["root_id"])
         before_a = db_row(p4["ai_id"])
@@ -516,20 +541,22 @@ def start_server() -> uvicorn.Server:
 
 
 def main_entry() -> int:
-    sid = f"g6-harness-{uuid.uuid4()}"
     server = None
     ids = None
+    uid = None
     try:
-        ids = seed(sid)
+        uid, token = make_user()
+        ids = seed(uid)
         server = start_server()
-        with httpx.Client(base_url=BASE, timeout=30) as client:
-            run_tests(client, ids, sid)
+        with httpx.Client(base_url=BASE, timeout=30, cookies={"session": token}) as client:
+            run_tests(client, ids, uid)
     except Exception as e:
         check("harness setup", False, f"exception: {e!r}")
     finally:
         if server is not None:
             server.should_exit = True
-        cleanup(sid)
+        if uid is not None:
+            cleanup(uid)
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     failed = [(n, d) for n, ok, d in RESULTS if not ok]

@@ -15,8 +15,9 @@ from slowapi.errors import RateLimitExceeded
 
 # 自訂模組
 from database import get_session, engine
-from auth_routes import cookie_secure, router as auth_router
+from auth_routes import cookie_secure, get_current_user, router as auth_router
 from models import (
+    User,
     Message,
     ChatRequest,
     UpdateTitleRequest,
@@ -79,7 +80,23 @@ async def lifespan(app: FastAPI):
     print("伺服器關閉中...")
 
 
-app = FastAPI(lifespan=lifespan)
+def _api_docs_enabled() -> bool:
+    """API 文件（/docs、/redoc、/openapi.json）預設關閉，只在 ENABLE_API_DOCS 為真時開啟。"""
+    return (os.getenv("ENABLE_API_DOCS", "false") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+_DOCS_ON = _api_docs_enabled()
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url="/docs" if _DOCS_ON else None,
+    redoc_url="/redoc" if _DOCS_ON else None,
+    openapi_url="/openapi.json" if _DOCS_ON else None,
+)
 
 # 2. Rate limit (slowapi)：以來源 IP 為 key。
 # /chat 會觸發付費 LLM 呼叫，限制每分鐘 10 次，避免被刷。
@@ -151,35 +168,25 @@ def read_root():
     return {"status": "ok", "message": "Chat API is running"}
 
 
-# 讀取所有訊息 (檢查用)
-@app.get("/messages", response_model=list[Message])
-def read_messages(session: Session = Depends(get_session)):
-    messages = session.exec(select(Message)).all()
-    return messages
+def get_owned_message(
+    session: Session, message_id: uuid.UUID, user: User, detail: str = "not found"
+) -> Message:
+    """(S-U1-4) 取訊息：不存在或不屬於 user（user_id 為 NULL 也算）一律 404，不洩漏存在與否。"""
+    msg = session.get(Message, message_id)
+    if msg is None or msg.user_id != user.id:
+        raise HTTPException(status_code=404, detail=detail)
+    return msg
 
 
-# --- 關鍵修正區 ---
+def get_owned_branch(
+    session: Session, branch_id: uuid.UUID, user: User, detail: str = "not found"
+) -> Branch:
+    """(S-U1-4) 取分支：不存在或不屬於 user（user_id 為 NULL 也算）一律 404。"""
+    branch = session.get(Branch, branch_id)
+    if branch is None or branch.user_id != user.id:
+        raise HTTPException(status_code=404, detail=detail)
+    return branch
 
-# 修正 1: 這裡改用 def (同步函式)，去掉 async
-# 因為我們的 Session 是同步的，這樣寫最穩
-def save_ai_message_sync(content: str, parent_id: uuid.UUID, model: str):
-    print(f"🔄 開始執行存檔: {content[:10]}...")  # Debug 用
-
-    # 這裡必須重新 import engine，因為要在新的 Session 運作
-    from database import engine
-    try:
-        with Session(engine) as session:
-            ai_msg = Message(
-                content=content,
-                role="assistant",
-                parent_id=parent_id,
-                model_used=model
-            )
-            session.add(ai_msg)
-            session.commit()
-            print(f"✅ AI 回應已存檔，ID: {ai_msg.id}")
-    except Exception as e:
-        print(f"❌ 存檔失敗: {e}")
 
 def get_conversation_history(session: Session, parent_id: uuid.UUID | None) -> list[Message]:
     """
@@ -207,18 +214,33 @@ def get_conversation_history(session: Session, parent_id: uuid.UUID | None) -> l
 
 @app.post("/chat")
 @limiter.limit("10/minute")
-async def chat_endpoint(payload: ChatRequest, request: Request, session: Session = Depends(get_session)):
+async def chat_endpoint(
+    payload: ChatRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     # 0. 模型白名單檢查（免費 tier）：必須在任何寫入 DB / 呼叫 LLM 之前就擋掉，
     #    否則會留下沒有回覆的孤兒訊息；而且串流一旦開始就無法再回 403。
     if not is_model_allowed(payload.model, session):
         raise HTTPException(status_code=403, detail=f"Model '{payload.model}' is not allowed on this plan")
+
+    # (S-U1-4) 擁有者檢查：帶了的 parent_id / branch_id / anchor_message_id 都要屬於本人，
+    # 必須在讀歷史、任何寫入與 LLM 呼叫之前。
+    if payload.parent_id is not None:
+        get_owned_message(session, payload.parent_id, user)
+    if payload.branch_id is not None:
+        get_owned_branch(session, payload.branch_id, user)
+    if payload.anchor_message_id is not None:
+        get_owned_message(session, payload.anchor_message_id, user)
 
     # ★★★ 修正補上：先取得歷史對話紀錄 ★★★
     # 這行是為了讓後面的 gemini_chat_stream / openrouter_chat_stream 有 history 可以用
     history = get_conversation_history(session, payload.parent_id)
 
     # 1. 先存使用者的訊息 (User Message)
-    user_msg = Message(role="user", content=payload.message, parent_id=payload.parent_id, session_id=payload.session_id,
+    user_msg = Message(role="user", content=payload.message, parent_id=payload.parent_id,
+                       user_id=user.id,
                        branch_id=payload.branch_id, anchor_message_id=payload.anchor_message_id)
     session.add(user_msg)
     session.commit()
@@ -255,7 +277,7 @@ async def chat_endpoint(payload: ChatRequest, request: Request, session: Session
         content="",  # 先留空，等串流完再補
         parent_id=user_msg.id, 
         model_used=payload.model,
-        session_id=payload.session_id,
+        user_id=user.id,
         branch_id=payload.branch_id  # 跟隨 user_msg 的分支（不回填 anchor）
     )
     session.add(ai_msg)
@@ -304,23 +326,31 @@ async def _read_buffer(ai_id: str, offset: int):
 
 
 @app.get("/messages/{message_id}/stream")
-async def stream_message(message_id: str, offset: int = 0, session: Session = Depends(get_session)):
+async def stream_message(
+    message_id: str,
+    offset: int = 0,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     """(P3b-A2) 續讀一則 AI 回覆：回傳從 offset 之後的新文字。
     - 生成中：會持續等待直到完成（切回對話時用來接續顯示）。
     - 已完成（緩衝已清掉）：直接從 DB 回傳 offset 之後的內容。
-    - 找不到：404。"""
+    - 找不到、不是 AI 回覆、或不屬於本人：404。
+    (S-U1-4) 一定先查擁有者，再查 GENERATIONS 緩衝，否則別人可以讀到生成中的內容。"""
     try:
-        uuid.UUID(message_id)
+        msg_uuid = uuid.UUID(message_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="not found")
 
-    if message_id in GENERATIONS:
-        return StreamingResponse(_read_buffer(message_id, max(offset, 0)), media_type="text/plain",
+    msg = get_owned_message(session, msg_uuid, user)
+    if msg.role != "assistant":
+        raise HTTPException(status_code=404, detail="not found")
+
+    buf_key = str(msg.id)
+    if buf_key in GENERATIONS:
+        return StreamingResponse(_read_buffer(buf_key, max(offset, 0)), media_type="text/plain",
                                  headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    msg = session.get(Message, uuid.UUID(message_id))
-    if not msg or msg.role != "assistant":
-        raise HTTPException(status_code=404, detail="not found")
     return StreamingResponse(iter([msg.content[max(offset, 0):]]), media_type="text/plain",
                              headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
@@ -331,27 +361,26 @@ async def regenerate_message(
     payload: RegenerateRequest,
     request: Request,  # slowapi 限流需要 request 參數
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """(G6-1) 原地重新生成一則 AI 回覆（只允許「最後一則」）。
 
     (F9-1) 可選帶 content：同時編輯最後一則 user 訊息的內容，再用新內容生成。
 
-    檢查順序：404（不存在／非 AI）→ 422（content 帶了但全是空白）→
+    檢查順序：404（不存在／非 AI／不屬於本人）→ 422（content 帶了但全是空白）→
     403（模型不在白名單，改資料之前擋）→
     409（還在生成中）→ 409（同一條線上還有子訊息，不是最後一則）→
     幽靈化錨在此則上的分支 → 內容清空、換模型（有 content 則一併改 user 內容），一次 commit → 背景生成 → 串流。
     """
-    # a. 404：id 格式錯、不存在、或不是 AI 回覆
+    # a. 404：id 格式錯、不存在、不屬於本人、或不是 AI 回覆
     try:
         ai_uuid = uuid.UUID(message_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="not found")
-    ai = session.get(Message, ai_uuid)
-    if not ai or ai.role != "assistant" or ai.parent_id is None:
+    ai = get_owned_message(session, ai_uuid, user)
+    if ai.role != "assistant" or ai.parent_id is None:
         raise HTTPException(status_code=404, detail="not found")
-    user_msg = session.get(Message, ai.parent_id)
-    if user_msg is None:
-        raise HTTPException(status_code=404, detail="not found")
+    user_msg = get_owned_message(session, ai.parent_id, user)
 
     # (F9-1) 422：帶了 content 但全是空白，在任何寫入之前擋掉
     if payload.content is not None and not payload.content.strip():
@@ -391,7 +420,7 @@ async def regenerate_message(
     # e. 幽靈化：錨在這則上的分支 → anchor 清空、is_orphaned=True；分支的 root 斷開 parent 與 anchor
     orphaned_ids: list[str] = []
     branches = session.exec(select(Branch).where(Branch.anchor_message_id == ai.id)).all()
-    # (E2) 幽靈記住原本所屬的對話：寫入這則 AI 回覆所在樹的樹根（只用來依 session 過濾幽靈清單）
+    # (E2) 幽靈記住原本所屬的對話：寫入這則 AI 回覆所在樹的樹根
     tree_root_id = _find_tree_root(session, ai).id
     for br in branches:
         br.anchor_message_id = None
@@ -434,7 +463,11 @@ async def regenerate_message(
 
 
 @app.get("/chats/roots", response_model=list[MessageWithActivity])
-def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session = Depends(get_session)):
+def get_chat_roots(
+    sort_by: str = "updated",
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     """
     取得側邊欄列表，支援兩種排序：
     1. created: 依建立日期排序 (舊版預設)
@@ -445,7 +478,7 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
         # (G6-1) 只列主線根（branch_id IS NULL）：幽靈分支的 root 斷開 parent 後也沒有 parent，不能被當成新對話
         statement = select(Message).where(
             Message.parent_id == None,
-            Message.session_id == session_id,
+            Message.user_id == user.id,
             Message.branch_id == None,
         ).order_by(Message.created_at.desc())
         return session.exec(statement).all()
@@ -456,7 +489,7 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
             SELECT id AS root_id, id AS msg_id, created_at
             FROM message
             -- (G6-1) 同 created 模式：幽靈分支的 root 不算主線根
-            WHERE parent_id IS NULL AND session_id = :session_id AND branch_id IS NULL
+            WHERE parent_id IS NULL AND user_id = :uid AND branch_id IS NULL
 
             UNION ALL
             
@@ -479,9 +512,8 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
             m.content, 
             m.role, 
             m.model_used, 
-            m.created_at, 
-            m.session_id, 
-            m.parent_id, 
+            m.created_at,
+            m.parent_id,
             m.title, 
             m.has_branch,
             tmt.last_activity AS "last_activity"
@@ -490,13 +522,17 @@ def get_chat_roots(session_id: str, sort_by: str = "updated", session: Session =
         ORDER BY tmt.last_activity DESC;
         """)
         
-        results = session.exec(query, params={"session_id": session_id}).mappings().all()
+        results = session.exec(query, params={"uid": user.id}).mappings().all()
         
         # ★ 強制手動映射：把 RowMapping 拆解並塞入白名單模型，絕對不讓 FastAPI/Driver 偷偷丟掉欄位
         return [MessageWithActivity(**row) for row in results]
 
 @app.get("/chats/{root_id}/history", response_model=list[Message])
-def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)):
+def get_chat_history(
+    root_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     """
     (P2-6) history 只回「跟 root 相同 branch_id」的那條線。
 
@@ -504,15 +540,17 @@ def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)
     root 是分支根 (branch_id = X) 就只走 X 這條分支，不跨越回祖先主幹。
     這樣主線與分支各自乾淨，不會被別條分支的最新訊息污染。
     """
-    
+    # (S-U1-4) 起點必須屬於本人，否則 404（不存在與不屬於本人無法區分）
+    get_owned_message(session, root_id, user)
+
     # 單一遞迴 CTE：從 root 往下遞迴，只沿著 branch_id 與父節點相同的子訊息走。
     # IS NOT DISTINCT FROM：NULL 對 NULL 視為相等，主幹 (NULL) 才比對得起來。
     path_query = text("""
     WITH RECURSIVE chat_path AS (
-        SELECT id, role, content, model_used, created_at, parent_id, title, session_id, has_branch, branch_id, anchor_message_id
+        SELECT id, role, content, model_used, created_at, parent_id, title, has_branch, branch_id, anchor_message_id
         FROM message WHERE id = :root_id
         UNION ALL
-        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title, m.session_id, m.has_branch, m.branch_id, m.anchor_message_id
+        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title, m.has_branch, m.branch_id, m.anchor_message_id
         FROM message m
         JOIN chat_path cp ON m.parent_id = cp.id
         WHERE m.branch_id IS NOT DISTINCT FROM cp.branch_id
@@ -527,11 +565,14 @@ def get_chat_history(root_id: uuid.UUID, session: Session = Depends(get_session)
 
 # ★★★ 功能 1: 修改對話標題 ★★★
 @app.patch("/chats/{root_id}/title")
-def update_chat_title(root_id: uuid.UUID, request: UpdateTitleRequest, session: Session = Depends(get_session)):
-    msg = session.get(Message, root_id)
-    if not msg:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    
+def update_chat_title(
+    root_id: uuid.UUID,
+    request: UpdateTitleRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    msg = get_owned_message(session, root_id, user, detail="Chat not found")
+
     msg.title = request.title
     session.add(msg)
     session.commit()
@@ -540,13 +581,19 @@ def update_chat_title(root_id: uuid.UUID, request: UpdateTitleRequest, session: 
 
 # ★★★ 功能 2: 刪除對話串 ★★★
 @app.delete("/chats/{root_id}")
-def delete_chat(root_id: uuid.UUID, session: Session = Depends(get_session)):
+def delete_chat(
+    root_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     """
     刪除整串對話 (終極修正版：Depth-First Deletion)
     策略：計算每一則訊息的「層級 (Level)」，從最深層的葉子節點開始刪除。
     這能完美解決 Foreign Key Constraint 問題，不管有沒有分支或改名。
     """
-    
+    # (S-U1-4) 起點必須屬於本人，在任何刪除之前
+    get_owned_message(session, root_id, user, detail="Chat not found")
+
     # 1. 使用遞迴查詢找出所有子孫，並計算「層級 (level)」
     # Root 的 level = 0, 子 = 1, 孫 = 2 ...
     query = text("""
@@ -567,7 +614,7 @@ def delete_chat(root_id: uuid.UUID, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Chat not found")
 
     # (E2) 幽靈分支的 attach_root_id 若指向即將刪除的訊息，先清成 NULL（同一個交易），否則 FK 會擋住刪除。
-    # 幽靈本身保留，之後清單改用分支首則訊息的 session 判斷。
+    # 幽靈本身保留（歸屬由 Branch.user_id 決定）。
     doomed_ids = [uuid.UUID(str(i)) for i in all_ids]
     for br in session.exec(select(Branch).where(Branch.attach_root_id.in_(doomed_ids))).all():
         br.attach_root_id = None
@@ -593,20 +640,27 @@ def delete_chat(root_id: uuid.UUID, session: Session = Depends(get_session)):
 
 # 取得整棵對話樹
 @app.get("/chats/{root_id}/tree", response_model=list[Message])
-def get_chat_tree(root_id: uuid.UUID, session: Session = Depends(get_session)):
+def get_chat_tree(
+    root_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     """
     取得整棵對話樹的「所有」節點 (用來畫前端的 React Flow 樹狀圖)
     """
+    # (S-U1-4) 起點必須屬於本人，否則 404
+    get_owned_message(session, root_id, user)
+
     query = text("""
     WITH RECURSIVE chat_tree AS (
         -- 1. 找到樹根
-        SELECT id, role, content, model_used, created_at, parent_id, title, session_id, has_branch, branch_id, anchor_message_id 
+        SELECT id, role, content, model_used, created_at, parent_id, title, has_branch, branch_id, anchor_message_id
         FROM message WHERE id = :root_id
-        
+
         UNION ALL
-        
+
         -- 2. 往下找出所有子子孫孫 (不論有幾個分支全抓)
-        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title, m.session_id, m.has_branch, m.branch_id, m.anchor_message_id 
+        SELECT m.id, m.role, m.content, m.model_used, m.created_at, m.parent_id, m.title, m.has_branch, m.branch_id, m.anchor_message_id
         FROM message m
         JOIN chat_tree ct ON m.parent_id = ct.id
     )
@@ -708,6 +762,7 @@ def create_branch(
     root_id: uuid.UUID,
     payload: CreateBranchRequest,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """
     (P2-9) 從某則既有訊息 (anchor) 分岔出一條新分支。
@@ -721,13 +776,11 @@ def create_branch(
     3. 把整棵樹的根標記 has_branch = True，commit。
     """
     # --- 1. 驗證 ---
-    root_msg = session.get(Message, root_id)
-    if not root_msg:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    anchor_msg = session.get(Message, payload.anchor_message_id)
-    if not anchor_msg:
-        raise HTTPException(status_code=404, detail="Anchor message not found")
+    # (S-U1-4) root 與 anchor 都必須屬於本人（不存在與不屬於本人都是 404）
+    root_msg = get_owned_message(session, root_id, user, detail="Chat not found")
+    anchor_msg = get_owned_message(
+        session, payload.anchor_message_id, user, detail="Anchor message not found"
+    )
 
     # 簡單驗證 anchor 屬於 root 這棵樹：從 anchor 往上遞迴找祖先，看是否會走到 root
     belongs = session.exec(
@@ -792,6 +845,7 @@ def create_branch(
         title=title,
         # 若 anchor 本身已屬於某條分支，代表這是「分支再分支」
         parent_branch_id=anchor_msg.branch_id,
+        user_id=user.id,
     )
     session.add(branch)
     session.flush()  # 取得 branch.id
@@ -826,15 +880,22 @@ def create_branch(
 
 
 @app.get("/chats/{root_id}/branches")
-def list_branches(root_id: uuid.UUID, session: Session = Depends(get_session)):
+def list_branches(
+    root_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     """
     (P2-11) 列出「錨定在這棵對話樹內」的所有分支。
+    (S-U1-4) root 必須屬於本人，否則 404。
 
     判定方式：從 root_id 出發，沿著 parent_id 往下遞迴展開所有子孫訊息，
     得到這棵樹的完整 message id 集合；再取出 anchor_message_id 落在集合內的分支。
     這樣即使 UI 傳來的 root_id 只是樹中間的某一則訊息，也能正確取到該子樹的分支。
     以 created_at 升冪排序 (分支建立順序，前端可穩定渲染)。
     """
+    get_owned_message(session, root_id, user)
+
     query = text("""
     WITH RECURSIVE tree AS (
         SELECT id FROM message WHERE id = :root_id
@@ -871,37 +932,30 @@ def list_branches(root_id: uuid.UUID, session: Session = Depends(get_session)):
 
 
 @app.get("/branches/orphaned")
-def list_orphaned_branches(session_id: str, session: Session = Depends(get_session)):
+def list_orphaned_branches(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     """
     (E2) 幽靈分支清單（給分支面板的「幽靈分支」區與選字時的「連結幽靈分支」選單）。
 
-    歸屬判定（只看 session，不看對話）：
-    - attach_root_id 有值 → 該樹根訊息的 session_id 等於 session_id；
-    - attach_root_id 為 NULL（舊資料或原對話已刪）→ 分支首則訊息的 session_id 等於 session_id。
+    (S-U1-4) 歸屬只看 Branch.user_id（等於目前登入者）；user_id 為 NULL 的舊資料不列出。
     依 created_at 新到舊。
     """
-    query = text("""
-    SELECT b.id, b.title, b.anchor_text, b.root_message_id, b.created_at
-    FROM branch b
-    LEFT JOIN message am ON am.id = b.attach_root_id
-    LEFT JOIN message rm ON rm.id = b.root_message_id
-    WHERE b.is_orphaned = true
-      AND (
-        (b.attach_root_id IS NOT NULL AND am.session_id = :sid)
-        OR (b.attach_root_id IS NULL AND rm.session_id = :sid)
-      )
-    ORDER BY b.created_at DESC;
-    """)
-    rows = session.exec(query, params={"sid": session_id}).mappings().all()
+    rows = session.exec(
+        select(Branch)
+        .where(Branch.is_orphaned == True, Branch.user_id == user.id)  # noqa: E712
+        .order_by(Branch.created_at.desc())
+    ).all()
     return [
         {
-            "id": str(row["id"]),
-            "title": row["title"],
-            "anchor_text": row["anchor_text"],
-            "root_message_id": str(row["root_message_id"]) if row["root_message_id"] else None,
-            "created_at": to_utc_iso(row["created_at"]),
+            "id": str(b.id),
+            "title": b.title,
+            "anchor_text": b.anchor_text,
+            "root_message_id": str(b.root_message_id) if b.root_message_id else None,
+            "created_at": to_utc_iso(b.created_at),
         }
-        for row in rows
+        for b in rows
     ]
 
 
@@ -910,32 +964,27 @@ def relink_branch(
     branch_id: uuid.UUID,
     payload: RelinkBranchRequest,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """
     (E2) 把幽靈分支接回 root 這棵對話上的一段文字（變成 inline 高亮）。
 
     檢查順序：
-    1. 404：分支不存在、root 不存在，或分支的歸屬 session（attach_root_id 那則；為 NULL 時用首則訊息；
-       兩者都沒有 → 不屬於任何人）與 root 的 session 不同。一律 404，不洩漏分支是否存在。
+    1. 404：分支、root、錨點訊息任一個不存在或不屬於目前登入者（user_id 為 NULL 也算）。
+       一律 404，不洩漏是否存在；都在任何 409／422 之前。
     2. 409：不是幽靈（is_orphaned 不是 True）。
     3. 422：anchor_start／anchor_end 必須成對；有帶時 0 <= start < end <= 回覆長度。
-    4. 404：錨點訊息不存在。400：錨點不在 root 這棵樹上，或錨點位於分支自己的訊息之下（會形成循環）。
+    4. 400：錨點不在 root 這棵樹上，或錨點位於分支自己的訊息之下（會形成循環）。
     5. 409：同一則上已有範圍完全相同的非幽靈分支（不寫入）。
     通過後同一個 commit：重疊的舊分支降級（exclude 自己）→ 設錨點、is_orphaned=False、attach_root_id=NULL；
     分支首則訊息 parent_id／anchor_message_id 接到新錨點；樹根 has_branch=True。title 不變。
     """
-    # 1. 404（不洩漏存在與否）
-    branch = session.get(Branch, branch_id)
-    root_msg = session.get(Message, payload.root_id)
-    if branch is None or root_msg is None:
-        raise HTTPException(status_code=404, detail="Branch not found")
-    owner_msg = None
-    if branch.attach_root_id is not None:
-        owner_msg = session.get(Message, branch.attach_root_id)
-    elif branch.root_message_id is not None:
-        owner_msg = session.get(Message, branch.root_message_id)
-    if owner_msg is None or owner_msg.session_id != root_msg.session_id:
-        raise HTTPException(status_code=404, detail="Branch not found")
+    # 1. 404（不洩漏存在與否）：分支、root、錨點都必須屬於本人
+    branch = get_owned_branch(session, branch_id, user, detail="Branch not found")
+    root_msg = get_owned_message(session, payload.root_id, user, detail="Branch not found")
+    anchor_msg = get_owned_message(
+        session, payload.anchor_message_id, user, detail="Anchor message not found"
+    )
 
     # 2. 409：不是幽靈
     if branch.is_orphaned is not True:
@@ -946,10 +995,7 @@ def relink_branch(
         raise HTTPException(status_code=422, detail="anchor_start and anchor_end must be given together")
     has_offset = payload.anchor_start is not None
 
-    # 4. 錨點：存在、屬於 root 這棵樹、不在分支自己的訊息之下
-    anchor_msg = session.get(Message, payload.anchor_message_id)
-    if anchor_msg is None:
-        raise HTTPException(status_code=404, detail="Anchor message not found")
+    # 4. 錨點：屬於 root 這棵樹、不在分支自己的訊息之下
     if not _is_ancestor_or_self(session, root_msg.id, anchor_msg.id):
         raise HTTPException(status_code=400, detail="Anchor message does not belong to this chat")
     if branch.root_message_id is not None and _is_ancestor_or_self(
@@ -1007,6 +1053,9 @@ def relink_branch(
 
 
 @app.get("/api/free-models")
-def get_free_models_endpoint(session: Session = Depends(get_session)):
+def get_free_models_endpoint(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     models = get_free_models(session)
     return {"models": models}

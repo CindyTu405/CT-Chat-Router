@@ -7,9 +7,14 @@
 - patch 假的 GitHub provider：authorize_redirect / authorize_access_token / _fetch_github_user。
 - 用 subprocess curl（-b/-c cookie 檔、-D 取原始標頭）逐步重播登入流程。
   不用 httpx / TestClient 的 cookie jar 判斷，因為 Python 的 jar 會掩蓋 B10（同名 cookie 被覆蓋）。
-- 結束時只刪本腳本建立的 user 與 auth_session。
+- (S-U1-4) 路由保護與隔離測試：列舉 app.routes 驗證未登入全部 401、使用者 B 打 A 的資料全部 404 且 A 的資料
+  與假 LLM 呼叫次數都沒變、生成中 B 讀不到緩衝、user_id 為 NULL 的資料誰都讀不到、A 自己的完整流程、
+  父子 user_id 一致、回應不含 user_id。假 LLM（絕不呼叫真模型）；NULL 資料由本腳本建立並刪除。
+- 結束時只刪本腳本建立的 user、auth_session、分支與訊息。
 """
+import asyncio
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,15 +33,37 @@ import uvicorn  # noqa: E402
 from authlib.integrations.base_client import OAuthError  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 from sqlalchemy.exc import IntegrityError  # noqa: E402
+from sqlalchemy import text as sa_text  # noqa: E402
 from sqlmodel import Session, select  # noqa: E402
 
 import auth_routes  # noqa: E402
 import main  # noqa: E402
 from database import engine  # noqa: E402
-from models import AuthSession, User  # noqa: E402
+from models import AuthSession, Branch, Message, User  # noqa: E402
 
 engine.echo = False
 main.limiter.enabled = False
+main.BUFFER_RETENTION_SECONDS = 2
+# 不讓白名單檢查去抓 OpenRouter 免費模型清單（外部網路）
+main.get_free_models = lambda session, force_refresh=False: []
+
+# (S-U1-4) 假 LLM：記錄每次呼叫；message 以 "GATED" 開頭時在中途等 GATE（用來測「生成中」）。
+LLM_CALLS: list = []
+GATE = threading.Event()
+GATE.set()
+
+
+async def fake_llm_stream(message, history, model):
+    LLM_CALLS.append(message)
+    yield "MOCK-"
+    if message.startswith("GATED"):
+        while not GATE.is_set():
+            await asyncio.sleep(0.02)
+    yield "REPLY"
+
+
+main.gemini_chat_stream = fake_llm_stream
+main.openrouter_chat_stream = fake_llm_stream
 
 PORT = 8767
 BASE = f"http://127.0.0.1:{PORT}"
@@ -291,6 +318,422 @@ def run_endpoint_checks():
             auth_routes._fetch_github_user = orig_fetch
 
 
+# ===== (S-U1-4) 路由保護與隔離 =====
+
+ISO_UIDS: list = []          # 本腳本建立的使用者 id
+NULL_MSG_IDS: list = []      # 本腳本建立、user_id 為 NULL 的訊息
+NULL_BRANCH_IDS: list = []   # 本腳本建立、user_id 為 NULL 的分支
+DOC_PATHS = {"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+
+
+def make_user(label: str) -> tuple[uuid.UUID, str]:
+    """直接建立 User + AuthSession，回傳 (user_id, 原始 token)。"""
+    with Session(engine) as s:
+        u = User(oauth_provider="github", oauth_sub=f"iso-{label}-{UNIQ}",
+                 email=f"iso-{label}-{UNIQ}@example.invalid")
+        s.add(u)
+        s.commit()
+        s.refresh(u)
+        ISO_UIDS.append(u.id)
+        token = auth_routes.create_session_token(s, u)
+        return u.id, token
+
+
+def snap(uids: list) -> tuple[dict, dict]:
+    """這些使用者所有訊息與分支欄位的快照（用來證明沒被改動）。"""
+    with Session(engine) as s:
+        msgs = s.exec(select(Message).where(Message.user_id.in_(uids))).all()
+        brs = s.exec(select(Branch).where(Branch.user_id.in_(uids))).all()
+        return (
+            {str(m.id): (m.content, m.title, m.parent_id, m.branch_id, m.anchor_message_id,
+                         m.has_branch, m.model_used, m.role, m.user_id) for m in msgs},
+            {str(b.id): (b.root_message_id, b.anchor_message_id, b.attach_root_id, b.is_orphaned,
+                         b.anchor_text, b.anchor_start, b.anchor_end, b.title,
+                         b.parent_branch_id, b.user_id) for b in brs},
+        )
+
+
+def snap_null() -> tuple[dict, dict]:
+    with Session(engine) as s:
+        msgs = s.exec(select(Message).where(Message.id.in_(NULL_MSG_IDS))).all()
+        brs = s.exec(select(Branch).where(Branch.id.in_(NULL_BRANCH_IDS))).all()
+        return (
+            {str(m.id): (m.content, m.title, m.parent_id, m.branch_id, m.anchor_message_id,
+                         m.has_branch, m.model_used, m.role, m.user_id) for m in msgs},
+            {str(b.id): (b.root_message_id, b.anchor_message_id, b.attach_root_id, b.is_orphaned,
+                         b.anchor_text, b.anchor_start, b.anchor_end, b.title,
+                         b.parent_branch_id, b.user_id) for b in brs},
+        )
+
+
+def post_stream(client: httpx.Client, path: str, body: dict):
+    """POST 並讀完整個 body，回傳 (status, headers, text)。"""
+    with client.stream("POST", path, json=body) as r:
+        txt = r.read().decode("utf-8")
+        return r.status_code, r.headers, txt
+
+
+def wait_db_content(msg_id, expected: str, timeout: float = 5.0) -> bool:
+    """生成結束後 DB 寫回稍晚於串流結束，輪詢等它。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with Session(engine) as s:
+            m = s.get(Message, uuid.UUID(str(msg_id)))
+            if m is not None and m.content == expected:
+                return True
+        time.sleep(0.05)
+    return False
+
+
+def db_owner(msg_id):
+    with Session(engine) as s:
+        m = s.get(Message, uuid.UUID(str(msg_id)))
+        return m.user_id if m is not None else "MISSING"
+
+
+def make_msg(uid, role: str, content: str, parent_id=None, branch_id=None, title=None,
+             null_owner: bool = False) -> uuid.UUID:
+    with Session(engine) as s:
+        m = Message(role=role, content=content, parent_id=parent_id, branch_id=branch_id,
+                    title=title, user_id=None if null_owner else uid,
+                    model_used="gemini-2.5-flash" if role == "assistant" else None)
+        s.add(m)
+        s.commit()
+        s.refresh(m)
+        if null_owner:
+            NULL_MSG_IDS.append(m.id)
+        return m.id
+
+
+def make_orphan(uid, title: str, root_message_id=None, null_owner: bool = False) -> uuid.UUID:
+    with Session(engine) as s:
+        b = Branch(title=title, anchor_text="x", is_orphaned=True, root_message_id=root_message_id,
+                   user_id=None if null_owner else uid)
+        s.add(b)
+        s.commit()
+        s.refresh(b)
+        if null_owner:
+            NULL_BRANCH_IDS.append(b.id)
+        return b.id
+
+
+def foreign_matrix(c: httpx.Client, root, ai, br, own_root, own_ai, own_br, model: str) -> list:
+    """以 c 的身分，對「不屬於 c 的資源」(root/ai/br) 呼叫上表每條路由。回傳 [(name, status)]，期望全是 404。
+    own_* 是 c 自己的資源，用來把「只有一個參數不屬於自己」的情況單獨測出來。"""
+    def branch_body(anchor):
+        return {"anchor_message_id": str(anchor), "anchor_text": "x", "anchor_start": 0, "anchor_end": 1}
+
+    def relink_body(rt, an):
+        return {"root_id": str(rt), "anchor_message_id": str(an), "anchor_start": 0,
+                "anchor_end": 1, "anchor_text": "x"}
+
+    def chat_body(**kw):
+        return {"message": "hack", "model": model, **{k: str(v) for k, v in kw.items()}}
+
+    reqs = [
+        ("history", "GET", f"/chats/{root}/history", None),
+        ("tree", "GET", f"/chats/{root}/tree", None),
+        ("list branches", "GET", f"/chats/{root}/branches", None),
+        ("title", "PATCH", f"/chats/{root}/title", {"title": "HACKED"}),
+        ("delete", "DELETE", f"/chats/{root}", None),
+        ("create branch (root+anchor foreign)", "POST", f"/chats/{root}/branches", branch_body(ai)),
+        ("create branch (root own, anchor foreign)", "POST", f"/chats/{own_root}/branches", branch_body(ai)),
+        ("create branch (root foreign, anchor own)", "POST", f"/chats/{root}/branches", branch_body(own_ai)),
+        ("stream ai", "GET", f"/messages/{ai}/stream", None),
+        ("stream user msg", "GET", f"/messages/{root}/stream", None),
+        ("regenerate", "POST", f"/messages/{ai}/regenerate", {"model": model}),
+        ("chat parent_id", "POST", "/chat", chat_body(parent_id=ai)),
+        ("chat branch_id", "POST", "/chat", chat_body(branch_id=br)),
+        ("chat anchor_message_id", "POST", "/chat", chat_body(anchor_message_id=ai)),
+        ("relink all foreign", "POST", f"/branches/{br}/relink", relink_body(root, ai)),
+        ("relink branch foreign only", "POST", f"/branches/{br}/relink", relink_body(own_root, own_ai)),
+        ("relink root foreign only", "POST", f"/branches/{own_br}/relink", relink_body(root, own_ai)),
+        ("relink anchor foreign only", "POST", f"/branches/{own_br}/relink", relink_body(own_root, ai)),
+    ]
+    out = []
+    for name, method, path, body in reqs:
+        r = c.request(method, path, json=body) if body is not None else c.request(method, path)
+        out.append((name, r.status_code))
+    return out
+
+
+def run_route_enumeration():
+    """從 app.routes 動態列舉（不寫死），未登入呼叫每條受保護路由都必須 401。"""
+    docs_on = main._DOCS_ON
+    routes: list[tuple[str, str]] = []
+    for route in main.app.routes:
+        methods = getattr(route, "methods", None)
+        path = getattr(route, "path", None)
+        if not methods or not path:
+            continue
+        for m in sorted(set(methods) - {"HEAD", "OPTIONS"}):
+            routes.append((m, path))
+
+    present_docs = sorted({p for _, p in routes} & DOC_PATHS)
+    check("enum: doc routes absent (ENABLE_API_DOCS off)", docs_on or not present_docs, str(present_docs))
+    for p in ("/docs", "/openapi.json", "/redoc"):
+        if not docs_on:
+            check(f"enum: GET {p} -> 404", hit("GET", p).status_code == 404)
+
+    protected = [(m, p) for m, p in routes
+                 if p != "/" and not p.startswith("/auth/") and not (docs_on and p in DOC_PATHS)]
+    check("enum: found >= 13 protected routes", len(protected) >= 13, f"found {len(protected)}: {protected}")
+    calls_before = len(LLM_CALLS)
+    for method, path in protected:
+        url = re.sub(r"\{[^}]+\}", lambda _m: str(uuid.uuid4()), path)
+        kw = {"json": {}} if method in ("POST", "PUT", "PATCH") else {}
+        r = httpx.request(method, BASE + url, follow_redirects=False, timeout=30, **kw)
+        check(f"enum: no cookie {method} {path} -> 401", r.status_code == 401, str(r.status_code))
+    check("enum: LLM not called without login", len(LLM_CALLS) == calls_before)
+    check("enum: GET / stays public", hit("GET", "/").status_code == 200)
+
+
+def run_isolation_checks():
+    model = next((m for m in ["gemini-2.5-flash-lite", "gemini-2.5-flash"] if main.is_model_allowed(m)), None)
+    check("iso setup: an allowed gemini model exists", model is not None, "no allowed model")
+    if model is None:
+        return
+
+    uid_a, tok_a = make_user("a")
+    uid_b, tok_b = make_user("b")
+    with httpx.Client(base_url=BASE, timeout=30, cookies={"session": tok_a}) as ca, \
+            httpx.Client(base_url=BASE, timeout=30, cookies={"session": tok_b}) as cb:
+        _run_isolation(ca, cb, uid_a, uid_b, model)
+
+
+def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str):
+    # ---------- A 的完整流程（第一段：送、列、取、建分支、分支內送、幽靈化）----------
+    st, h, body = post_stream(ca, "/chat", {"message": "hello A", "model": model})
+    check("A flow: send /chat -> 200 and mock reply", st == 200 and body == "MOCK-REPLY", f"{st} {body!r}")
+    R, A1 = h.get("x-user-message-id"), h.get("x-message-id")
+    check("A flow: user and AI messages carry user_id=A", db_owner(R) == uid_a and db_owner(A1) == uid_a,
+          f"{db_owner(R)} {db_owner(A1)}")
+    check("A flow: AI content persisted", wait_db_content(A1, "MOCK-REPLY"))
+    r = ca.patch(f"/chats/{R}/title", json={"title": "A title"})
+    check("A flow: title -> 200", r.status_code == 200 and r.json().get("title") == "A title", r.text[:200])
+
+    for sort_by in ("created", "updated"):
+        r = ca.get("/chats/roots", params={"sort_by": sort_by})
+        ids_in = [i["id"] for i in r.json()] if r.status_code == 200 else []
+        check(f"A flow: roots sort_by={sort_by} lists R", r.status_code == 200 and R in ids_in, f"{r.status_code}")
+        check(f"A flow: roots sort_by={sort_by} no user_id key", "user_id" not in r.text)
+    for name in ("history", "tree"):
+        r = ca.get(f"/chats/{R}/{name}")
+        ids_in = [i["id"] for i in r.json()] if r.status_code == 200 else []
+        check(f"A flow: {name} contains R and A1", R in ids_in and A1 in ids_in, f"{r.status_code}")
+        check(f"A flow: {name} no user_id key", "user_id" not in r.text)
+
+    r = ca.post(f"/chats/{R}/branches", json={"anchor_message_id": A1, "anchor_text": "MOCK",
+                                             "anchor_start": 0, "anchor_end": 4})
+    check("A flow: create branch -> 200", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+    check("A flow: create branch response no user_id", "user_id" not in r.text)
+    BR = r.json().get("branch_id")
+    with Session(engine) as s:
+        b = s.get(Branch, uuid.UUID(BR))
+        check("A flow: branch carries user_id=A", b is not None and b.user_id == uid_a)
+
+    st, h, body = post_stream(ca, "/chat", {"message": "branch Q", "model": model, "parent_id": A1,
+                                            "branch_id": BR, "anchor_message_id": A1})
+    check("A flow: send in branch -> 200", st == 200 and body == "MOCK-REPLY", f"{st} {body!r}")
+    RB1, RB1_AI = h.get("x-user-message-id"), h.get("x-message-id")
+    check("A flow: branch messages carry user_id=A", db_owner(RB1) == uid_a and db_owner(RB1_AI) == uid_a)
+    check("A flow: branch AI content persisted", wait_db_content(RB1_AI, "MOCK-REPLY"))
+    with Session(engine) as s:
+        b = s.get(Branch, uuid.UUID(BR))
+        check("A flow: branch root_message_id filled by first message", b.root_message_id == uuid.UUID(RB1))
+    r = ca.get(f"/chats/{R}/branches")
+    check("A flow: list branches contains BR", r.status_code == 200 and any(i["id"] == BR for i in r.json()))
+    check("A flow: list branches no user_id key", "user_id" not in r.text)
+
+    st, h, body = post_stream(ca, f"/messages/{A1}/regenerate", {"model": model})
+    check("A flow: regenerate A1 -> 200", st == 200 and body == "MOCK-REPLY", f"{st} {body!r}")
+    check("A flow: regenerate orphans BR (header)", BR in h.get("x-orphaned-branch-ids", ""))
+    r = ca.get("/branches/orphaned")
+    items = r.json() if r.status_code == 200 else []
+    check("A flow: orphaned lists BR with exact keys",
+          any(i["id"] == BR for i in items)
+          and all(set(i) == {"id", "title", "anchor_text", "root_message_id", "created_at"} for i in items),
+          f"{r.status_code} {r.text[:200]}")
+    check("A flow: orphaned no user_id key", "user_id" not in r.text)
+
+    # ---------- B 與 NULL 資料 ----------
+    B_ROOT = make_msg(uid_b, "user", "B root", title="B title")
+    B_AI = make_msg(uid_b, "assistant", "B-AI-CONTENT", parent_id=B_ROOT)
+    B_BR = make_orphan(uid_b, "B orphan")
+    N_ROOT = make_msg(None, "user", "NULL root", title="NULL title", null_owner=True)
+    N_AI = make_msg(None, "assistant", "NULL-AI-CONTENT", parent_id=N_ROOT, null_owner=True)
+    N_BR = make_orphan(None, "NULL orphan", null_owner=True)
+    N_BR_ROOT = make_msg(None, "user", "NULL branch root", branch_id=N_BR, null_owner=True)
+    with Session(engine) as s:
+        nb = s.get(Branch, N_BR)
+        nb.root_message_id = N_BR_ROOT
+        s.add(nb)
+        s.commit()
+
+    snap0 = snap([uid_a, uid_b])
+    null0 = snap_null()
+    calls0 = len(LLM_CALLS)
+
+    # ---------- B 對 A 的資料：每條路由 404 ----------
+    res = foreign_matrix(cb, R, A1, BR, B_ROOT, B_AI, B_BR, model)
+    for name, status in res:
+        check(f"B vs A: {name} -> 404", status == 404, str(status))
+    # B 單獨用 A 的 parent_id / branch_id / anchor_message_id 打 /chat（上面已含，這裡再確認筆數）
+    check("B vs A: A's/B's rows unchanged", snap([uid_a, uid_b]) == snap0)
+    check("B vs A: message count unchanged", len(snap([uid_a, uid_b])[0]) == len(snap0[0]))
+    check("B vs A: A title unchanged", snap([uid_a])[0][R][1] == "A title")
+    check("B vs A: LLM not called", len(LLM_CALLS) == calls0, f"{len(LLM_CALLS) - calls0} calls")
+    for sort_by in ("created", "updated"):
+        r = cb.get("/chats/roots", params={"sort_by": sort_by})
+        ids_in = [i["id"] for i in r.json()] if r.status_code == 200 else []
+        check(f"B vs A: B roots sort_by={sort_by} has only B's", str(B_ROOT) in ids_in and R not in ids_in
+              and str(N_ROOT) not in ids_in, str(ids_in))
+    r = cb.get("/branches/orphaned")
+    ids_in = [i["id"] for i in r.json()] if r.status_code == 200 else []
+    check("B vs A: B orphaned lists only B's", str(B_BR) in ids_in and BR not in ids_in and str(N_BR) not in ids_in,
+          str(ids_in))
+    check("B control: own history works", cb.get(f"/chats/{B_ROOT}/history").status_code == 200)
+    check("B control: /api/free-models with login -> 200", cb.get("/api/free-models").status_code == 200)
+
+    # ---------- user_id 為 NULL 的舊資料：登入者都讀不到 ----------
+    res = foreign_matrix(ca, N_ROOT, N_AI, N_BR, R, A1, BR, model)
+    for name, status in res:
+        check(f"NULL rows as A: {name} -> 404", status == 404, str(status))
+    r = ca.get(f"/chats/{N_BR_ROOT}/history")
+    check("NULL rows as A: branch-root history -> 404", r.status_code == 404, str(r.status_code))
+    for sort_by in ("created", "updated"):
+        r = ca.get("/chats/roots", params={"sort_by": sort_by})
+        ids_in = [i["id"] for i in r.json()] if r.status_code == 200 else []
+        check(f"NULL rows as A: roots sort_by={sort_by} excludes NULL rows",
+              R in ids_in and str(N_ROOT) not in ids_in and str(N_BR_ROOT) not in ids_in, str(ids_in))
+    r = ca.get("/branches/orphaned")
+    ids_in = [i["id"] for i in r.json()] if r.status_code == 200 else []
+    check("NULL rows as A: orphaned excludes NULL branch", str(N_BR) not in ids_in and BR in ids_in, str(ids_in))
+    check("NULL rows: unchanged and still exist", snap_null() == null0)
+    check("NULL rows: A/B rows unchanged", snap([uid_a, uid_b]) == snap0)
+    check("NULL rows: LLM not called", len(LLM_CALLS) == calls0, f"{len(LLM_CALLS) - calls0} calls")
+
+    # ---------- 生成中：B 讀不到緩衝（先查擁有者、再查 GENERATIONS）----------
+    GATE.clear()
+    try:
+        with ca.stream("POST", "/chat", json={"message": "GATED run", "model": model}) as ra:
+            ai_if = ra.headers.get("x-message-id")
+            user_if = ra.headers.get("x-user-message-id")
+            buf = main.GENERATIONS.get(ai_if)
+            check("in-flight: generation is really in flight", ra.status_code == 200 and buf is not None
+                  and not buf["done"], f"{ra.status_code} buf={buf}")
+            with cb.stream("GET", f"/messages/{ai_if}/stream") as rb:
+                check("in-flight: B stream -> 404", rb.status_code == 404, str(rb.status_code))
+            with httpx.stream("GET", f"{BASE}/messages/{ai_if}/stream", timeout=10) as rn:
+                check("in-flight: no cookie stream -> 401", rn.status_code == 401, str(rn.status_code))
+            with ca.stream("GET", f"/messages/{ai_if}/stream", params={"offset": 0}) as rs:
+                check("in-flight: A own stream -> 200", rs.status_code == 200, str(rs.status_code))
+                GATE.set()
+                resumed = rs.read().decode("utf-8")
+            check("in-flight: A stream reaches the end", resumed == "MOCK-REPLY", repr(resumed))
+            first = ra.read().decode("utf-8")
+            check("in-flight: A original response complete", first == "MOCK-REPLY", repr(first))
+    finally:
+        GATE.set()
+    check("in-flight: AI content persisted", wait_db_content(ai_if, "MOCK-REPLY"))
+    with cb.stream("GET", f"/messages/{ai_if}/stream") as rb:
+        check("in-flight: B stream after done -> 404", rb.status_code == 404, str(rb.status_code))
+    check("in-flight: rows unchanged for others", snap([uid_b])[0] == {k: v for k, v in snap0[0].items()
+                                                                        if v[-1] == uid_b})
+
+    # ---------- A 的完整流程（第二段：重連、再送、刪除）----------
+    r = ca.post(f"/branches/{BR}/relink", json={"root_id": R, "anchor_message_id": A1, "anchor_start": 0,
+                                               "anchor_end": 4, "anchor_text": "MOCK"})
+    check("A flow: relink -> 200", r.status_code == 200 and r.json().get("reused") is False,
+          f"{r.status_code} {r.text[:200]}")
+    check("A flow: relink response no user_id", "user_id" not in r.text)
+    r = ca.get("/branches/orphaned")
+    check("A flow: orphaned no longer lists BR", BR not in [i["id"] for i in r.json()])
+    r = ca.get(f"/chats/{R}/branches")
+    check("A flow: BR precise after relink", any(i["id"] == BR and i["precise"] is True for i in r.json()))
+    st, h, body = post_stream(ca, "/chat", {"message": "after relink", "model": model,
+                                            "parent_id": RB1_AI, "branch_id": BR})
+    check("A flow: send in relinked branch -> 200", st == 200 and body == "MOCK-REPLY", f"{st} {body!r}")
+    wait_db_content(h.get("x-message-id"), "MOCK-REPLY")
+
+    # ---------- 父子 user_id 一致（限本次資料）----------
+    uids = [str(uid_a), str(uid_b)]
+    with Session(engine) as s:
+        mismatch = s.exec(sa_text(
+            "SELECT count(*) FROM message c JOIN message p ON c.parent_id = p.id "
+            "WHERE c.user_id IS DISTINCT FROM p.user_id "
+            "AND (c.user_id = ANY(CAST(:u AS uuid[])) OR p.user_id = ANY(CAST(:u AS uuid[])))"
+        ), params={"u": uids}).scalar()
+    check("parent/child user_id mismatch count (this run) == 0", mismatch == 0, str(mismatch))
+
+    # 刪除用沒有分支的那串（生成中測試建立的）。含分支根訊息的對話目前刪除會被 FK 擋成 500（既有行為，
+    # 與擁有者檢查無關），由 cleanup_iso 清掉 R 那串。
+    r = ca.delete(f"/chats/{user_if}")
+    check("A flow: delete -> 200 (2 messages)", r.status_code == 200 and r.json().get("deleted_count") == 2,
+          f"{r.status_code} {r.text[:200]}")
+    check("A flow: history after delete -> 404", ca.get(f"/chats/{user_if}/history").status_code == 404)
+    check("B rows still exist after A delete", snap([uid_b])[0].keys() == {k for k, v in snap0[0].items()
+                                                                          if v[-1] == uid_b})
+
+
+def cleanup_iso():
+    """刪除本腳本在隔離測試建立的資料：訊息、分支（含 user_id 為 NULL 的）、auth_session、使用者。"""
+    try:
+        with Session(engine) as s:
+            msgs = s.exec(select(Message).where(Message.user_id.in_(ISO_UIDS))).all() if ISO_UIDS else []
+            msg_ids = {m.id for m in msgs} | set(NULL_MSG_IDS)
+            branch_ids = {m.branch_id for m in msgs if m.branch_id} | set(NULL_BRANCH_IDS)
+            if NULL_MSG_IDS:
+                branch_ids |= {m.branch_id for m in s.exec(
+                    select(Message).where(Message.id.in_(NULL_MSG_IDS))).all() if m.branch_id}
+            if ISO_UIDS:
+                branch_ids |= set(s.exec(select(Branch.id).where(Branch.user_id.in_(ISO_UIDS))).all())
+            if msg_ids:
+                branch_ids |= set(s.exec(select(Branch.id).where(
+                    Branch.anchor_message_id.in_(msg_ids)
+                    | Branch.root_message_id.in_(msg_ids)
+                    | Branch.attach_root_id.in_(msg_ids)
+                )).all())
+        if branch_ids:
+            with Session(engine) as s:
+                for b in s.exec(select(Branch).where(Branch.id.in_(branch_ids))).all():
+                    b.root_message_id = None
+                    b.anchor_message_id = None
+                    b.attach_root_id = None
+                    b.parent_branch_id = None
+                    s.add(b)
+                s.commit()
+        if msg_ids:
+            with Session(engine) as s:
+                for m in s.exec(select(Message).where(Message.id.in_(msg_ids))).all():
+                    m.parent_id = None
+                    m.branch_id = None
+                    m.anchor_message_id = None
+                    s.add(m)
+                s.commit()
+            with Session(engine) as s:
+                for m in s.exec(select(Message).where(Message.id.in_(msg_ids))).all():
+                    s.delete(m)
+                s.commit()
+        if branch_ids:
+            with Session(engine) as s:
+                for b in s.exec(select(Branch).where(Branch.id.in_(branch_ids))).all():
+                    s.delete(b)
+                s.commit()
+        if ISO_UIDS:
+            with Session(engine) as s:
+                for a in s.exec(select(AuthSession).where(AuthSession.user_id.in_(ISO_UIDS))).all():
+                    s.delete(a)
+                s.commit()
+                for u in s.exec(select(User).where(User.id.in_(ISO_UIDS))).all():
+                    s.delete(u)
+                s.commit()
+        print(f"cleanup: isolation data removed ({len(msg_ids)} message(s), {len(branch_ids)} branch(es), "
+              f"{len(ISO_UIDS)} user(s))")
+    except Exception as e:
+        print(f"cleanup (isolation) FAILED: {e}")
+
+
 def cleanup():
     try:
         with Session(engine) as s:
@@ -326,11 +769,17 @@ def main_entry() -> int:
         server = start_server()
         run_login_flow()
         run_endpoint_checks()
+        run_route_enumeration()
+        run_isolation_checks()
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         check("harness setup", False, f"exception: {e!r}")
     finally:
         if server is not None:
             server.should_exit = True
+        GATE.set()
+        cleanup_iso()
         cleanup()
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
