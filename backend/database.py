@@ -47,8 +47,10 @@ def _build_database_url() -> str:
 DATABASE_URL = _build_database_url()
 
 # 建立引擎
-# echo=True 會在終端機印出所有 SQL 語法，方便 Debug
-engine = create_engine(DATABASE_URL, echo=True)
+# echo 會在終端機印出所有 SQL 語法與參數（參數可能含對話內容），所以預設關閉；
+# 只在本機除錯時設定 SQL_ECHO=true。
+_SQL_ECHO = (os.getenv("SQL_ECHO", "false") or "").strip().lower() in ("1", "true", "yes", "on")
+engine = create_engine(DATABASE_URL, echo=_SQL_ECHO)
 
 # 依賴注入 (Dependency Injection) 用
 # 讓 FastAPI 可以拿到資料庫連線
