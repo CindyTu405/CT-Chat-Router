@@ -104,3 +104,13 @@
 - **原因（讀程式＋截圖判斷）**：E3 的 `BRANCH_ENTRY_TEXT_CLASS` 用 `truncate`（`white-space: nowrap`）。泡泡寬度依內容決定，最長的入口不換行就把泡泡撐到它的全長，內文也跟著用這個寬度排版，看起來就像內文不換行。
 - **修正**：入口改成可換行（`whitespace-normal break-words`），併入 E3。
 - **狀態**：已完成（2bbf0af，使用者確認換行正常）
+
+## B9：正式環境的 SQL 日誌可能記下使用者資料
+
+- **發生於**：`backend/database.py` 的 `create_engine(DATABASE_URL, echo=True)`，所有環境
+- **發現於**：H3 部署後檢查 `docker compose logs api`（2026-11-05）
+- **重現**：`sudo docker compose logs api --tail 5` → 看得到 SQL 與參數，例如 `{'session_id': ...}`
+- **預期**：正式環境不記錄 SQL 語句與參數，只在開發需要時打開
+- **影響**：SQLAlchemy 的 echo 會連參數一起輸出，寫入訊息時對話內容可能進入容器日誌
+- **修正**：預設關閉，只有環境變數 `SQL_ECHO` 為真時才開啟
+- **狀態**：修正中
