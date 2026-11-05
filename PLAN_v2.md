@@ -298,11 +298,11 @@ chat-{root_id}-{date}/
 
 | 編號 | 負責 | 內容 | 狀態 |
 |---|---|---|---|
-| H0 | 使用者 | Cloudflare Access 臨時門禁，白名單 Email | 待做 |
-| H1 | 使用者 | 確認 Elastic IP；Origin Certificate 放到 VM `/etc/fluentbranch/tls/`；VM `.env` 加 `SESSION_SECRET_KEY` | 待做 |
+| H0 | 使用者 | Cloudflare Access 臨時門禁，白名單 Email | 完成（2026-11-05） |
+| H1 | 使用者 | 確認 Elastic IP；Origin Certificate 放到 VM `/etc/fluentbranch/tls/`；VM `.env` 加 `SESSION_SECRET_KEY` | 完成（2026-11-05） |
 | H2 | implementer | 新增 `frontend/nginx.prod.conf`；修改 `docker-compose.prod.yml` | 完成並本機驗證（34ddf61）；未部署 |
-| H3 | 使用者 | VM 部署；切 Full (strict)；開 Always Use HTTPS | 待做 |
-| H4 | 使用者 | Security Group：443 只開 Cloudflare IP，移除 80 對外 | 待做 |
+| H3 | 使用者 | VM 部署；切 Full (strict)；開 Always Use HTTPS | 完成（2026-11-05） |
+| H4 | 使用者 | Security Group：443 只開 Cloudflare IP，移除 80 對外 | 完成（2026-11-05） |
 
 H2 驗收：
 1. nginx 以測試憑證執行 `nginx -t` → `test is successful`
