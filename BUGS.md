@@ -93,7 +93,7 @@
 - **重現**：選取「最佳造訪季節**： 6–8 月白天」這種跨粗體結尾的文字建立分支 → 高亮看起來是兩段
 - **原因**：`rehypeHighlight` 依設計在每個 text node 內各包一個 `<mark>`（不破壞粗體結構），而 `ANCHOR_MARK_CLASS` 每段都有 `rounded-sm px-0.5`，相鄰兩段之間出現圓角與間隙；hover 也是各段各自變色（使用者截圖確認）。
 - **修正方向（使用者同意先做出來看效果）**：`rehypeHighlight` 在同一分支的第一段 mark 加 `data-first`、最後一段加 `data-last`；樣式只在 first 左側、last 右側有圓角與留白。滑過任一段 → 同一分支所有段一起變色（在 MessageList 容器用事件委派，對同 `data-branch` 的 mark 設 `data-hover` 屬性，樣式用 `data-[hover]:`，不經 React state，避免整段 Markdown 重新渲染）。
-- **狀態**：規格已定，待教學文件與「開始」
+- **狀態**：✅ 已修正 f785aed（使用者瀏覽器確認）
 
 ---
 
