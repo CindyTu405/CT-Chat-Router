@@ -124,4 +124,14 @@
 - **原因**：authlib 清掉 state 後暫存內容變空，middleware 在回應最後補上刪除同名 cookie 的標頭
 - **注意**：Python cookie jar（`TestClient`／httpx）重播時 token 仍在，會誤判沒問題；測試要用 curl 並檢查 `Set-Cookie` 標頭
 - **修正方向**：`SessionMiddleware` 改用 `session_cookie="oauth_state"`（S-U1-1）。教學：`docs/20261105_(S-U1)user-ownership-guide.html`
-- **狀態**：待修，等使用者說「開始」
+- **狀態**：已修（6541856），auth_harness 通過（含移除修正後測試會失敗）；待真實瀏覽器驗證（S-U1-8）
+
+## B11：刪除有分支的對話會失敗，前端沒有提示
+
+- **發生於**：`DELETE /chats/{root_id}`（`backend/main.py`）與 `App.jsx` 的刪除流程；早於 S-U1
+- **發現於**：S-U1-4 harness（2026-11-05）
+- **重現**：對話中有錨定或已有訊息的分支 → 刪除 → 500。在會 rollback 的交易中確認，刪除被引用的訊息會撞上 `fk_branch_anchor_message_id_message`、`fk_branch_root_message_id_message`。尚未在瀏覽器重現
+- **預期**：刪除成功，或清楚告知失敗原因
+- **原因**：刪除前只清 `attach_root_id`，沒有處理 `anchor_message_id`、`root_message_id`。前端的 `fetch` 沒檢查 `response.ok`，500 也照常刷新列表，對話仍在且沒有錯誤訊息
+- **修正方向（待討論）**：刪除對話時，對話內的分支要一起刪，還是變成幽靈？刪除的範圍涉及 X1（刪除前匯出 JSON）
+- **狀態**：待討論

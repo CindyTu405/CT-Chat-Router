@@ -1,5 +1,6 @@
 from typing import Optional, List
 from sqlmodel import SQLModel, Field
+from sqlalchemy import UniqueConstraint
 from datetime import datetime, timezone
 from pydantic import BaseModel, field_serializer
 import uuid
@@ -57,6 +58,10 @@ class Branch(SQLModel, table=True):
     title: Optional[str] = None
     parent_branch_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="branch.id"
+    )
+    # (S-U1-3) 擁有者；暫時允許 NULL（舊資料），API 回應不輸出
+    user_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="user.id", index=True, exclude=True
     )
     # naive UTC，理由同 Message.created_at
     created_at: datetime = Field(
@@ -119,6 +124,10 @@ class MessageBase(SQLModel):
 class Message(MessageBase, table=True):
     # 使用 UUID 作為 ID，比數字 1,2,3 更適合分散式系統
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    # (S-U1-3) 擁有者；暫時允許 NULL（舊資料），API 回應不輸出
+    user_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="user.id", index=True, exclude=True
+    )
 
 # 第三層：回傳給前端的白名單 (繼承 Base，並加入擴充欄位)
 # 注意：這裡必須重新定義 id，確保序列化時能正確導出
@@ -136,7 +145,6 @@ class ChatRequest(SQLModel):
     message: str
     parent_id: Optional[uuid.UUID] = None
     model: str = "gpt-3.5-turbo"
-    session_id: str = "default"
     # --- Phase 2：分支 (Branch) ---
     # 這次對話要寫入哪條分支 (None = 不歸屬分支，維持舊行為)
     branch_id: Optional[uuid.UUID] = None
@@ -181,6 +189,9 @@ class FreeModelsCache(SQLModel, table=True):
 # ===== Phase 0：OAuth 使用者與登入 session =====
 
 class User(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("oauth_provider", "oauth_sub", name="uq_user_oauth_provider_sub"),
+    )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     # OAuth provider 名稱："google" 或 "github"
     oauth_provider: str = Field(index=True)
@@ -201,7 +212,7 @@ class AuthSession(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
     # 只存 token 的 hash，不存原始 token（原始 token 只放在 httpOnly cookie）
-    token_hash: str = Field(index=True)
+    token_hash: str = Field(unique=True, index=True)
     expires_at: datetime
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)

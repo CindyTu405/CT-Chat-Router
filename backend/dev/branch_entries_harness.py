@@ -3,12 +3,13 @@
 用法：cd backend && uv run python dev/branch_entries_harness.py
 
 做的事：
-- 連 docker chat_db（沿用 database.py 的設定），用唯一的 session_id 建測試資料，結束時清掉。
+- 連 docker chat_db（沿用 database.py 的設定），建立兩個測試 User + AuthSession（A、B；Cookie: session=<token>），
+  測試資料都寫 user_id，結束時只清掉本腳本建立的 user／auth_session／分支／訊息。
 - 把 main.gemini_chat_stream / main.openrouter_chat_stream 換成假串流（絕不呼叫真模型）。
 - 把 main.get_free_models 換成空清單，避免白名單檢查去打 OpenRouter 的模型清單。
 - 在 127.0.0.1:8766 起真的 uvicorn（背景 thread），用 HTTP 打 API。
 - E1：建立分支的重疊降級、範圍相同重用、offset 驗證（422 且不寫入）、回傳欄位。
-- E2：regenerate 幽靈化寫 attach_root_id、幽靈清單（session 歸屬）、重連的各種拒絕、重連成功後的欄位與
+- E2：regenerate 幽靈化寫 attach_root_id、幽靈清單（user 歸屬）、重連的各種拒絕、重連成功後的欄位與
   分支對話上下文（假 LLM 收到的 history）、刪除對話時清掉 attach_root_id。
 """
 import asyncio
@@ -27,7 +28,8 @@ from sqlmodel import Session, select  # noqa: E402
 
 import main  # noqa: E402
 from database import engine  # noqa: E402
-from models import Branch, Message  # noqa: E402
+import auth_routes  # noqa: E402
+from models import AuthSession, Branch, Message, User  # noqa: E402
 
 # database.py 的 echo=True 會印出每一句 SQL，這個腳本只要看測試結果，關掉它（只影響本腳本）。
 engine.echo = False
@@ -52,7 +54,7 @@ async def fake_stream(message, history, model):
 main.gemini_chat_stream = fake_stream
 main.openrouter_chat_stream = fake_stream
 
-# 測試中建立、但沒有任何訊息可以反查 session 的分支（清理時要明確刪）
+# 測試中建立、user_id 為 NULL 且沒有任何訊息可以反查的分支（清理時要明確刪）
 EXTRA_BRANCH_IDS: list = []
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -96,7 +98,7 @@ def db_msg(msg_id) -> dict:
             "parent_id": m.parent_id,
             "anchor_message_id": m.anchor_message_id,
             "has_branch": m.has_branch,
-            "session_id": m.session_id,
+            "user_id": m.user_id,
         }
 
 
@@ -123,8 +125,8 @@ def relink(client: httpx.Client, branch_id, root_id, anchor_id, start=None, end=
     return client.post(f"/branches/{branch_id}/relink", json=body)
 
 
-def orphaned(client: httpx.Client, sid: str):
-    r = client.get("/branches/orphaned", params={"session_id": sid})
+def orphaned(client: httpx.Client):
+    r = client.get("/branches/orphaned")
     return r.status_code, (r.json() if r.status_code == 200 else [])
 
 
@@ -136,11 +138,11 @@ def regen(client: httpx.Client, msg_id, model: str):
         return r.status_code, r.headers, body
 
 
-def chat(client: httpx.Client, sid: str, message: str, parent_id, model: str, branch_id=None):
+def chat(client: httpx.Client, message: str, parent_id, model: str, branch_id=None):
     """送一則訊息（假 LLM），讀完整個 body，回傳 (status, headers, text)。"""
     main.limiter.reset()
     body = {"message": message, "parent_id": str(parent_id) if parent_id else None,
-            "model": model, "session_id": sid}
+            "model": model}
     if branch_id is not None:
         body["branch_id"] = str(branch_id)
     with client.stream("POST", "/chat", json=body) as r:
@@ -148,18 +150,19 @@ def chat(client: httpx.Client, sid: str, message: str, parent_id, model: str, br
         return r.status_code, r.headers, text_
 
 
-def make_legacy_ghost(sid: str, title: str, anchor_text: str, with_root: bool = True) -> dict:
-    """直接寫入一個「舊資料」幽靈：attach_root_id 為 NULL，靠首則訊息的 session 判斷歸屬。
-    with_root=False → 沒有任何訊息（既沒有 attach 也沒有 root），歸屬不明。"""
+def make_legacy_ghost(uid, title: str, anchor_text: str, with_root: bool = True) -> dict:
+    """直接寫入一個 attach_root_id 為 NULL 的幽靈，歸屬 = Branch.user_id。
+    with_root=False → 沒有任何訊息，且 user_id 為 NULL（無人擁有的舊資料）。"""
     with Session(engine) as s:
         br = Branch(anchor_message_id=None, anchor_start=None, anchor_end=None,
-                    anchor_text=anchor_text, title=title, is_orphaned=True, attach_root_id=None)
+                    anchor_text=anchor_text, title=title, is_orphaned=True, attach_root_id=None,
+                    user_id=uid if with_root else None)
         s.add(br)
         s.flush()
         root_id = None
         if with_root:
             m = Message(role="user", content=f"{title} question", parent_id=None,
-                        session_id=sid, branch_id=br.id)
+                        user_id=uid, branch_id=br.id)
             s.add(m)
             s.flush()
             br.root_message_id = m.id
@@ -171,37 +174,37 @@ def make_legacy_ghost(sid: str, title: str, anchor_text: str, with_root: bool = 
         return {"branch_id": br.id, "root_id": root_id}
 
 
-def seed(sid: str, sid_other: str) -> dict:
+def seed(uid, uid_other) -> dict:
     """主對話樹 R → {A, A2}（A2 的內容用來驗證重連後的 history）；另一棵樹 R2 → AX；
-    sid_other 的一棵樹 R_other（只為了讓 sid_other 有歸屬資料）。"""
+    uid_other 的一棵樹 R_other（只為了讓另一位使用者有資料）。"""
     with Session(engine) as s:
         R = Message(role="user", content="E2 root question", parent_id=None,
-                    session_id=sid, title="E2 harness")
+                    user_id=uid, title="E2 harness")
         s.add(R)
         s.commit()
         s.refresh(R)
         A = Message(role="assistant", content=A_TEXT, parent_id=R.id,
-                    session_id=sid, model_used="gemini-2.5-flash")
+                    user_id=uid, model_used="gemini-2.5-flash")
         A2 = Message(role="assistant", content=A2_TEXT, parent_id=R.id,
-                     session_id=sid, model_used="gemini-2.5-flash")
+                     user_id=uid, model_used="gemini-2.5-flash")
         s.add_all([A, A2])
         s.commit()
         s.refresh(A)
         s.refresh(A2)
 
         R2 = Message(role="user", content="E2 other tree", parent_id=None,
-                     session_id=sid, title="E2 other")
+                     user_id=uid, title="E2 other")
         s.add(R2)
         s.commit()
         s.refresh(R2)
         AX = Message(role="assistant", content=AX_TEXT, parent_id=R2.id,
-                     session_id=sid, model_used="gemini-2.5-flash")
+                     user_id=uid, model_used="gemini-2.5-flash")
         s.add(AX)
         s.commit()
         s.refresh(AX)
 
         R_other = Message(role="user", content="other session root", parent_id=None,
-                          session_id=sid_other, title="other")
+                          user_id=uid_other, title="other")
         s.add(R_other)
         s.commit()
         s.refresh(R_other)
@@ -211,11 +214,11 @@ def seed(sid: str, sid_other: str) -> dict:
 def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
     """E1 測試。out 用來把之後 E2 會用到的 branch id 傳出去（b1、b2、ov 等）。"""
     root_id = ids["R"]
-    sid = out["sid"]
+    uid = out["uid"]
     # E1 測試各用獨立的 AI 回覆（與 E2 的主線 A／A2 分開，互不影響）
-    ai_e1 = _make_ai(root_id, sid=sid, text="0123456789" * 4)   # 主要測試對象
-    ai_other = _make_ai(root_id, sid=sid, text="ABCDEFGHIJ" * 4)  # E1-e：不同則同 offset
-    ai_double = _make_ai(root_id, sid=sid, text="abcdefghij" * 4)  # E1-f：雙重疊
+    ai_e1 = _make_ai(root_id, uid=uid, text="0123456789" * 4)   # 主要測試對象
+    ai_other = _make_ai(root_id, uid=uid, text="ABCDEFGHIJ" * 4)  # E1-e：不同則同 offset
+    ai_double = _make_ai(root_id, uid=uid, text="abcdefghij" * 4)  # E1-f：雙重疊
 
     # ---- E1-a. 無重疊 → reused=false、demoted_ids=[]；回傳含 title/reused/demoted_ids ----
     try:
@@ -361,25 +364,25 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
         check("E1-i list", False, f"exception: {e!r}")
 
 
-def _make_ai(root_id, sid: str, text: str) -> uuid.UUID:
+def _make_ai(root_id, uid, text: str) -> uuid.UUID:
     """在 root 底下另外建一則 AI 回覆（E1 測試用，各自獨立，不影響 E2 的主線）。"""
     with Session(engine) as s:
         a = Message(role="assistant", content=text, parent_id=root_id,
-                    session_id=sid, model_used="gemini-2.5-flash")
+                    user_id=uid, model_used="gemini-2.5-flash")
         s.add(a)
         s.commit()
         s.refresh(a)
         return a.id
 
 
-def run_e2_tests(client: httpx.Client, ids: dict, sid: str, sid_other: str, model: str):
+def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, uid_other, model: str):
     R, A, A2, R2, AX = ids["R"], ids["A"], ids["A2"], ids["R2"], ids["AX"]
 
     # ---- E2-0. 準備：在 A 上建分支 BR（[0,8)），用 /chat 送第一則（分支首則訊息綁上 root）----
     try:
         r = create(client, R, A, "ORIG", 0, 8)
         BR = r.json()["branch_id"]
-        st, h, _ = chat(client, sid, "branch Q", A, model, branch_id=BR)
+        st, h, _ = chat(client, "branch Q", A, model, branch_id=BR)
         check("E2-0 setup: branch first message via /chat", st == 200, f"status={st}")
         RB1 = h.get("x-user-message-id")
         RB1_AI = h.get("x-message-id")
@@ -401,39 +404,39 @@ def run_e2_tests(client: httpx.Client, ids: dict, sid: str, sid_other: str, mode
     except Exception as e:
         check("E2-1 regen ghosting", False, f"exception: {e!r}")
 
-    # ---- E2-2. 幽靈清單依 session 過濾 ----
+    # ---- E2-2. 幽靈清單依 user 過濾（B 是另一位真實使用者）----
     try:
-        st, items = orphaned(client, sid)
-        check("E2-2 orphaned(sid): 200 and contains BR", st == 200 and any(i["id"] == str(BR) for i in items),
+        st, items = orphaned(client)
+        check("E2-2 orphaned(A): 200 and contains BR", st == 200 and any(i["id"] == str(BR) for i in items),
               f"status={st} ids={[i['id'] for i in items]}")
         if items:
             check("E2-2 orphaned item fields",
                   set(items[0].keys()) == {"id", "title", "anchor_text", "root_message_id", "created_at"},
                   f"keys={sorted(items[0].keys())}")
-        st2, items2 = orphaned(client, sid_other)
-        check("E2-2 orphaned(other sid): does not contain BR",
+        st2, items2 = orphaned(client_b)
+        check("E2-2 orphaned(other user): does not contain BR",
               st2 == 200 and not any(i["id"] == str(BR) for i in items2),
               f"status={st2} ids={[i['id'] for i in items2]}")
     except Exception as e:
         check("E2-2 orphaned list", False, f"exception: {e!r}")
 
-    # ---- E2-3. 舊資料幽靈（attach NULL，靠首則訊息 session 判斷）----
-    G_same = make_legacy_ghost(sid, "G-SAME", "same range")
-    G_range = make_legacy_ghost(sid, "G-RANGE", "range")
-    G_wrong = make_legacy_ghost(sid, "G-WRONG", "wrong tree")
-    G_other = make_legacy_ghost(sid_other, "G-OTHER", "other session")
-    G_unowned = make_legacy_ghost(sid, "G-UNOWNED", "nobody", with_root=False)
+    # ---- E2-3. attach NULL 的幽靈（歸屬 = Branch.user_id；G_unowned 的 user_id 為 NULL）----
+    G_same = make_legacy_ghost(uid, "G-SAME", "same range")
+    G_range = make_legacy_ghost(uid, "G-RANGE", "range")
+    G_wrong = make_legacy_ghost(uid, "G-WRONG", "wrong tree")
+    G_other = make_legacy_ghost(uid_other, "G-OTHER", "other user")
+    G_unowned = make_legacy_ghost(None, "G-UNOWNED", "nobody", with_root=False)
     try:
-        st, items = orphaned(client, sid)
+        st, items = orphaned(client)
         ids_sid = {i["id"] for i in items}
-        check("E2-3 legacy ghost (attach NULL) listed for its session",
+        check("E2-3 ghost (attach NULL) listed for its owner",
               str(G_range["branch_id"]) in ids_sid and str(G_same["branch_id"]) in ids_sid,
               f"ids={ids_sid}")
-        check("E2-3 unowned ghost (no messages) not listed",
+        check("E2-3 unowned ghost (user_id NULL) not listed",
               str(G_unowned["branch_id"]) not in ids_sid, "")
-        st2, items2 = orphaned(client, sid_other)
+        st2, items2 = orphaned(client_b)
         ids_other = {i["id"] for i in items2}
-        check("E2-3 legacy ghost of other session listed only for that session",
+        check("E2-3 ghost of other user listed only for that user",
               str(G_other["branch_id"]) in ids_other and str(G_other["branch_id"]) not in ids_sid
               and str(G_range["branch_id"]) not in ids_other,
               f"ids_other={ids_other}")
@@ -455,7 +458,7 @@ def run_e2_tests(client: httpx.Client, ids: dict, sid: str, sid_other: str, mode
     except Exception as e:
         check("E2-5 random branch id", False, f"exception: {e!r}")
 
-    for label, g in [("other session ghost", G_other), ("unowned ghost", G_unowned)]:
+    for label, g in [("other user ghost", G_other), ("unowned ghost", G_unowned)]:
         try:
             before = db_branch(g["branch_id"])
             r = relink(client, g["branch_id"], R, A2, 10, 18)
@@ -533,7 +536,7 @@ def run_e2_tests(client: httpx.Client, ids: dict, sid: str, sid_other: str, mode
         ov = db_branch(OV)
         check("E2-6 relink BR: OV demoted (start/end NULL)", ov["anchor_start"] is None and ov["anchor_end"] is None,
               f"ov={ov}")
-        st, items = orphaned(client, sid)
+        st, items = orphaned(client)
         check("E2-6 after relink: GET /chats/R/branches contains BR precise",
               any(i["id"] == str(BR) and i["precise"] is True
                   for i in client.get(f"/chats/{R}/branches").json()),
@@ -543,7 +546,7 @@ def run_e2_tests(client: httpx.Client, ids: dict, sid: str, sid_other: str, mode
     except Exception as e:
         check("E2-6 relink success", False, f"exception: {e!r}")
 
-    # ---- E2-7. 非幽靈 → 409（BR 現在是非幽靈，屬於 sid）----
+    # ---- E2-7. 非幽靈 → 409（BR 現在是非幽靈，屬於 A）----
     try:
         before = db_branch(BR)
         r = relink(client, BR, R, A2, 0, 3)
@@ -555,7 +558,7 @@ def run_e2_tests(client: httpx.Client, ids: dict, sid: str, sid_other: str, mode
     # ---- E2-8. 重連後在分支送訊息：假 LLM 收到的 history 以新錨點為上下文 ----
     try:
         LLM_CALLS.clear()
-        st, _, _ = chat(client, sid, "after relink Q", RB1_AI, model, branch_id=BR)
+        st, _, _ = chat(client, "after relink Q", RB1_AI, model, branch_id=BR)
         check("E2-8 chat in relinked branch: 200", st == 200, f"status={st}")
         contents = [c for _, c in LLM_CALLS[-1]["history"]] if LLM_CALLS else []
         check("E2-8 history contains new anchor content (A2)", A2_TEXT in contents,
@@ -567,11 +570,11 @@ def run_e2_tests(client: httpx.Client, ids: dict, sid: str, sid_other: str, mode
 
     # ---- E2-9. 原對話被刪：幽靈保留，attach_root_id 變 NULL ----
     try:
-        RT = _make_root(sid, "E2 tree T")
-        AT = _make_ai(RT, sid, "T-AI-" * 8)
+        RT = _make_root(uid, "E2 tree T")
+        AT = _make_ai(RT, uid, "T-AI-" * 8)
         r = create(client, RT, AT, "T-ghost", 0, 4)
         BT = r.json()["branch_id"]
-        st, h, _ = chat(client, sid, "T branch Q", AT, model, branch_id=BT)
+        st, h, _ = chat(client, "T branch Q", AT, model, branch_id=BT)
         RT_B1 = h.get("x-user-message-id")
         st_r, _, _ = regen(client, AT, model)
         check("E2-9 setup: T branch ghosted", st_r == 200 and db_branch(BT)["is_orphaned"] is True
@@ -583,31 +586,45 @@ def run_e2_tests(client: httpx.Client, ids: dict, sid: str, sid_other: str, mode
         check("E2-9 ghost survives with attach_root_id NULL", b["is_orphaned"] is True and b["attach_root_id"] is None,
               f"b={b}")
         check("E2-9 branch first message survives", db_msg(RT_B1)["exists"] is True, "")
-        st3, items3 = orphaned(client, sid)
-        check("E2-9 ghost still listed for its session", any(i["id"] == str(BT) for i in items3),
+        st3, items3 = orphaned(client)
+        check("E2-9 ghost still listed for its owner", any(i["id"] == str(BT) for i in items3),
               f"ids={[i['id'] for i in items3]}")
     except Exception as e:
         check("E2-9 delete with ghost", False, f"exception: {e!r}")
 
 
-def _make_root(sid: str, text: str) -> uuid.UUID:
+def _make_root(uid, text: str) -> uuid.UUID:
     with Session(engine) as s:
-        r = Message(role="user", content=text, parent_id=None, session_id=sid, title=text)
+        r = Message(role="user", content=text, parent_id=None, user_id=uid, title=text)
         s.add(r)
         s.commit()
         s.refresh(r)
         return r.id
 
 
-def cleanup(sids: list[str]):
-    """清掉測試資料。順序：先斷開 branch 指向訊息的 FK → 斷開訊息之間的 FK → 刪訊息 → 刪分支。
-    分支由這些 session 的訊息（branch_id／anchor／root／attach）反查，外加 EXTRA_BRANCH_IDS。"""
+def make_user(label: str) -> tuple[uuid.UUID, str]:
+    """直接建立測試 User + AuthSession，回傳 (user_id, 原始 token)。"""
+    with Session(engine) as s:
+        u = User(oauth_provider="github", oauth_sub=f"branch-harness-{label}-{uuid.uuid4()}",
+                 email=f"branch-harness-{label}@example.invalid")
+        s.add(u)
+        s.commit()
+        s.refresh(u)
+        token = auth_routes.create_session_token(s, u)
+        return u.id, token
+
+
+def cleanup(uids: list):
+    """清掉測試資料（只動這些測試 user 的列，外加 EXTRA_BRANCH_IDS）。
+    順序：先斷開 branch 指向訊息的 FK → 斷開訊息之間的 FK → 刪訊息 → 刪分支 → 刪 auth_session → 刪 user。
+    分支由這些 user 的訊息（branch_id／anchor／root／attach）、Branch.user_id 反查。"""
     try:
         with Session(engine) as s:
-            msgs = s.exec(select(Message).where(Message.session_id.in_(sids))).all()
+            msgs = s.exec(select(Message).where(Message.user_id.in_(uids))).all()
             msg_ids = [m.id for m in msgs]
             branch_ids = {m.branch_id for m in msgs if m.branch_id}
             branch_ids |= set(EXTRA_BRANCH_IDS)
+            branch_ids |= set(s.exec(select(Branch.id).where(Branch.user_id.in_(uids))).all())
             if msg_ids:
                 branch_ids |= set(s.exec(select(Branch.id).where(
                     Branch.anchor_message_id.in_(msg_ids)
@@ -624,14 +641,14 @@ def cleanup(sids: list[str]):
                     s.add(b)
                 s.commit()
         with Session(engine) as s:
-            for m in s.exec(select(Message).where(Message.session_id.in_(sids))).all():
+            for m in s.exec(select(Message).where(Message.user_id.in_(uids))).all():
                 m.parent_id = None
                 m.branch_id = None
                 m.anchor_message_id = None
                 s.add(m)
             s.commit()
         with Session(engine) as s:
-            for m in s.exec(select(Message).where(Message.session_id.in_(sids))).all():
+            for m in s.exec(select(Message).where(Message.user_id.in_(uids))).all():
                 s.delete(m)
             s.commit()
         if branch_ids:
@@ -639,9 +656,16 @@ def cleanup(sids: list[str]):
                 for b in s.exec(select(Branch).where(Branch.id.in_(branch_ids))).all():
                     s.delete(b)
                 s.commit()
-        print(f"cleanup: removed sessions {sids}")
+        with Session(engine) as s:
+            for a in s.exec(select(AuthSession).where(AuthSession.user_id.in_(uids))).all():
+                s.delete(a)
+            s.commit()
+            for u in s.exec(select(User).where(User.id.in_(uids))).all():
+                s.delete(u)
+            s.commit()
+        print(f"cleanup: removed users {[str(u) for u in uids]}")
     except Exception as e:  # 清理失敗要看得到，但不蓋掉測試結果
-        print(f"cleanup FAILED for {sids}: {e}")
+        print(f"cleanup FAILED for {uids}: {e}")
 
 
 def start_server() -> uvicorn.Server:
@@ -658,9 +682,7 @@ def start_server() -> uvicorn.Server:
 
 
 def main_entry() -> int:
-    tag = uuid.uuid4()
-    sid = f"e-harness-{tag}"
-    sid_other = f"e-harness-other-{tag}"
+    created_uids: list = []
     server = None
     try:
         model = next(
@@ -668,19 +690,25 @@ def main_entry() -> int:
             None,
         )
         check("setup: an allowed gemini model exists", model is not None, "no allowed model")
-        ids = seed(sid, sid_other)
+        uid, token = make_user("a")
+        created_uids.append(uid)
+        uid_other, token_other = make_user("b")
+        created_uids.append(uid_other)
+        ids = seed(uid, uid_other)
         server = start_server()
-        with httpx.Client(base_url=BASE, timeout=30) as client:
-            out = {"sid": sid}
+        with httpx.Client(base_url=BASE, timeout=30, cookies={"session": token}) as client, \
+                httpx.Client(base_url=BASE, timeout=30, cookies={"session": token_other}) as client_b:
+            out = {"uid": uid}
             run_e1_tests(client, ids, out)
             if model is not None:
-                run_e2_tests(client, ids, sid, sid_other, model)
+                run_e2_tests(client, client_b, ids, uid, uid_other, model)
     except Exception as e:
         check("harness setup", False, f"exception: {e!r}")
     finally:
         if server is not None:
             server.should_exit = True
-        cleanup([sid, sid_other])
+        if created_uids:
+            cleanup(created_uids)
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     failed = [(n, d) for n, ok, d in RESULTS if not ok]

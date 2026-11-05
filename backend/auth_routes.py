@@ -3,7 +3,8 @@
 流程：
     GET /auth/{provider}/login      -> 轉去 provider 的授權頁 (authlib 會把 state 存進 session)
     GET /auth/{provider}/callback   -> 換 token、取 userinfo、upsert User、發 session cookie
-    GET /auth/logout                -> 刪掉 DB 裡的 AuthSession、清 cookie
+    GET /auth/me                    -> 目前登入者 (email / provider)
+    POST /auth/logout               -> 刪掉 DB 裡的 AuthSession、清 cookie
 
 安全設計：
     - 原始 session token 只放在 httpOnly cookie，資料庫只存 sha256 hash。
@@ -11,6 +12,7 @@
 """
 
 import hashlib
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -23,6 +25,8 @@ from sqlmodel import Session, select
 from database import get_session
 from models import AuthSession, User
 from oauth import is_provider_configured, oauth
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -59,6 +63,16 @@ def cookie_secure() -> bool:
         "yes",
         "on",
     )
+
+
+def frontend_url() -> str:
+    """前端網址（去掉結尾 /，避免組出 //?）。"""
+    return (os.getenv("FRONTEND_URL", "http://localhost:5173") or "").rstrip("/")
+
+
+def auth_error_redirect(code: str) -> RedirectResponse:
+    """OAuth 失敗一律 303 導回前端，帶 auth_error 代碼（不洩漏細節）。"""
+    return RedirectResponse(url=f"{frontend_url()}/?auth_error={code}", status_code=303)
 
 
 def ensure_supported_provider(provider: str) -> str:
@@ -175,10 +189,7 @@ async def oauth_login(provider: str, request: Request):
     ensure_supported_provider(provider)
 
     if not is_provider_configured(provider):
-        raise HTTPException(
-            status_code=503,
-            detail=f"OAuth provider '{provider}' is not configured on this server",
-        )
+        return auth_error_redirect("provider_unavailable")
 
     redirect_uri = str(request.url_for("oauth_callback", provider=provider))
     client = getattr(oauth, provider)
@@ -195,39 +206,53 @@ async def oauth_callback(
     ensure_supported_provider(provider)
 
     if not is_provider_configured(provider):
-        raise HTTPException(
-            status_code=503,
-            detail=f"OAuth provider '{provider}' is not configured on this server",
-        )
+        return auth_error_redirect("provider_unavailable")
 
     client = getattr(oauth, provider)
-    token = await client.authorize_access_token(request)
+    sub = None
+    email = None
+    try:
+        token = await client.authorize_access_token(request)
 
-    if provider == "google":
-        userinfo = token.get("userinfo") or {}
-        sub = userinfo.get("sub")
-        email = userinfo.get("email")
-    else:  # github
-        gh_user = await _fetch_github_user(token)
-        gh_id = gh_user.get("id")
-        sub = str(gh_id) if gh_id is not None else None
-        email = gh_user.get("email")
+        if provider == "google":
+            userinfo = token.get("userinfo") or {}
+            sub = userinfo.get("sub")
+            email = userinfo.get("email")
+        else:  # github
+            gh_user = await _fetch_github_user(token)
+            gh_id = gh_user.get("id")
+            sub = str(gh_id) if gh_id is not None else None
+            email = gh_user.get("email")
+    except Exception as e:
+        # 只記例外型別：不記 token、不記 provider 回應內容
+        logger.warning("OAuth callback failed (%s): %s", provider, type(e).__name__)
+        return auth_error_redirect("login_failed")
 
     if not sub:
-        raise HTTPException(status_code=400, detail=f"{provider} did not return a user id")
+        logger.warning("OAuth callback failed (%s): missing sub", provider)
+        return auth_error_redirect("login_failed")
 
     user = upsert_user(session, provider=provider, sub=str(sub), email=email)
     raw_token = create_session_token(session, user)
 
     response = RedirectResponse(
-        url=os.getenv("FRONTEND_URL", "http://localhost:5173"),
+        url=frontend_url(),
         status_code=303,
     )
     set_session_cookie(response, raw_token)
     return response
 
 
-@router.get("/logout")
+@router.get("/me")
+def me(user: User = Depends(get_current_user)):
+    """目前登入者資訊（不回 id）。"""
+    return JSONResponse(
+        {"email": user.email, "provider": user.oauth_provider},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post("/logout")
 def logout(request: Request, session: Session = Depends(get_session)):
     """登出：刪掉對應的 AuthSession 並清 cookie。"""
     raw_token = request.cookies.get(SESSION_COOKIE_NAME)

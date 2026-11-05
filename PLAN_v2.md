@@ -301,13 +301,13 @@ chat-{root_id}-{date}/
 
 | 編號 | 負責 | 內容 | 狀態 |
 |---|---|---|---|
-| S-U1-1 | implementer | B10：state cookie 改名、登入流程 harness | ⏳ |
-| S-U1-2 | implementer | `/auth/me`、POST 登出、OAuth 失敗導回 | ⏳ |
-| S-U1-3 | implementer | `user_id` 欄位（允許 NULL）、唯一約束 migration | ⏳ |
-| S-U1-4 | implementer | 所有路由加登入與擁有者檢查、隔離 harness | ⏳ |
-| S-U1-5 | implementer | 舊資料認領腳本 | ⏳ |
-| S-U1-6 | implementer | 前端 `apiFetch`、移除 `session_id` | ⏳ |
-| S-U1-7 | implementer | 登入閘門、登入頁、帳號區 | ⏳ |
+| S-U1-1 | implementer | B10：state cookie 改名、登入流程 harness | ✅ 6541856 |
+| S-U1-2 | implementer | `/auth/me`、POST 登出、OAuth 失敗導回 | ✅ ffd9565 |
+| S-U1-3 | implementer | `user_id` 欄位（允許 NULL）、唯一約束 migration | ✅ 551ca95（revision d7e8f9a0b1c2） |
+| S-U1-4 | implementer | 所有路由加登入與擁有者檢查、隔離 harness | ✅ c2015b8（發現既有 bug B11） |
+| S-U1-5 | implementer | 舊資料認領腳本 | ✅ 897d976（auth_harness 187 PASS） |
+| S-U1-6 | implementer | 前端 `apiFetch`、移除 `session_id` | ✅ 61a2733 |
+| S-U1-7 | implementer | 登入閘門、登入頁、帳號區 | ✅ a721e2e（使用者瀏覽器驗收通過，假 LLM） |
 | S-U1-8 | 使用者 | OAuth 主控台與 VM 設定、部署、認領、真實登入與隔離驗證 | ⏳ |
 | S-U1-9 | implementer | `user_id` NOT NULL、刪 `session_id` | ⏳ 等決策 4 |
 

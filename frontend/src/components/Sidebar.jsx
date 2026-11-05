@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, ArrowUpDown, Check, X, Trash2, Edit2, MessageSquare, Settings, MoreVertical } from 'lucide-react';
+import { Plus, ArrowUpDown, Check, X, Trash2, Edit2, MessageSquare, MoreVertical } from 'lucide-react';
 import { TbBinaryTree2 } from 'react-icons/tb';
+import { FcGoogle } from 'react-icons/fc';
+import { FaGithub } from 'react-icons/fa';
+import { apiFetch } from '../api';
 import { formatDateTime, groupByTimeRange } from '../dateUtils';
 
 // 一列對話：左側載入按鈕 + 右側單一三點選單（分支圖／改名／刪除）
@@ -178,6 +181,7 @@ function ChatRenameRow({
 // 左側側邊欄：New Chat 按鈕、歷史列表（時間軸分組 + 排序／三點選單）、底部設定
 // 只做渲染與局部互動，狀態與 callback 由 App 透過 props 傳入。
 function Sidebar({
+  user,
   sidebarOpen,
   activeChatId,
   historyList,
@@ -272,6 +276,21 @@ function Sidebar({
     e.stopPropagation();
     // move/up 掛在 window 上，拖曳到側邊欄外也持續有效
     setIsResizing(true);
+  };
+
+  // (S-U1-7) 帳號區：email 為 null 時用 provider 名稱當後備
+  const accountLabel =
+    user?.email || (user?.provider === 'github' ? 'GitHub 帳號' : 'Google 帳號');
+  const [loggingOut, setLoggingOut] = useState(false);
+  const onLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' });
+    } catch {
+      // 網路失敗也照樣回首頁
+    }
+    window.location.replace('/');
   };
 
   return (
@@ -377,16 +396,28 @@ function Sidebar({
         </div>
       </div>
 
-      {/* 底部設定區（mt-auto 讓它貼齊側欄底部） */}
-      <div className="mt-auto p-4 border-t border-gray-300 bg-[#E8F1F5]">
-        <div className="flex items-center gap-3 px-2">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#7DB9DE] to-[#7B90D2] flex items-center justify-center font-bold text-xs text-white shadow-sm">
-            ME
-          </div>
-          <div className="text-sm font-medium text-gray-700" >User</div>
-            <div title="只是一個齒輪" className="ml-auto">
-            <Settings className="w-4 h-4 text-gray-500 hover:text-[#7DB9DE]"/>
-            </div>
+      {/* (S-U1-7) 帳號區：固定在側欄底部、不在捲動列表內；底部用 max() 補手機安全區，避免被瀏覽器工具列蓋住 */}
+      <div className="mt-auto flex-shrink-0 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-gray-300 bg-[#E8F1F5]">
+        <div className="flex items-center gap-2 min-h-[2.5rem]">
+          {user?.provider === 'github' ? (
+            <FaGithub className="w-5 h-5 flex-shrink-0 text-gray-700" aria-hidden="true" />
+          ) : (
+            <FcGoogle className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
+          )}
+          <span
+            title={accountLabel}
+            className="flex-1 min-w-0 whitespace-nowrap overflow-hidden text-sm text-gray-700 [mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent_100%)] [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent_100%)]"
+          >
+            {accountLabel}
+          </span>
+          <button
+            type="button"
+            onClick={onLogout}
+            disabled={loggingOut}
+            className="flex-shrink-0 px-3 py-2 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-white/80 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7DB9DE]"
+          >
+            登出
+          </button>
         </div>
       </div>
     </aside>
