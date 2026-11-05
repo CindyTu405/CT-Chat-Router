@@ -775,15 +775,6 @@ function App() {
     }
   };
 
-  // (P2-5) 關閉分支 tab；關的是當前分支就切到別支，沒有就回到空狀態
-  const closeBranch = (branchId) => {
-    const next = branches.filter(b => b.id !== branchId);
-    setBranches(next);
-    if (activeBranchId === branchId) {
-      setActiveBranchId(next.length > 0 ? next[next.length - 1].id : null);
-    }
-  };
-
   // 刪除對話
   const handleDeleteChat = async (e, chatId) => {
     e.stopPropagation(); // 防止觸發 "載入對話"
@@ -922,8 +913,11 @@ function App() {
           setIsCustomModel={setIsCustomModel}
           freeModels={freeModels}
           freeModelsLoading={freeModelsLoading}
-          onSelectBranch={setActiveBranchId}
-          onCloseBranch={closeBranch}
+          // (E4) 分支列表：目前對話的分支、主對話訊息（排序用）、捲動容器、開啟分支
+          branchList={branchList}
+          messages={messages}
+          scrollContainerRef={scrollContainerRef}
+          onOpenBranch={openBranchFromHighlight}
           onInputChange={(branchId, text) => updateBranch(branchId, b => ({ ...b, input: text }))}
           onSend={sendBranchMessage}
           onRetry={retryBranchMessage}

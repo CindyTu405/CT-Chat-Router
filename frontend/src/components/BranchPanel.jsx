@@ -2,21 +2,25 @@ import { useEffect, useState } from 'react';
 import { GitBranch, X, PanelRightClose } from 'lucide-react';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
+import BranchListOverlay from './BranchListOverlay';
 
-// (P2-5) 右側分支面板：多 tab 切換、各分支獨立訊息串與獨立輸入框
+// (P2-5) 右側分支面板：各分支獨立訊息串與獨立輸入框
+// (E4) 移除 tab 列：面板一次只顯示 activeBranchId 那一條；header 左上角分支圖示開「分支列表」覆蓋層（BranchListOverlay）
 // (G3-2) 訊息區改用 MessageList，輸入區改用 ChatInput（兩者皆設 branch 變體），
 //        與主對話共用同一套組件（variant 設為 branch）；分支與主對話共用同一個 model state。
 // props:
-//   branches          [{ id, rootMessageId, title, messages, input, isLoading }]
-//   activeBranchId    目前選中的分支 id（null = 沒有開啟任何分支）
+//   branches          [{ id, rootMessageId, title, messages, input, isLoading }]（已載入分支的快取）
+//   activeBranchId    目前顯示的分支 id（null = 沒有開啟任何分支）
 //   model             當前模型名稱（顯示於標題，並傳給模型選單）
 //   setModel          (G3-2) 切換模型（與主對話共用）
 //   isCustomModel     (G3-2) 是否為自訂模型輸入
 //   setIsCustomModel  (G3-2) 切換自訂模型輸入
 //   freeModels        (G3-2) 免費模型清單（模型選單用）
 //   freeModelsLoading (G3-2) 免費模型清單是否載入中
-//   onSelectBranch(id)
-//   onCloseBranch(id)
+//   branchList        (E4) 目前對話的分支清單（GET /chats/{root}/branches 原始資料），分支列表用
+//   messages          (E4) 主對話訊息，分支列表依位置排序用
+//   scrollContainerRef (E4) 主對話捲動容器的 ref，點分支列表項目後捲動主對話用
+//   onOpenBranch(branch) (E4) 開啟分支（與點高亮相同的 openBranchFromHighlight）
 //   onInputChange(id, text)
 //   onSend(id)
 //   onRetry(branchId, msg)  (G6-2) 重新生成分支裡的最後一則 AI 回覆；只有最後一則 AI 回覆會觸發（見 MessageList）
@@ -31,8 +35,10 @@ function BranchPanel({
   setIsCustomModel,
   freeModels,
   freeModelsLoading,
-  onSelectBranch,
-  onCloseBranch,
+  branchList,
+  messages,
+  scrollContainerRef,
+  onOpenBranch,
   onInputChange,
   onSend,
   onRetry,
@@ -41,6 +47,8 @@ function BranchPanel({
 }) {
   // (G3-2) 自己送出訊息時強制捲到底（比照主對話 forceScrollToken）
   const [sendScrollToken, setSendScrollToken] = useState(0);
+  // (E4) 分支列表覆蓋層是否開啟
+  const [listOpen, setListOpen] = useState(false);
 
   // 面板寬度（可拖曳調整）：佔視窗寬度 20% ~ 50%，以百分比儲存並持久化
   const MIN_PANEL_PERCENT = 20;
@@ -136,12 +144,21 @@ function BranchPanel({
     onSend(activeBranch.id);
   };
 
+  // (E4) 點分支列表一項：關清單、開分支，並把主對話捲到該高亮（precise）或該底部入口（否則）置中
+  const handlePickFromList = (branch) => {
+    setListOpen(false);
+    onOpenBranch(branch);
+    const root = scrollContainerRef?.current || document;
+    const selector = branch.precise ? `[data-branch="${branch.id}"]` : `[data-branch-entry="${branch.id}"]`;
+    root.querySelector(selector)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+
   return (
     // P3b-F5：手機（< 768px）滿版覆蓋（fixed）；桌面（md 以上）維持並排的百分比寬度。
     // 桌面寬度用 inline style；手機不設 inline 寬度，由 w-full 決定。
     <aside
       style={isDesktop ? { width: `${panelPercent}%` } : undefined}
-      className="fixed inset-0 z-40 w-full md:z-auto md:inset-auto md:h-full md:w-auto md:relative flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)]"
+      className="isolate fixed inset-0 z-40 w-full md:z-auto md:inset-auto md:h-full md:w-auto md:relative flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)]"
     >
       {/* --- 左側拖曳把手：調整面板寬度（僅桌面） --- */}
       <div
@@ -150,7 +167,7 @@ function BranchPanel({
         aria-label="拖曳調整分支面板寬度"
         title="拖曳調整寬度"
         onPointerDown={handleResizeStart}
-        className={`absolute left-0 top-0 z-10 h-full w-[6px] cursor-col-resize transition-colors hidden md:block ${
+        className={`absolute left-0 top-0 z-30 h-full w-[6px] cursor-col-resize transition-colors hidden md:block ${
           isResizing ? 'bg-[#51A8DD]/60' : 'bg-transparent hover:bg-[#51A8DD]/40'
         }`}
       />
@@ -158,14 +175,22 @@ function BranchPanel({
       {/* --- 面板標題 --- */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white/70 backdrop-blur-sm">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-[#7B90D2] flex items-center justify-center flex-shrink-0">
+          {/* (E4) 左上角分支圖示改為按鈕：開啟分支列表 */}
+          <button
+            type="button"
+            onClick={() => setListOpen(true)}
+            title="分支列表"
+            aria-label="分支列表"
+            className="w-7 h-7 rounded-lg bg-[#7B90D2] hover:bg-[#51A8DD] flex items-center justify-center flex-shrink-0 cursor-pointer transition-colors"
+          >
             <GitBranch className="w-4 h-4 text-white" />
-          </div>
+          </button>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-gray-700 leading-tight">分支對話</p>
-            <p className="text-[11px] text-gray-400 font-mono truncate">
-              {branches.length > 0 ? `${branches.length} 條分支 · ${model}` : model}
+            {/* (E4) 標題＝目前分支標題（單行截斷）；沒開分支時「分支對話」 */}
+            <p className="text-sm font-semibold text-gray-700 leading-tight truncate">
+              {activeBranch ? activeBranch.title || '未命名分支' : '分支對話'}
             </p>
+            <p className="text-[11px] text-gray-400 font-mono truncate">{model}</p>
           </div>
         </div>
         {onToggle && (
@@ -181,44 +206,6 @@ function BranchPanel({
           </button>
         )}
       </div>
-
-      {/* --- Tab bar --- */}
-      {branches.length > 0 && (
-        <div className="flex items-stretch gap-1 px-2 py-2 overflow-x-auto border-b border-gray-200 bg-gray-50/70">
-          {branches.map((b) => {
-            const isActive = b.id === activeBranchId;
-            return (
-              <div
-                key={b.id}
-                onClick={() => onSelectBranch(b.id)}
-                title={b.title}
-                className={`group/tab flex items-center gap-1.5 pl-2.5 pr-1.5 py-1.5 rounded-lg text-xs cursor-pointer border transition flex-shrink-0 max-w-[160px] ${
-                  isActive
-                    ? 'bg-[#51A8DD] text-white border-[#51A8DD] shadow-sm'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-[#7DB9DE] hover:text-[#3D9AD1]'
-                }`}
-              >
-                {b.isLoading && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse flex-shrink-0" />
-                )}
-                <span className="truncate">{b.title || '未命名分支'}</span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloseBranch(b.id);
-                  }}
-                  title="關閉這個分支"
-                  className={`p-0.5 rounded transition flex-shrink-0 cursor-pointer ${
-                    isActive ? 'hover:bg-white/25' : 'hover:bg-gray-200'
-                  }`}
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {/* --- 訊息區（G3-2）：與主對話共用 MessageList --- */}
       {/* (G3-2) key 綁分支 id：切 tab 時重建組件，捲動狀態歸零並貼底 */}
@@ -270,6 +257,16 @@ function BranchPanel({
           setIsCustomModel={setIsCustomModel}
           freeModels={freeModels}
           freeModelsLoading={freeModelsLoading}
+        />
+      )}
+
+      {/* --- (E4) 分支列表覆蓋層：蓋住整個面板（含標題列），X 關閉 --- */}
+      {listOpen && (
+        <BranchListOverlay
+          branches={branchList || []}
+          messages={messages || []}
+          onSelect={handlePickFromList}
+          onClose={() => setListOpen(false)}
         />
       )}
     </aside>
