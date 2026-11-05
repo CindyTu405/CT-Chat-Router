@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：分支入口＋重疊降級＋分支列表＋幽靈重連（E1–E5，branch `feat/branch-entries`，見第八節「E 規格與驗收」）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
+**下一步**：S-U1 資料綁定使用者（已確認規格，教學待使用者讀完說「開始」，見第八節「S-U1 規格與驗收」）→ S-U2（待討論）→ E5（暫停中）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
 
 ---
 
@@ -291,6 +291,163 @@ chat-{root_id}-{date}/
 4. `git show --stat HEAD` → 只有 `BranchPanel.jsx`、`App.jsx`
 5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
 6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
+
+### S-U1 規格與驗收：資料綁定使用者（2026-11-05 定稿）
+
+教學與決策表：`docs/20261105_(S-U1)user-ownership-guide.html`。對應安全性清單第 1 項。Cloudflare Access 在 S-U1 全程保留；移除前提是 S-U2（BACKLOG）。
+在 branch `feat/s-u1-user-ownership` 開發（使用者說「開始」後才建立；其他 session 共用此資料夾時改用 worktree）。S-U1-1～S-U1-7 驗收後 merge 回 main。
+波次：W1＝S-U1-1→5（後端，依序、同一 branch，不需停下等驗證）；W2＝S-U1-6→7（前端，依序，瀏覽器驗證後才 commit S-U1-7）；W3＝S-U1-8（使用者部署與驗證）；W4＝S-U1-9（第 4 項決策定案後）。
+所有 harness 不呼叫真模型、真 OAuth，資料用唯一識別建立並在結束時清除。每個後端任務開工前先 `docker compose ps` 確認 chat_db 為 running，不是就停下回報。
+
+| 編號 | 負責 | 內容 | 狀態 |
+|---|---|---|---|
+| S-U1-1 | implementer | B10：state cookie 改名、登入流程 harness | ⏳ |
+| S-U1-2 | implementer | `/auth/me`、POST 登出、OAuth 失敗導回 | ⏳ |
+| S-U1-3 | implementer | `user_id` 欄位（允許 NULL）、唯一約束 migration | ⏳ |
+| S-U1-4 | implementer | 所有路由加登入與擁有者檢查、隔離 harness | ⏳ |
+| S-U1-5 | implementer | 舊資料認領腳本 | ⏳ |
+| S-U1-6 | implementer | 前端 `apiFetch`、移除 `session_id` | ⏳ |
+| S-U1-7 | implementer | 登入閘門、登入頁、帳號區 | ⏳ |
+| S-U1-8 | 使用者 | OAuth 主控台與 VM 設定、部署、認領、真實登入與隔離驗證 | ⏳ |
+| S-U1-9 | implementer | `user_id` NOT NULL、刪 `session_id` | ⏳ 等決策 4 |
+
+**S-U1-1 B10（`backend/main.py`、新檔 `backend/dev/auth_harness.py`）**
+- `SessionMiddleware` 加 `session_cookie="oauth_state"`、`max_age=600`、`same_site="lax"`、`https_only=cookie_secure()`（`cookie_secure` 從 `auth_routes` import）。
+- harness：真 uvicorn（`127.0.0.1:8767`），沿用 `branch_entries_harness.py` 的寫法。假 provider：patch `auth_routes.is_provider_configured`、`oauth.github.authorize_redirect`（把 `_state_github_<state>` 存進 `request.session` 並導向 callback）、`oauth.github.authorize_access_token`（pop 同一個 key，回傳假 token）、`auth_routes._fetch_github_user`。
+- 登入流程必須用 `curl -b <jar> -c <jar>` 重播，並直接檢查 callback 的 `Set-Cookie` 標頭；不可用 httpx／TestClient 的 cookie jar 判斷（它們會掩蓋 B10）。
+
+驗收：
+1. `docker compose ps` → chat_db running
+2. `cd backend && uv run python dev/auth_harness.py 2>&1 | grep -v sqlalchemy | tail -15` → 每項 PASS，最後一行 `ALL PASS`。涵蓋：login 回應只設 `oauth_state`、不設 `session`；callback 的 `Set-Cookie` 中 `session` 只出現一次且值不是 `null`、`oauth_state` 被清除；curl 重播後 cookie 檔內有 `session`；把 `session_cookie` 改回預設時此項 FAIL（implementer 暫時改動以確認測得出來，不 commit）
+3. `git show --stat HEAD` → 只有 `main.py`、`auth_harness.py`
+4. commit 後把 BUGS B10 狀態改為「已修，待真實瀏覽器驗證（S-U1-8）」，獨立 `docs:` commit
+
+**S-U1-2 認證端點（`backend/auth_routes.py`、`backend/dev/auth_harness.py`）**
+- 新增 `GET /auth/me`（`Depends(get_current_user)`）：回 `{ "email": ..., "provider": ... }`，不回 id，header `Cache-Control: no-store`。
+- `GET /auth/logout` 改成 `POST /auth/logout`，行為不變。
+- provider 未設定：login 改為 303 導向 `FRONTEND_URL/?auth_error=provider_unavailable`（不存在的 provider 仍 404）。
+- callback 內 `authorize_access_token` 或取使用者資料拋例外（使用者拒絕授權、state 不符、provider 出錯）、或拿不到 sub → 303 導向 `FRONTEND_URL/?auth_error=login_failed`，不建立使用者與 session，例外細節只寫 log。
+
+驗收：
+1. `cd backend && uv run python dev/auth_harness.py 2>&1 | grep -v sqlalchemy | tail -25` → `ALL PASS`。新增涵蓋：`/auth/me` 無 cookie → 401、亂造 token → 401、過期 session → 401 且該列被刪、有效 → 200 且 JSON 鍵只有 `email`、`provider`；`GET /auth/logout` → 405；`POST /auth/logout` → 該 token 再打 `/auth/me` 為 401；provider 未設定 → 303 含 `auth_error=provider_unavailable`；假 provider 拋例外 → 303 含 `auth_error=login_failed`、`user` 與 `auth_session` 筆數不變
+2. `git show --stat HEAD` → 只有 `auth_routes.py`、`auth_harness.py`
+
+**S-U1-3 資料欄位（`backend/models.py`、新 migration）**
+- `Message`（table class，不放 `MessageBase`）與 `Branch` 加 `user_id: Optional[uuid.UUID]`，FK `user.id`，有 index，允許 NULL，API 回應不輸出此欄位。
+- `user` 加唯一約束 `(oauth_provider, oauth_sub)`；`auth_session.token_hash` 改唯一。migration 寫完整 downgrade。
+- 不改任何路由（下一步才用）。
+
+驗收：
+1. `cd backend && uv run alembic upgrade head && uv run alembic current` → 新 revision 為 head
+2. `docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\d message" -c "\d branch" -c "\d \"user\"" -c "\d auth_session"'` → 兩表都有可為 NULL 的 `user_id` 與 FK；`user`、`auth_session` 有唯一約束
+3. `cd backend && uv run alembic downgrade -1 && uv run alembic upgrade head` → 都成功，訊息與分支筆數不變
+4. `cd backend && uv run python dev/regenerate_harness.py 2>&1 | grep -v sqlalchemy | tail -3` 與 `uv run python dev/branch_entries_harness.py 2>&1 | grep -v sqlalchemy | tail -3` → 都 `ALL PASS`
+5. `git show --stat HEAD` → 只有 `models.py`、新 migration
+
+**S-U1-4 路由保護（`backend/main.py`、`backend/models.py`、`backend/dev/auth_harness.py`、`backend/dev/regenerate_harness.py`、`backend/dev/branch_entries_harness.py`、`backend/dev/seed_chats.py`）**
+- 新增 `get_owned_message(session, id, user)`、`get_owned_branch(session, id, user)`：不存在或 `user_id != user.id`（含 NULL）→ 404。
+- 除 `/`、`/auth/*` 外，每條路由加 `user: User = Depends(get_current_user)`。
+- 刪除 `GET /messages`、未使用的 `save_ai_message_sync`。`/docs`、`/redoc`、`/openapi.json` 只在環境變數 `ENABLE_API_DOCS` 為真時開啟，預設關閉。
+- `ChatRequest` 移除 `session_id`。新寫入一律不再指定 `session_id`，欄位暫留到 S-U1-9。
+
+| 路由 | 擁有者檢查（都在任何寫入、LLM 呼叫之前） |
+|---|---|
+| `POST /chat` | `parent_id`、`branch_id`、`anchor_message_id` 有帶的都要屬於本人；user 與 AI 訊息寫入 `user_id` |
+| `GET /messages/{id}/stream` | **先**檢查訊息屬於本人，再查 `GENERATIONS` |
+| `POST /messages/{id}/regenerate` | AI 訊息屬於本人 |
+| `GET /chats/roots` | 移除 `session_id` 參數；兩種排序都用 `user_id` 過濾根訊息 |
+| `GET /chats/{id}/history`、`/tree` | 起點屬於本人；不存在時由空陣列改回 404 |
+| `PATCH /chats/{id}/title`、`DELETE /chats/{id}` | 起點屬於本人 |
+| `POST /chats/{id}/branches` | root、anchor 都屬於本人；新分支寫入 `user_id` |
+| `GET /chats/{id}/branches` | root 屬於本人 |
+| `GET /branches/orphaned` | 移除 `session_id` 參數；只用 `Branch.user_id` 過濾 |
+| `POST /branches/{id}/relink` | 分支、root、anchor 都屬於本人；取代原本比對 session 的邏輯 |
+| `GET /api/free-models` | 只要求登入 |
+
+- harness 測試方式：直接建立 `User`＋`AuthSession`，用 `Cookie: session=<token>` 打 API（沿用真 uvicorn＋假 LLM）。既有兩支 harness 改成這樣登入，原有測項全部保留；`/branches/orphaned` 的隔離測項改用兩個使用者。`seed_chats.py` 改收 `--provider`、`--email`，寫入 `user_id`。
+
+驗收：
+1. `docker compose ps` → chat_db running
+2. `cd backend && uv run python dev/auth_harness.py 2>&1 | grep -v sqlalchemy | tail -50` → `ALL PASS`。新增涵蓋：
+   - 列舉 `main.app.routes`：未登入呼叫每條路由 → 401，例外只有 `/`、`/auth/*`，以及 `ENABLE_API_DOCS` 關閉時不存在的文件路由
+   - 使用者 B 對 A 的資料呼叫上表每條路由 → 404，且 A 的訊息內容、標題、分支欄位都沒變，假 LLM 未被呼叫
+   - B 用 A 的 `parent_id`、`branch_id`、`anchor_message_id` 打 `/chat` → 404，訊息筆數不變
+   - A 的回覆生成中，B 打 `/messages/{id}/stream` → 404（證明先查擁有者再查緩衝）
+   - `user_id` 為 NULL 的舊訊息與分支：每個登入者都讀不到、`/chats/roots` 不列出
+   - A 自己的完整流程：送訊息、取清單、重傳、建立分支、在分支送訊息、幽靈化、重連、刪除都正常
+   - `SELECT count(*) FROM message c JOIN message p ON c.parent_id=p.id WHERE c.user_id IS DISTINCT FROM p.user_id` 限本次測試資料 → 0
+   - 回應 JSON 都不含 `user_id`
+3. `cd backend && uv run python dev/regenerate_harness.py 2>&1 | grep -v sqlalchemy | tail -3` 與 `uv run python dev/branch_entries_harness.py 2>&1 | grep -v sqlalchemy | tail -3` → 都 `ALL PASS`
+4. `cd backend && env -u ENABLE_API_DOCS uv run python -c "import main; print(main.app.docs_url, main.app.openapi_url)" 2>/dev/null | tail -1` → `None None`
+5. `grep -n "save_ai_message_sync\|session_id" backend/main.py` → 無輸出
+6. `git show --stat HEAD` → 只有上列檔案
+
+**S-U1-5 認領腳本（新檔 `backend/claim_legacy_data.py`、`backend/dev/auth_harness.py`）**
+- 參數：`--provider`、`--email`（找不到或多於一位 → 非 0 結束）、可重複的 `--session-id`、`--apply`。沒帶 `--apply` 只印數字、不寫入。
+- 同一個交易：`session_id` 符合且 `user_id` 為 NULL 的訊息設為該使用者；`user_id` 為 NULL 的分支，依序取錨點訊息、首則訊息、`attach_root_id` 訊息的 `user_id`，落在本次使用者時才設定。已有 `user_id` 的資料不動。
+- 分開列印：認領的訊息數與分支數、仍為 NULL 的訊息數（依 `session_id`）、仍為 NULL 的分支數、其中查不到擁有者的分支數。
+- 新增 `--delete-ownerless-branches`（需同時帶 `--apply`）：刪除三個來源都是 NULL 的分支。
+- 寫入前檢查：有父子 `user_id` 不一致（雙方都非 NULL）就 rollback 並非 0 結束。
+- 剩餘資料的處理（決策 4）不在此任務；定案後另補規格。
+
+驗收：
+1. `cd backend && uv run python dev/auth_harness.py 2>&1 | grep -v sqlalchemy | tail -60` → `ALL PASS`。新增涵蓋：試算不寫入；`--apply` 後訊息與分支（錨定、底部入口、幽靈、尚無訊息）歸屬正確；已歸他人的資料不動；別的 session 的資料不動；重跑結果相同；email 不存在 → 非 0；`--delete-ownerless-branches` 只刪沒有擁有者的分支；父子不一致 → 非 0 且全部 rollback
+2. `git show --stat HEAD` → 只有 `claim_legacy_data.py`、`auth_harness.py`
+
+**S-U1-6 前端 API 層（新檔 `frontend/src/api.js`、`frontend/src/App.jsx`、`frontend/src/BranchTreeModal.jsx`）**
+- `apiFetch(path, options)`：組上 `VITE_API_URL`、`credentials: 'include'`；回應 401 時 `window.dispatchEvent(new Event('auth:unauthorized'))`；回傳 response。
+- `App.jsx`、`BranchTreeModal.jsx` 全部 `fetch` 改用它。
+- 移除 `sessionId` state 與請求中的 `session_id`；App 掛載時 `localStorage.removeItem('chat_session_id')`。
+- 此任務沒有登入畫面，本機要到 S-U1-7 才能在瀏覽器完整操作；無視覺變更，可直接 commit。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -nE "\bfetch\(" frontend/src/App.jsx frontend/src/BranchTreeModal.jsx` → 無輸出；`grep -c "credentials: 'include'" frontend/src/api.js` → `1`
+3. `grep -n "session_id\|sessionId" frontend/src/App.jsx` → 只有 `removeItem('chat_session_id')` 一行
+4. `git show --stat HEAD` → 只有上列 3 個檔案
+
+**S-U1-7 登入閘門（新檔 `frontend/src/components/AuthGate.jsx`、`frontend/src/main.jsx`、`frontend/src/App.jsx`、`frontend/src/components/Sidebar.jsx`、新檔 `backend/dev/dev_session.py`）**
+- `AuthGate`：mount 時 `GET /auth/me`。確認中不渲染、未登入顯示登入頁、已登入才掛載 `<App user={user} />`；收到 `auth:unauthorized` → 回登入頁（App 卸載，草稿不保留）。網路錯誤也視為未登入。
+- 登入頁（全螢幕）：產品名稱＋「使用 Google 繼續」「使用 GitHub 繼續」，都是一般連結 `${VITE_API_URL}/auth/{provider}/login`。`?auth_error=` 有值時顯示固定中文訊息（不顯示參數原文），並用 `history.replaceState` 從網址移除。
+- `Sidebar` 底部帳號區：Email（沒有就顯示「GitHub 帳號」／「Google 帳號」）＋登入方式圖示＋「登出」。登出：`POST /auth/logout` → `window.location.replace('/')`。
+- `backend/dev/dev_session.py --provider --email`：只供本機；建立使用者與 `AuthSession`，印出可貼到 console 的 `document.cookie="session=...; path=/"`。不掛任何路由。讓本機瀏覽器驗證不需要真實 OAuth；本機對話要先用 `claim_legacy_data.py` 認領才看得到。token 不寫進 repo、不貼到聊天。
+- 視覺變更：build 後先不 commit，給使用者調整參數，確認後才 commit。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -c "AuthGate" frontend/src/main.jsx` → ≥ 1；`grep -c "/auth/logout" frontend/src/components/Sidebar.jsx frontend/src/App.jsx | grep -v ":0"` → 至少一行
+3. `git show --stat HEAD` → 只有上列 5 個檔案
+4. 瀏覽器（桌面 ≥ 768，假 LLM）：未登入 → 只看到登入頁、Network 沒有 `/chats/*` 請求；`?auth_error=login_failed` → 顯示訊息且網址參數消失；設定 dev session 後重新整理 → 進入 App、側邊欄底部有帳號與登出；既有功能正常（送訊息、切換對話續讀串流、重傳、編輯、建立與開啟分支、分支地圖、改名、刪除）；console 刪掉 session 列或另開分頁登出後，下一個請求 → 回登入頁且對話內容消失；按登出 → 回登入頁、重新整理仍是登入頁；換另一個 dev 使用者 → 看不到前一位的對話；側邊欄拖寬、時間軸與底部帳號區不重疊
+5. 瀏覽器（手機 < 768）：登入頁按鈕在畫面內可點；側邊欄 drawer 底部有帳號與登出，不被瀏覽器工具列擋住；其餘同桌面
+
+**S-U1-8 使用者：部署與真實驗證（implementer 不執行）**
+
+前置：
+1. Google 與 GitHub 主控台 callback 設為 `https://fluentbranch.com/api/auth/{provider}/callback`；client id／secret 放進 VM `.env`。
+2. 部署前備份並檢查（VM）：
+   - `sudo docker compose exec db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > ~/fluentbranch-before-s-u1.dump`
+   - `sudo docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select oauth_provider, oauth_sub, count(*) from \"user\" group by 1,2 having count(*)>1"'` → 0 列（有重複時唯一約束 migration 會失敗，先回報）
+
+部署（VM）：`git pull` → `sudo docker compose up -d --build` → `sudo docker compose exec api alembic upgrade head`。
+
+驗收：
+1. 用已通過 Access 但尚未登入 App 的瀏覽器，在 console 執行：`fetch('/api/chats/roots').then(r=>r.status)` → `401`；`fetch('/api/docs').then(r=>r.status)` → `404`；登入後 `fetch('/api/messages').then(r=>r.status)` → `404`
+2. 真實 Google、GitHub 各登入一次（瀏覽器 DevTools 確認 `session` cookie 為 HttpOnly、Secure），BUGS B10 改為已完成；拒絕授權 → 回登入頁並顯示訊息
+3. 認領（VM）：先 `sudo docker compose exec api python claim_legacy_data.py --provider ... --email ... --session-id ...` 看數字，再加 `--apply`；登入後舊對話、分支都在
+4. 跨帳號：Google 帳號開一則對話，複製 root id；GitHub 帳號在 console 執行 ``fetch(`/api/chats/${id}/history`).then(r=>r.status)`` → `404`；側邊欄看不到該對話
+5. 真實模型送一則訊息（使用者執行）→ 正常串流
+6. `sudo docker compose logs api --tail 50` → 沒有 token、client secret 或訊息內容
+
+**S-U1-9 收縮（`backend/models.py`、新 migration、`backend/dev/*`）— 等決策 4 定案、S-U1-8 完成才開工**
+- migration：開頭檢查 `message`、`branch` 的 `user_id` 是否還有 NULL，有就中止並印出筆數；`user_id` 改 NOT NULL；`message` 刪除 `session_id`。downgrade 加回 `session_id`（值為 `default`）並改回可為 NULL。
+- 刪除 `MessageBase.session_id` 與 `backend/migrate.py`。`claim_legacy_data.py` 用途結束，一併刪除。
+- 部署順序：VM 上先確認兩表 NULL 筆數為 0，部署新程式後立刻 `alembic upgrade head`。`message.session_id` 目前是 NOT NULL 且沒有資料庫預設值，兩個動作之間新增訊息會失敗，所以選低使用時段、接受這段短暫中斷（Access 仍在，使用者只有白名單）。
+
+驗收：
+1. 有 NULL 時：`cd backend && uv run alembic upgrade head` → 非 0 且資料表不變
+2. 無 NULL 時：`cd backend && uv run alembic upgrade head` 成功；`docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\d message"'` → `user_id` 為 not null、無 `session_id`
+3. `cd backend && uv run python dev/auth_harness.py 2>&1 | grep -v sqlalchemy | tail -3`、`regenerate_harness.py`、`branch_entries_harness.py` → 都 `ALL PASS`
+4. `grep -rn "session_id" backend/main.py backend/models.py backend/dev/` → 無輸出（`auth_session` 不算）
 
 ### H 規格與驗收：fluentbranch.com HTTPS 上線（2026-11-04 定稿）
 

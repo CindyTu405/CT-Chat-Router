@@ -30,4 +30,5 @@ AI回答中選取文字 可以用螢光筆高亮效果 展開分支 弄成像wik
 
 ## 安全性／商業化（2026-11-04 提出，細節待討論）
 
-- **S-U1** 資料綁 OAuth 使用者：訊息（或對話）加 `user_id`，所有讀寫 API 改用 `get_current_user` 驗證並只回自己的資料；對話清單、幽靈分支清單從 `session_id` 改為 `user_id`；既有 session_id 資料的歸屬遷移方式待定。現況：登入與 `get_current_user` 已有（P0-2～P0-4），但沒有任何 API 使用，任何人知道 session_id 或訊息 id 就能讀寫。對應 PLAN_v2 三、安全性清單第 1 項。
+- **S-U1** 資料綁 OAuth 使用者：訊息（或對話）加 `user_id`，所有讀寫 API 改用 `get_current_user` 驗證並只回自己的資料；對話清單、幽靈分支清單從 `session_id` 改為 `user_id`；既有 session_id 資料的歸屬遷移方式待定。現況：登入與 `get_current_user` 已有（P0-2～P0-4），但沒有任何 API 使用，任何人知道 session_id 或訊息 id 就能讀寫。對應 PLAN_v2 三、安全性清單第 1 項。**2026-11-05 已確認，規格見 PLAN_v2「S-U1 規格與驗收」。**
+- **S-U2** 每日額度與以使用者為單位的限流：移除 Cloudflare Access 前的前提（S-U1 決策 11），避免任何 Google 帳號都能消耗平台金鑰。額度數字見 PLAN_v2 第四節；細節待討論，尚未確認。
