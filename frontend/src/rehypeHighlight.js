@@ -25,7 +25,30 @@ export default function rehypeHighlight(anchors) {
       });
     };
     wrap(tree, false);
+    markFirstAndLast(tree);
   };
+}
+
+// (B7) 依文件順序走訪所有 mark：每個分支的第一段加 data-first，最後一段加 data-last
+// （只有一段時兩個都加）。樣式靠這兩個屬性決定哪一側圓角、留白。
+function markFirstAndLast(tree) {
+  const seen = new Set();
+  const lastById = new Map();
+  const visit = (node) => {
+    if (node.type === 'element' && node.tagName === 'mark') {
+      const id = node.properties['data-branch'];
+      if (!seen.has(id)) {
+        seen.add(id);
+        node.properties['data-first'] = '';
+      }
+      lastById.set(id, node);
+    }
+    if (node.children) node.children.forEach(visit);
+  };
+  visit(tree);
+  for (const node of lastById.values()) {
+    node.properties['data-last'] = '';
+  }
 }
 
 function spanOf(start, end, children) {
