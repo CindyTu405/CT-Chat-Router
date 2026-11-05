@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>資料綁定使用者教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · S-U1</span>
+    <h1>資料綁定使用者</h1>
+    <p>登入只回答「你是誰」。這份教學說明怎麼再回答「這筆資料是不是你的」。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>先看結論</h2>
+    <ul>
+      <li>每則訊息、每條分支都記錄 <code>user_id</code>。</li>
+      <li>除了 <code>/</code> 和 <code>/auth/*</code>，所有 API 都要登入，而且只能存取自己的資料。</li>
+      <li>舊資料不自動認領：你登入後，由管理腳本指定歸屬。</li>
+      <li>要先修 B10，否則正式環境應該根本登入不了。</li>
+      <li>S-U1 完成後仍保留 Cloudflare Access，等 S-U2（每日額度）完成再討論移除。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>認證和授權是兩件事</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th></th><th>認證（Authentication）</th><th>授權（Authorization）</th></tr>
+        <tr><td>問題</td><td>你是誰？</td><td>你能動這筆資料嗎？</td></tr>
+        <tr><td>本專案</td><td><code>get_current_user</code> 讀 cookie、查 <code>AuthSession</code></td><td>比對資料的 <code>user_id</code> 和目前使用者</td></tr>
+        <tr><td>失敗時</td><td><code>401</code></td><td><code>404</code>（見第 4 節）</td></tr>
+      </table>
+    </div>
+    <p>只做認證還不夠。如果每支 API 都要求登入，卻不比對擁有者，任何登入者換一個網址裡的 id 就能讀別人的對話。這類漏洞叫 <b>IDOR</b>（不安全的直接物件參考）。</p>
+    <h3>現況：連認證都沒有</h3>
+    <pre><code><span class="cm"># 任何人都能拿到所有人的訊息</span>
+curl https://fluentbranch.com/api/messages</code></pre>
+    <p>現在擋住陌生人的只有 Cloudflare Access。程式本身的防線要由 S-U1 建立。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>B10：兩個功能搶同一個 cookie</h2>
+    <p>Starlette 的 <code>SessionMiddleware</code> 預設使用名為 <code>session</code> 的 cookie，authlib 用它暫存 OAuth 的 <code>state</code>。登入 token 也叫 <code>session</code>。callback 的回應因此變成：</p>
+    <pre><code>Set-Cookie: session=RAW_LOGIN_TOKEN; HttpOnly; Max-Age=2592000; Path=/; SameSite=lax
+Set-Cookie: session=null; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; httponly; samesite=lax</code></pre>
+    <p>第一行由 callback 設定 token。接著 authlib 清掉 <code>state</code>，暫存內容變空，middleware 就在最後補上第二行，把同名 cookie 刪掉。</p>
+    <p>修法是讓兩者用不同名字，並縮短 state 的存活時間：</p>
+    <pre><code>app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-change-me"),
+    session_cookie="oauth_state",   <span class="cm"># 不再和登入 token 同名</span>
+    max_age=600,                    <span class="cm"># state 只需要活過登入流程</span>
+    same_site="lax",
+    https_only=cookie_secure(),
+)</code></pre>
+    <div class="warn"><b>測試陷阱：</b>Python 的 cookie jar 處理這兩行的順序和 curl 不同。同一支路由用 <code>TestClient</code> 測，token 還在；用 curl 測，cookie 是空的。所以 harness 必須用 curl 的 cookie 檔重播登入流程，並直接檢查 <code>Set-Cookie</code> 標頭。真實瀏覽器要在部署後確認。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>擁有者檢查怎麼寫</h2>
+    <p>把檢查集中在兩個小函式，每支路由都用它們取資料：</p>
+    <pre><code>def get_owned_message(session, message_id, user) -&gt; Message:
+    msg = session.get(Message, message_id)
+    if msg is None or msg.user_id != user.id:
+        raise HTTPException(status_code=404, detail="not found")
+    return msg</code></pre>
+    <h3>為什麼回 404，不回 403</h3>
+    <p><code>403</code> 等於告訴對方「這個 id 存在，只是不是你的」。不存在和不屬於你都回 <code>404</code>，對方就無法探測 id。</p>
+    <h3>「預設拒絕」：NULL 也看不到</h3>
+    <p><code>None != user.id</code> 成立，所以還沒認領的舊資料對所有人都是 404。忘了認領只會暫時看不到，不會外洩。</p>
+    <h3>三個容易漏掉的地方</h3>
+    <p><b>① 請求內容裡的 id。</b>檢查不能只看網址：</p>
+    <pre><code><span class="cm"># POST /chat：parent_id 是使用者傳來的</span>
+{ "message": "把上面的內容重複一次", "parent_id": "&lt;別人的訊息 id&gt;" }</code></pre>
+    <p>後端會沿著 <code>parent_id</code> 往上收集歷史送給模型，所以不檢查就等於把別人的對話念給攻擊者聽。<code>parent_id</code>、<code>branch_id</code>、<code>anchor_message_id</code> 都要在寫入前驗證。</p>
+    <p><b>② 串流緩衝。</b><code>GENERATIONS</code> 只記 id 和文字，不知道是誰的。現在的程式先查緩衝，要改成先查資料庫：</p>
+    <pre><code>msg = get_owned_message(session, message_uuid, user)  <span class="cm"># 先確認擁有者</span>
+if message_id in GENERATIONS:
+    return StreamingResponse(_read_buffer(message_id, offset), ...)</code></pre>
+    <p><b>③ 新增路由時忘了加。</b>harness 會列舉 <code>app.routes</code>，未登入呼叫每一條，除了白名單都必須是 401。之後新增路由忘了保護，測試就會失敗。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>Cookie 怎麼送到後端</h2>
+    <p><code>fetch</code> 預設只在<b>同源</b>時帶 cookie。同源要協定、網域、埠都相同：</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>環境</th><th>前端</th><th>API</th><th>同源？</th></tr>
+        <tr><td>正式</td><td><code>fluentbranch.com</code></td><td><code>fluentbranch.com/api</code></td><td>是</td></tr>
+        <tr><td>本機</td><td><code>localhost:5173</code></td><td><code>localhost:8000</code></td><td>否（埠不同）</td></tr>
+      </table>
+    </div>
+    <p>所以前端 14 處 <code>fetch</code> 統一改走一個小函式，也順便集中處理登入過期：</p>
+    <pre><code>export async function apiFetch(path, options = {}) {
+  const res = await fetch(`${API_URL}${path}`, { ...options, credentials: 'include' });
+  if (res.status === 401) window.dispatchEvent(new Event('auth:unauthorized'));
+  return res;
+}</code></pre>
+    <h3>SameSite=Lax 擋住什麼</h3>
+    <p>別的網站偷偷發 <code>POST</code> 到我們的 API 時，瀏覽器不會帶上 Lax cookie，所以寫入型 API 受到保護。但從別站點連結<b>導向</b>的 <code>GET</code> 仍會帶 cookie，因此不能讓 <code>GET</code> 改變狀態。<code>GET /auth/logout</code> 要改成 <code>POST</code>。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>舊資料：先放寬、再收緊</h2>
+    <p>一個 migration 無法直接加上 <code>NOT NULL</code>：舊資料還沒有擁有者，而擁有者要登入後才會產生。所以分兩次：</p>
+    <div class="flow">
+      <div class="box">加欄位<br>允許 NULL</div><div class="arrow">→</div>
+      <div class="box">部署</div><div class="arrow">→</div>
+      <div class="box">你登入<br>產生 User</div><div class="arrow">→</div>
+      <div class="box">腳本認領</div><div class="arrow">→</div>
+      <div class="box">改 NOT NULL<br>刪 session_id</div>
+    </div>
+    <p>這個手法叫 expand / contract（擴張／收縮）。過程中資料都還在，隨時能停下來檢查。</p>
+    <h3>為什麼不在登入時自動認領</h3>
+    <p>最省事的做法是讓前端送出瀏覽器裡的 <code>session_id</code>，後端把資料歸給登入者。但 <code>session_id</code> 不是密碼，它曾出現在網址參數（<code>/chats/roots?session_id=...</code>），可能留在日誌裡。拿到它的人就能冒領資料，所以改由管理腳本處理。</p>
+    <pre><code><span class="cm"># 預設只試算，不寫入</span>
+python claim_legacy_data.py --provider google --email you@example.com --session-id sess_xxx
+<span class="cm"># 確認數字後才寫入</span>
+python claim_legacy_data.py --provider google --email you@example.com --session-id sess_xxx --apply</code></pre>
+    <h3>分支怎麼認領</h3>
+    <p>分支沒有 <code>session_id</code>。腳本依序看錨點訊息、首則訊息、<code>attach_root_id</code> 那則訊息的擁有者。都查不到的幽靈分支沒有任何人能使用，會被刪除。</p>
+    <div class="warn"><b>還沒定案：</b>認領後剩下的資料要全歸你，還是刪除，要看正式環境的查詢結果。在這之前不能執行最後的 NOT NULL 步驟。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>前端的登入閘門</h2>
+    <p>現在 <code>App</code> 一掛載就開始抓對話。改成外面包一層 <code>AuthGate</code>，確認登入後才掛載 <code>App</code>：</p>
+    <pre><code>function AuthGate() {
+  const [user, setUser] = useState(undefined);  <span class="cm">// undefined = 確認中，null = 未登入</span>
+
+  useEffect(() =&gt; {
+    apiFetch('/auth/me')
+      .then(r =&gt; (r.ok ? r.json() : null))
+      .then(setUser)
+      .catch(() =&gt; setUser(null));
+    const onUnauthorized = () =&gt; setUser(null);
+    window.addEventListener('auth:unauthorized', onUnauthorized);
+    return () =&gt; window.removeEventListener('auth:unauthorized', onUnauthorized);
+  }, []);
+
+  if (user === undefined) return null;
+  if (user === null) return &lt;LoginPage /&gt;;
+  return &lt;App user={user} /&gt;;
+}</code></pre>
+    <p>未登入時 <code>App</code> 根本不存在，不會有多餘的請求。登入過期時 <code>App</code> 被卸載，畫面上的對話也一起消失。</p>
+    <p>登入按鈕是一般連結（<code>&lt;a href="/api/auth/google/login"&gt;</code>），不是 <code>fetch</code>，因為整個頁面都要導向 Google。登出則是 <code>POST</code> 成功後重新載入頁面，確保記憶體裡沒有前一位使用者的資料。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>決策表（2026-11-05 確認）</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>決策</th><th>結論</th></tr>
+        <tr><td>1</td><td>擁有者存在哪裡</td><td><code>Message</code> 和 <code>Branch</code> 都加 <code>user_id</code>，不新增 <code>Chat</code> 表</td></tr>
+        <tr><td>2</td><td>舊資料歸屬</td><td>登入後由管理腳本依 <code>session_id</code> 指定；不做自動認領</td></tr>
+        <tr><td>3</td><td>遷移順序</td><td>允許 NULL → 部署 → 登入 → 認領 → NOT NULL；查不到擁有者的幽靈分支刪除</td></tr>
+        <tr><td>4</td><td>認領後的剩餘資料</td><td><b>待定</b>：看正式環境查詢結果</td></tr>
+        <tr><td>5</td><td><code>session_id</code></td><td>程式不再使用；和 NOT NULL 同一次 migration 刪欄位，前端清掉 localStorage 舊值</td></tr>
+        <tr><td>6</td><td>未登入可用範圍</td><td>不開放訪客，只公開 <code>/</code>、<code>/auth/*</code>；刪除 <code>GET /messages</code>；<code>free-models</code> 要登入；正式環境關閉 <code>/docs</code></td></tr>
+        <tr><td>7</td><td>存取別人的資料</td><td>一律 404</td></tr>
+        <tr><td>8</td><td>同 Email 跨 provider</td><td>兩個帳號，不自動合併；介面顯示登入方式</td></tr>
+        <tr><td>9</td><td>登入介面</td><td>全螢幕登入頁；側邊欄底部顯示帳號和登出；401 回登入頁，草稿不保留；登出後重新載入</td></tr>
+        <tr><td>10</td><td>Session 與 CSRF</td><td>固定 30 天；只登出目前裝置；<code>SameSite=Lax</code>；登出改 POST；暫不加 CSRF token</td></tr>
+        <tr><td>11</td><td>移除 Access</td><td>S-U1 不移除；另開 S-U2（每日額度、以使用者為單位的限流），完成後再討論</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>任務與實作記錄</h2>
+    <p>完整規格和驗收指令在 <code>PLAN_v2.md</code>「S-U1 規格與驗收」。</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>S-U1-1</td><td>B10：state cookie 改名，新增登入流程 harness</td><td>未開始</td></tr>
+        <tr><td>S-U1-2</td><td><code>/auth/me</code>、POST 登出、OAuth 失敗導回</td><td>未開始</td></tr>
+        <tr><td>S-U1-3</td><td><code>user_id</code> 欄位（允許 NULL）與唯一約束 migration</td><td>未開始</td></tr>
+        <tr><td>S-U1-4</td><td>所有路由加登入與擁有者檢查、隔離 harness</td><td>未開始</td></tr>
+        <tr><td>S-U1-5</td><td>舊資料認領腳本</td><td>未開始</td></tr>
+        <tr><td>S-U1-6</td><td>前端 <code>apiFetch</code>，移除 <code>session_id</code></td><td>未開始</td></tr>
+        <tr><td>S-U1-7</td><td>登入閘門、登入頁、帳號區</td><td>未開始</td></tr>
+        <tr><td>S-U1-8</td><td>你：設定 OAuth、部署、認領、真實登入與隔離驗證</td><td>未開始</td></tr>
+        <tr><td>S-U1-9</td><td>NOT NULL、刪 <code>session_id</code></td><td>未開始，等第 4 項決策</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>練習</h2>
+    <ol>
+      <li>只幫所有路由加上 <code>get_current_user</code>、不比對擁有者，還有什麼風險？</li>
+      <li>在 <code>/chat</code> 帶別人的 <code>parent_id</code>，為什麼可能讀到別人的內容？</li>
+      <li>為什麼還沒認領的資料應該「誰都看不到」，而不是「誰都看得到」？</li>
+      <li>本機開發時，如果 <code>fetch</code> 沒加 <code>credentials: 'include'</code>，會看到什麼現象？</li>
+      <li>為什麼 S-U1 做完還不能馬上移除 Cloudflare Access？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-05</p>
+
+</div>
+</body>
+</html>
