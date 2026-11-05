@@ -7,20 +7,15 @@ import ChatInput from './components/ChatInput';
 import BranchPanel from './components/BranchPanel';
 import { scrollToMessage } from './scrollUtils';
 
-// const API_URL = "http://localhost:8000"; // 本機開發用
-// const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
-const API_URL = import.meta.env.VITE_API_URL;
+import { apiFetch } from './api';
 
 function App() {
+  // 清掉舊版的匿名 session id（已改用登入 cookie），只在掛載時執行一次
+  useEffect(() => {
+    try { localStorage.removeItem('chat_session_id'); } catch { /* 忽略 */ }
+  }, []);
+
   // --- 狀態管理 ---
-  const [sessionId] = useState(() => {
-    let sid = localStorage.getItem("chat_session_id");
-    if (!sid) {
-      sid = "sess_" + Math.random().toString(36).substring(2, 15);
-      localStorage.setItem("chat_session_id", sid);
-    }
-    return sid;
-  });
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [historyList, setHistoryList] = useState([]); // 側邊欄列表
@@ -69,13 +64,13 @@ function App() {
   // 1. 載入側邊欄歷史紀錄 (Roots)
   const fetchHistory = useCallback( async () => {
     try {
-      const res = await fetch(`${API_URL}/chats/roots?session_id=${sessionId}&sort_by=${sortBy}`);
+      const res = await apiFetch(`/chats/roots?sort_by=${sortBy}`);
       const data = await res.json();
       setHistoryList(data);
     } catch (error) {
       console.error("無法載入歷史紀錄:", error);
     }
-  }, [sessionId, sortBy]); // 依賴 sessionId 和 sortBy
+  }, [sortBy]); // 依賴 sortBy
 
   useEffect(() => {
     fetchHistory();
@@ -83,7 +78,7 @@ function App() {
 
   // 載入 OpenRouter 免費模型清單
   useEffect(() => {
-    fetch(`${API_URL}/api/free-models`)
+    apiFetch(`/api/free-models`)
       .then(res => res.json())
       .then(data => setFreeModels(data.models || []))
       .catch(err => console.error("無法載入免費模型:", err))
@@ -98,7 +93,7 @@ function App() {
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/chats/${rootId}/branches`);
+      const res = await apiFetch(`/chats/${rootId}/branches`);
       if (!res.ok) throw new Error("API Error");
       const data = await res.json();
       setBranchList(Array.isArray(data) ? data : []);
@@ -127,7 +122,7 @@ function App() {
       // 這裡只放掉 ref，讓新對話的送出流程不被舊串流綁住。
       streamAbortRef.current = null;
       setIsLoading(false);
-      const res = await fetch(`${API_URL}/chats/${rootId}/history`);
+      const res = await apiFetch(`/chats/${rootId}/history`);
       const data = await res.json();
 
       // (P3b-F1b) 決定載入後要捲到哪：有存過的閱讀位置就還原，
@@ -166,7 +161,7 @@ function App() {
   // 只在「這串對話仍是目前顯示的對話」時寫入，切走就停止寫入。
   const resumeGeneration = async (rootId, messageId) => {
     try {
-      const res = await fetch(`${API_URL}/messages/${messageId}/stream?offset=0`);
+      const res = await apiFetch(`/messages/${messageId}/stream?offset=0`);
       if (!res.ok || !res.body) return;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -277,15 +272,14 @@ function App() {
     streamAbortRef.current = abortController;
 
     try {
-      const response = await fetch(`${API_URL}/chat`, {
+      const response = await apiFetch(`/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: abortController.signal,
         body: JSON.stringify({
           message: userMessageContent,
           model: model,
-          parent_id: parentId,
-          session_id: sessionId
+          parent_id: parentId
         })
       });
 
@@ -403,7 +397,7 @@ function App() {
     // (F9-2) 伺服器是否已接受（response.ok）；還沒接受前失敗 → user 還原
     let accepted = false;
     try {
-      const response = await fetch(`${API_URL}/messages/${retryId}/regenerate`, {
+      const response = await apiFetch(`/messages/${retryId}/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: abortController.signal,
@@ -488,7 +482,7 @@ function App() {
   // 面板只顯示分支自己那一段，因此從 rootMessageId 開始切。
   const loadBranchMessages = useCallback(async (branchId, rootMessageId) => {
     try {
-      const res = await fetch(`${API_URL}/chats/${rootMessageId}/history`);
+      const res = await apiFetch(`/chats/${rootMessageId}/history`);
       if (!res.ok) throw new Error("API Error");
       const data = await res.json();
       const startIdx = data.findIndex(m => m.id === rootMessageId);
@@ -549,7 +543,7 @@ function App() {
     }
 
     try {
-      const res = await fetch(`${API_URL}/chats/${rootId}/branches`, {
+      const res = await apiFetch(`/chats/${rootId}/branches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -631,14 +625,13 @@ function App() {
     }));
 
     try {
-      const response = await fetch(`${API_URL}/chat`, {
+      const response = await apiFetch(`/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: content,
           model: model,
           parent_id: parentId,
-          session_id: sessionId,
           branch_id: branchId,
         }),
       });
@@ -730,7 +723,7 @@ function App() {
     // (F9-2) 伺服器是否已接受（response.ok）；還沒接受前失敗 → user 還原
     let accepted = false;
     try {
-      const response = await fetch(`${API_URL}/messages/${retryId}/regenerate`, {
+      const response = await apiFetch(`/messages/${retryId}/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(content != null ? { model, content } : { model }),
@@ -783,7 +776,7 @@ function App() {
     if (!confirm("確定要刪除這個對話串嗎？此動作無法復原。")) return;
 
     try {
-      await fetch(`${API_URL}/chats/${chatId}`, { method: 'DELETE' });
+      await apiFetch(`/chats/${chatId}`, { method: 'DELETE' });
       
       // ★★★ 清理後的邏輯 ★★★
       // 如果現在畫面上顯示的對話 (messages[0]) 就是我們剛刪除的那個 (chatId)
@@ -813,7 +806,7 @@ function App() {
     if (!renameInput.trim()) return;
 
     try {
-        await fetch(`${API_URL}/chats/${renamingId}/title`, {
+        await apiFetch(`/chats/${renamingId}/title`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: renameInput })

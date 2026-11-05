@@ -4,9 +4,7 @@ import '@xyflow/react/dist/style.css';
 import { X, User, Bot } from 'lucide-react';
 import { TbBinaryTree2 } from 'react-icons/tb';
 
-// const API_URL = "http://localhost:8000"; 
-// const API_URL = "https://ai-chat-backend-ugmu.onrender.com";
-const API_URL = import.meta.env.VITE_API_URL;
+import { apiFetch } from './api';
 
 // ============================================================
 // (P2-7) 自訂排版：主幹垂直、分支向右
@@ -293,7 +291,7 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
     const fetchTreeData = async () => {
       setIsLoading(true);
       try {
-        const res = await fetch(`${API_URL}/chats/${rootId}/tree`);
+        const res = await apiFetch(`/chats/${rootId}/tree`);
         const data = await res.json();
 
         // 轉換資料給 React Flow 看
