@@ -307,8 +307,8 @@ chat-{root_id}-{date}/
 | S-U1-4 | implementer | 所有路由加登入與擁有者檢查、隔離 harness | ✅ c2015b8（發現既有 bug B11） |
 | S-U1-5 | implementer | 舊資料認領腳本 | ✅ 897d976（auth_harness 187 PASS） |
 | S-U1-6 | implementer | 前端 `apiFetch`、移除 `session_id` | ✅ 61a2733 |
-| S-U1-7 | implementer | 登入閘門、登入頁、帳號區 | ✅ a721e2e（使用者瀏覽器驗收通過，假 LLM） |
-| S-U1-8 | 使用者 | OAuth 主控台與 VM 設定、部署、認領、真實登入與隔離驗證 | ⏳ |
+| S-U1-7 | implementer | 登入閘門、登入頁、帳號區 | ✅ a721e2e、3ebc03e（本機 compose 傳 OAuth 變數）；2026-11-05 本機真實 Google/GitHub 登入與隔離驗收通過 |
+| S-U1-8 | 使用者 | OAuth 主控台與 VM 設定、部署、認領、真實登入與隔離驗證 | ⏳ 本機已驗，正式環境未做 |
 | S-U1-9 | implementer | `user_id` NOT NULL、刪 `session_id` | ⏳ 等決策 4 |
 
 **S-U1-1 B10（`backend/main.py`、新檔 `backend/dev/auth_harness.py`）**
