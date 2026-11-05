@@ -124,4 +124,4 @@
 - **原因**：authlib 清掉 state 後暫存內容變空，middleware 在回應最後補上刪除同名 cookie 的標頭
 - **注意**：Python cookie jar（`TestClient`／httpx）重播時 token 仍在，會誤判沒問題；測試要用 curl 並檢查 `Set-Cookie` 標頭
 - **修正方向**：`SessionMiddleware` 改用 `session_cookie="oauth_state"`（S-U1-1）。教學：`docs/20261105_(S-U1)user-ownership-guide.html`
-- **狀態**：待修，等使用者說「開始」
+- **狀態**：已修（6541856），auth_harness 通過（含移除修正後測試會失敗）；待真實瀏覽器驗證（S-U1-8）
