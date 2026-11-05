@@ -243,7 +243,7 @@ chat-{root_id}-{date}/
 | E2 | 後端：幽靈化記原對話、`GET /branches/orphaned`、`POST /branches/{id}/relink`、刪對話前清 `attach_root_id` | ✅ | caeeae1（branch_entries_harness 87 PASS、regenerate_harness 47 PASS）；取代 B3；另加：錨點在分支自己的訊息之下 → 400（避免 parent 循環） |
 | E3 | 前端：AI 回覆底部入口（橫線＋每行一個 anchor_text）、建立分支處理 `reused` | ✅ | 2bbf0af（使用者確認換行；含 BUGS B8 入口改可換行）；驗收中發現 B6（873a440）、B7（f785aed） |
 | E4 | 前端：分支面板左上角分支列表（滿版覆蓋、依位置排序、點了開分支＋主對話捲到位置）、移除 tab 列 | ✅ | a2f2ce0（使用者瀏覽器確認）；標題旁不加生成中提示（使用者決定） |
-| E5 | 前端：選字時「連結幽靈分支」按鈕＋選單、列表的幽靈分支區 | ⏳ | 取代 F9 的「幽靈分支重連 UI」 |
+| E5 | 前端：選字時「連結幽靈分支」按鈕＋選單、列表的幽靈分支區 | ⏳ 暫停 | 取代 F9 的「幽靈分支重連 UI」；E1–E4 已 merge 回 main（2026-11-05），E5 之後另開 branch；半成品（BranchListOverlay 幽靈區、BranchPanel 傳參）在 `git stash` 「E5 partial」 |
 
 > B2–B4／F9 的拆分以 HANDOVER 為準，尚未寫驗收指令；開工前先補（可執行指令形式）並出教學文件。
 
