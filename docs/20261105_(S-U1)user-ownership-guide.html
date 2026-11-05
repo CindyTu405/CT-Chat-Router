@@ -250,13 +250,13 @@ python claim_legacy_data.py --provider google --email you@example.com --session-
     <div class="table-wrap">
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
-        <tr><td>S-U1-1</td><td>B10：state cookie 改名，新增登入流程 harness</td><td>未開始</td></tr>
-        <tr><td>S-U1-2</td><td><code>/auth/me</code>、POST 登出、OAuth 失敗導回</td><td>未開始</td></tr>
-        <tr><td>S-U1-3</td><td><code>user_id</code> 欄位（允許 NULL）與唯一約束 migration</td><td>未開始</td></tr>
-        <tr><td>S-U1-4</td><td>所有路由加登入與擁有者檢查、隔離 harness</td><td>未開始</td></tr>
-        <tr><td>S-U1-5</td><td>舊資料認領腳本</td><td>未開始</td></tr>
-        <tr><td>S-U1-6</td><td>前端 <code>apiFetch</code>，移除 <code>session_id</code></td><td>未開始</td></tr>
-        <tr><td>S-U1-7</td><td>登入閘門、登入頁、帳號區</td><td>未開始</td></tr>
+        <tr><td>S-U1-1</td><td>B10：state cookie 改名，新增登入流程 harness</td><td>完成 6541856，真實瀏覽器驗證留到 S-U1-8</td></tr>
+        <tr><td>S-U1-2</td><td><code>/auth/me</code>、POST 登出、OAuth 失敗導回</td><td>完成 ffd9565</td></tr>
+        <tr><td>S-U1-3</td><td><code>user_id</code> 欄位（允許 NULL）與唯一約束 migration</td><td>完成 551ca95</td></tr>
+        <tr><td>S-U1-4</td><td>所有路由加登入與擁有者檢查、隔離 harness</td><td>完成 c2015b8，過程中發現既有 bug B11</td></tr>
+        <tr><td>S-U1-5</td><td>舊資料認領腳本</td><td>完成 897d976</td></tr>
+        <tr><td>S-U1-6</td><td>前端 <code>apiFetch</code>，移除 <code>session_id</code></td><td>完成 61a2733</td></tr>
+        <tr><td>S-U1-7</td><td>登入閘門、登入頁、帳號區</td><td>完成 a721e2e，瀏覽器驗收通過（假 LLM，尚未走真實 OAuth）</td></tr>
         <tr><td>S-U1-8</td><td>你：設定 OAuth、部署、認領、真實登入與隔離驗證</td><td>未開始</td></tr>
         <tr><td>S-U1-9</td><td>NOT NULL、刪 <code>session_id</code></td><td>未開始，等第 4 項決策</td></tr>
       </table>
