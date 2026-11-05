@@ -114,3 +114,14 @@
 - **影響**：SQLAlchemy 的 echo 會連參數一起輸出，寫入訊息時對話內容可能進入容器日誌
 - **修正**：預設關閉，只有環境變數 `SQL_ECHO` 為真時才開啟
 - **狀態**：已完成（862acf2，已部署，正式環境日誌驗證通過）
+
+## B10：OAuth state 和登入 token 共用 `session` cookie，登入後 token 立刻被刪
+
+- **發生於**：`backend/main.py` 的 `SessionMiddleware`（預設 cookie 名 `session`）與 `backend/auth_routes.py` 的 `SESSION_COOKIE_NAME = "session"`
+- **發現於**：S-U1 規劃時讀程式並做 spike（2026-11-05）
+- **重現**：spike 用相同設定的假路由，callback 回應依序有 `session=<token>` 與 `session=null; expires=1970`；curl cookie 檔重播後，下一個請求沒有 `session` cookie。尚未用真實瀏覽器與真實 OAuth 重現
+- **預期**：callback 後 `session` cookie 保留 token，`GET /auth/me` 回 200
+- **原因**：authlib 清掉 state 後暫存內容變空，middleware 在回應最後補上刪除同名 cookie 的標頭
+- **注意**：Python cookie jar（`TestClient`／httpx）重播時 token 仍在，會誤判沒問題；測試要用 curl 並檢查 `Set-Cookie` 標頭
+- **修正方向**：`SessionMiddleware` 改用 `session_cookie="oauth_state"`（S-U1-1）。教學：`docs/20261105_(S-U1)user-ownership-guide.html`
+- **狀態**：待修，等使用者說「開始」
