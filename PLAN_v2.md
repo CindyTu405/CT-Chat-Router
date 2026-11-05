@@ -308,8 +308,8 @@ chat-{root_id}-{date}/
 | S-U1-5 | implementer | 舊資料認領腳本 | ✅ 897d976（auth_harness 187 PASS） |
 | S-U1-6 | implementer | 前端 `apiFetch`、移除 `session_id` | ✅ 61a2733 |
 | S-U1-7 | implementer | 登入閘門、登入頁、帳號區 | ✅ a721e2e、3ebc03e（本機 compose 傳 OAuth 變數）；2026-11-05 本機真實 Google/GitHub 登入與隔離驗收通過 |
-| S-U1-8 | 使用者 | OAuth 主控台與 VM 設定、部署、認領、真實登入與隔離驗證 | ⏳ 本機已驗，正式環境未做 |
-| S-U1-9 | implementer | `user_id` NOT NULL、刪 `session_id` | ⏳ 等決策 4 |
+| S-U1-8 | 使用者 | OAuth 主控台與 VM 設定、部署、認領、真實登入與隔離驗證 | ⏳ 部署與驗收 1～15 通過（2026-11-05）；認領、匯出、刪除未做 |
+| S-U1-9 | implementer | `user_id` NOT NULL、刪 `session_id` | ⏳ 決策 4 已定（認領 `sess_6f9afo7l4zu`，其餘匯出 JSON 後刪除），等 VM 上 NULL 筆數為 0 |
 
 **S-U1-1 B10（`backend/main.py`、新檔 `backend/dev/auth_harness.py`）**
 - `SessionMiddleware` 加 `session_cookie="oauth_state"`、`max_age=600`、`same_site="lax"`、`https_only=cookie_secure()`（`cookie_secure` 從 `auth_routes` import）。
@@ -425,7 +425,7 @@ chat-{root_id}-{date}/
 前置：
 1. Google 與 GitHub 主控台 callback 設為 `https://fluentbranch.com/api/auth/{provider}/callback`；client id／secret 放進 VM `.env`。
 2. 部署前備份並檢查（VM）：
-   - `sudo docker compose exec db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > ~/fluentbranch-before-s-u1.dump`
+   - `sudo docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > ~/fluentbranch-before-s-u1.dump`（必須加 `-T`，避免 TTY 破壞二進位檔）
    - `sudo docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select oauth_provider, oauth_sub, count(*) from \"user\" group by 1,2 having count(*)>1"'` → 0 列（有重複時唯一約束 migration 會失敗，先回報）
 
 部署（VM）：`git pull` → `sudo docker compose up -d --build` → `sudo docker compose exec api alembic upgrade head`。

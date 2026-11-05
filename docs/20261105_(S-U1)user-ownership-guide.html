@@ -232,7 +232,7 @@ python claim_legacy_data.py --provider google --email you@example.com --session-
         <tr><td>1</td><td>擁有者存在哪裡</td><td><code>Message</code> 和 <code>Branch</code> 都加 <code>user_id</code>，不新增 <code>Chat</code> 表</td></tr>
         <tr><td>2</td><td>舊資料歸屬</td><td>登入後由管理腳本依 <code>session_id</code> 指定；不做自動認領</td></tr>
         <tr><td>3</td><td>遷移順序</td><td>允許 NULL → 部署 → 登入 → 認領 → NOT NULL；查不到擁有者的幽靈分支刪除</td></tr>
-        <tr><td>4</td><td>認領後的剩餘資料</td><td><b>待定</b>：看正式環境查詢結果</td></tr>
+        <tr><td>4</td><td>認領後的剩餘資料</td><td>2026-11-05 定案：認領訊息最多的 <code>sess_6f9afo7l4zu</code>；其餘匯出 JSON、確認後刪除</td></tr>
         <tr><td>5</td><td><code>session_id</code></td><td>程式不再使用；和 NOT NULL 同一次 migration 刪欄位，前端清掉 localStorage 舊值</td></tr>
         <tr><td>6</td><td>未登入可用範圍</td><td>不開放訪客，只公開 <code>/</code>、<code>/auth/*</code>；刪除 <code>GET /messages</code>；<code>free-models</code> 要登入；正式環境關閉 <code>/docs</code></td></tr>
         <tr><td>7</td><td>存取別人的資料</td><td>一律 404</td></tr>
@@ -258,7 +258,7 @@ python claim_legacy_data.py --provider google --email you@example.com --session-
         <tr><td>S-U1-6</td><td>前端 <code>apiFetch</code>，移除 <code>session_id</code></td><td>完成 61a2733</td></tr>
         <tr><td>S-U1-7</td><td>登入閘門、登入頁、帳號區</td><td>完成 a721e2e、3ebc03e（本機 compose 傳 OAuth 變數），本機真實 Google/GitHub 登入與隔離驗收通過</td></tr>
         <tr><td>S-U1-8</td><td>你：設定 OAuth、部署、認領、真實登入與隔離驗證</td><td>未開始</td></tr>
-        <tr><td>S-U1-9</td><td>NOT NULL、刪 <code>session_id</code></td><td>未開始，等第 4 項決策</td></tr>
+        <tr><td>S-U1-9</td><td>NOT NULL、刪 <code>session_id</code></td><td>未開始。第 4 項已定：認領最多的 session，其餘匯出 JSON 後刪除；等 VM 上 NULL 筆數為 0</td></tr>
       </table>
     </div>
   </section>
