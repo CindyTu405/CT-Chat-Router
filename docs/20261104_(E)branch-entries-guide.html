@@ -278,6 +278,8 @@ data-[hover]:bg-amber-300</code></pre>
       <tr><td>E2</td><td><code>caeeae1</code></td><td>幽靈化寫入 <code>attach_root_id</code>＝樹根；刪對話前清空；<code>GET /branches/orphaned</code>；<code>POST /branches/{id}/relink</code>（跨 session → 404、409／400／422、降級 exclude 自己、首則訊息接回新錨點）。另加：錨點落在分支自己的訊息之下 → 400，避免 parent 形成循環</td><td>branch_entries_harness 87 PASS（含重連後 /chat 上下文來自新錨點）；regenerate_harness 47 PASS</td></tr>
       <tr><td>B6</td><td><code>873a440</code></td><td>驗收中發現：<code>&lt;mark&gt;</code> 沒把 <code>data-s／data-e</code> 帶到 DOM，選取端點落在高亮內時算不出 offset，新分支變成底部入口。mark 元件改為轉出這些屬性</td><td>build；待瀏覽器驗證重疊情境</td></tr>
       <tr><td>E3</td><td><code>2bbf0af</code></td><td>AI 回覆底部入口（橫線＋每行一個 anchor_text，可換行；B8：原本單行不換行把泡泡撐超出畫面）；移除子字串高亮 fallback；建立分支處理 <code>reused</code></td><td>build；使用者確認換行正常</td></tr>
+      <tr><td>B7</td><td><code>f785aed</code></td><td><code>rehypeHighlight</code> 在同一分支第一段／最後一段 mark 加 <code>data-first</code>／<code>data-last</code>，只有兩端有圓角與留白；MessageList 容器事件委派設 <code>data-hover</code>，同分支所有段一起變色（不經 React state）</td><td>build；使用者瀏覽器確認</td></tr>
+      <tr><td>E4</td><td><code>a2f2ce0</code></td><td>移除分支面板 tab 列，標題改顯示目前分支；左上角分支圖示開 <code>BranchListOverlay</code>（滿版覆蓋、inline 與底部入口依位置排序、X 關閉）；點項目開分支並把主對話捲到高亮或入口。標題旁不加生成中提示</td><td>build；使用者瀏覽器確認</td></tr>
     </table>
   </section>
 
