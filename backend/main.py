@@ -4,6 +4,7 @@ from fastapi.responses import StreamingResponse
 import asyncio
 from types import SimpleNamespace
 from sqlmodel import Session, select, text
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import os
@@ -386,11 +387,14 @@ async def regenerate_message(
     # e. 幽靈化：錨在這則上的分支 → anchor 清空、is_orphaned=True；分支的 root 斷開 parent 與 anchor
     orphaned_ids: list[str] = []
     branches = session.exec(select(Branch).where(Branch.anchor_message_id == ai.id)).all()
+    # (E2) 幽靈記住原本所屬的對話：寫入這則 AI 回覆所在樹的樹根（只用來依 session 過濾幽靈清單）
+    tree_root_id = _find_tree_root(session, ai).id
     for br in branches:
         br.anchor_message_id = None
         br.anchor_start = None
         br.anchor_end = None
         br.is_orphaned = True  # anchor_text / title 保留，之後幽靈清單可顯示原本選的字
+        br.attach_root_id = tree_root_id
         session.add(br)
         orphaned_ids.append(str(br.id))
         if br.root_message_id:
@@ -558,6 +562,13 @@ def delete_chat(root_id: uuid.UUID, session: Session = Depends(get_session)):
     if not all_ids:
         raise HTTPException(status_code=404, detail="Chat not found")
 
+    # (E2) 幽靈分支的 attach_root_id 若指向即將刪除的訊息，先清成 NULL（同一個交易），否則 FK 會擋住刪除。
+    # 幽靈本身保留，之後清單改用分支首則訊息的 session 判斷。
+    doomed_ids = [uuid.UUID(str(i)) for i in all_ids]
+    for br in session.exec(select(Branch).where(Branch.attach_root_id.in_(doomed_ids))).all():
+        br.attach_root_id = None
+        session.add(br)
+
     # 2. 依照算出來的順序 (由深到淺) 逐一刪除
     # 這裡我們直接對每個 ID 執行刪除指令，確保順序絕對正確
     for msg_id in all_ids:
@@ -600,6 +611,92 @@ def get_chat_tree(root_id: uuid.UUID, session: Session = Depends(get_session)):
     
     results = session.exec(query, params={"root_id": root_id}).mappings().all()
     return results
+
+
+def demote_overlaps(
+    session: Session,
+    anchor_message_id: uuid.UUID,
+    start: int,
+    end: int,
+    exclude_id: uuid.UUID | None = None,
+) -> list[str]:
+    """(E1) 把同一則回覆上、與 [start, end) 重疊的 inline 分支降級為底部入口。
+
+    重疊判定（半開區間）：舊.start < end 且 start < 舊.end；相鄰不算重疊。
+    降級 = anchor_start／anchor_end 清空，其他欄位（anchor_message_id、anchor_text、title）不動。
+    不 commit：由呼叫端與建新／重連放在同一個交易。回傳被降級的 branch id（str）。
+    """
+    query = select(Branch).where(
+        Branch.anchor_message_id == anchor_message_id,
+        Branch.is_orphaned == False,  # noqa: E712
+        Branch.anchor_start.is_not(None),
+        Branch.anchor_end.is_not(None),
+        Branch.anchor_start < end,
+        Branch.anchor_end > start,
+    )
+    if exclude_id is not None:
+        query = query.where(Branch.id != exclude_id)
+    demoted: list[str] = []
+    for br in session.exec(query).all():
+        br.anchor_start = None
+        br.anchor_end = None
+        session.add(br)
+        demoted.append(str(br.id))
+    return demoted
+
+
+def _find_tree_root(session: Session, msg: Message) -> Message:
+    """(E2) 沿 parent_id 往上走，回傳 parent_id 為 NULL 的樹根訊息。"""
+    cur = msg
+    seen: set = set()
+    while cur.parent_id is not None and cur.id not in seen:
+        seen.add(cur.id)
+        parent = session.get(Message, cur.parent_id)
+        if parent is None:
+            break
+        cur = parent
+    return cur
+
+
+def _is_ancestor_or_self(session: Session, ancestor_id: uuid.UUID, descendant_id: uuid.UUID) -> bool:
+    """(E2) ancestor_id 是否為 descendant_id 本身或其祖先。"""
+    return session.exec(
+        text("""
+        WITH RECURSIVE ancestors AS (
+            SELECT id, parent_id FROM message WHERE id = :start_id
+            UNION ALL
+            SELECT m.id, m.parent_id FROM message m
+            JOIN ancestors a ON a.parent_id = m.id
+        )
+        SELECT id FROM ancestors WHERE id = :ancestor_id LIMIT 1;
+        """),
+        params={"start_id": descendant_id, "ancestor_id": ancestor_id},
+    ).first() is not None
+
+
+class RelinkBranchRequest(BaseModel):
+    """(E2) 幽靈分支重連：把它接到 root 這棵樹裡的某則訊息的一段文字上。"""
+    root_id: uuid.UUID
+    anchor_message_id: uuid.UUID
+    anchor_start: int | None = None
+    anchor_end: int | None = None
+    anchor_text: str | None = None
+
+
+def _branch_response(branch: Branch, reused: bool, demoted_ids: list[str]) -> dict:
+    """(E1) 建立分支的回傳格式（新建與重用共用）。"""
+    return {
+        "branch_id": str(branch.id),
+        "anchor_message_id": str(branch.anchor_message_id) if branch.anchor_message_id else None,
+        "anchor_text": branch.anchor_text,
+        "anchor_start": branch.anchor_start,
+        "anchor_end": branch.anchor_end,
+        "precise": branch.anchor_start is not None and branch.anchor_end is not None,
+        "root_message_id": str(branch.root_message_id) if branch.root_message_id else None,
+        "title": branch.title,
+        "reused": reused,
+        "demoted_ids": demoted_ids,
+    }
 
 
 @app.post("/chats/{root_id}/branches")
@@ -646,11 +743,41 @@ def create_branch(
             status_code=400, detail="Anchor message does not belong to this chat"
         )
 
+    # --- 1b. offset 驗證（E1）：在任何寫入之前；start／end 必須成對，且 0 <= start < end <= 回覆長度 ---
+    if (payload.anchor_start is None) != (payload.anchor_end is None):
+        raise HTTPException(status_code=422, detail="anchor_start and anchor_end must be given together")
+    has_offset = payload.anchor_start is not None
+    if has_offset:
+        content_len = len(anchor_msg.content or "")
+        if not (0 <= payload.anchor_start < payload.anchor_end <= content_len):
+            raise HTTPException(status_code=422, detail="anchor offsets out of range")
+
+        # 1c. 範圍完全相同的非幽靈分支已存在 → 不新建、不降級，直接回傳它（E1）
+        existing = session.exec(
+            select(Branch)
+            .where(
+                Branch.anchor_message_id == payload.anchor_message_id,
+                Branch.is_orphaned == False,  # noqa: E712
+                Branch.anchor_start == payload.anchor_start,
+                Branch.anchor_end == payload.anchor_end,
+            )
+            .order_by(Branch.created_at)
+        ).first()
+        if existing is not None:
+            return _branch_response(existing, reused=True, demoted_ids=[])
+
     # --- 2. Branch 本體（title 取 anchor_text 的單行前 50 字）---
     if payload.anchor_text and payload.anchor_text.strip():
         title = " ".join(payload.anchor_text.split())[:50]
     else:
         title = "新分支"
+
+    # (E1) 有 offset 才檢查重疊：重疊的舊分支降級為底部入口（與下面的建新同一個 commit）
+    demoted_ids: list[str] = []
+    if has_offset:
+        demoted_ids = demote_overlaps(
+            session, payload.anchor_message_id, payload.anchor_start, payload.anchor_end
+        )
 
     branch = Branch(
         root_message_id=None,
@@ -691,15 +818,7 @@ def create_branch(
     session.commit()
     session.refresh(branch)
 
-    return {
-        "branch_id": str(branch.id),
-        "anchor_message_id": str(branch.anchor_message_id) if branch.anchor_message_id else None,
-        "anchor_text": branch.anchor_text,
-        "anchor_start": branch.anchor_start,
-        "anchor_end": branch.anchor_end,
-        "precise": branch.anchor_start is not None and branch.anchor_end is not None,
-        "root_message_id": None,
-    }
+    return _branch_response(branch, reused=False, demoted_ids=demoted_ids)
 
 
 @app.get("/chats/{root_id}/branches")
@@ -745,6 +864,142 @@ def list_branches(root_id: uuid.UUID, session: Session = Depends(get_session)):
         }
         for row in rows
     ]
+
+
+@app.get("/branches/orphaned")
+def list_orphaned_branches(session_id: str, session: Session = Depends(get_session)):
+    """
+    (E2) 幽靈分支清單（給分支面板的「幽靈分支」區與選字時的「連結幽靈分支」選單）。
+
+    歸屬判定（只看 session，不看對話）：
+    - attach_root_id 有值 → 該樹根訊息的 session_id 等於 session_id；
+    - attach_root_id 為 NULL（舊資料或原對話已刪）→ 分支首則訊息的 session_id 等於 session_id。
+    依 created_at 新到舊。
+    """
+    query = text("""
+    SELECT b.id, b.title, b.anchor_text, b.root_message_id, b.created_at
+    FROM branch b
+    LEFT JOIN message am ON am.id = b.attach_root_id
+    LEFT JOIN message rm ON rm.id = b.root_message_id
+    WHERE b.is_orphaned = true
+      AND (
+        (b.attach_root_id IS NOT NULL AND am.session_id = :sid)
+        OR (b.attach_root_id IS NULL AND rm.session_id = :sid)
+      )
+    ORDER BY b.created_at DESC;
+    """)
+    rows = session.exec(query, params={"sid": session_id}).mappings().all()
+    return [
+        {
+            "id": str(row["id"]),
+            "title": row["title"],
+            "anchor_text": row["anchor_text"],
+            "root_message_id": str(row["root_message_id"]) if row["root_message_id"] else None,
+            "created_at": to_utc_iso(row["created_at"]),
+        }
+        for row in rows
+    ]
+
+
+@app.post("/branches/{branch_id}/relink")
+def relink_branch(
+    branch_id: uuid.UUID,
+    payload: RelinkBranchRequest,
+    session: Session = Depends(get_session),
+):
+    """
+    (E2) 把幽靈分支接回 root 這棵對話上的一段文字（變成 inline 高亮）。
+
+    檢查順序：
+    1. 404：分支不存在、root 不存在，或分支的歸屬 session（attach_root_id 那則；為 NULL 時用首則訊息；
+       兩者都沒有 → 不屬於任何人）與 root 的 session 不同。一律 404，不洩漏分支是否存在。
+    2. 409：不是幽靈（is_orphaned 不是 True）。
+    3. 422：anchor_start／anchor_end 必須成對；有帶時 0 <= start < end <= 回覆長度。
+    4. 404：錨點訊息不存在。400：錨點不在 root 這棵樹上，或錨點位於分支自己的訊息之下（會形成循環）。
+    5. 409：同一則上已有範圍完全相同的非幽靈分支（不寫入）。
+    通過後同一個 commit：重疊的舊分支降級（exclude 自己）→ 設錨點、is_orphaned=False、attach_root_id=NULL；
+    分支首則訊息 parent_id／anchor_message_id 接到新錨點；樹根 has_branch=True。title 不變。
+    """
+    # 1. 404（不洩漏存在與否）
+    branch = session.get(Branch, branch_id)
+    root_msg = session.get(Message, payload.root_id)
+    if branch is None or root_msg is None:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    owner_msg = None
+    if branch.attach_root_id is not None:
+        owner_msg = session.get(Message, branch.attach_root_id)
+    elif branch.root_message_id is not None:
+        owner_msg = session.get(Message, branch.root_message_id)
+    if owner_msg is None or owner_msg.session_id != root_msg.session_id:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    # 2. 409：不是幽靈
+    if branch.is_orphaned is not True:
+        raise HTTPException(status_code=409, detail="Branch is not orphaned")
+
+    # 3. 422：offset 成對且範圍合法（在任何寫入之前）
+    if (payload.anchor_start is None) != (payload.anchor_end is None):
+        raise HTTPException(status_code=422, detail="anchor_start and anchor_end must be given together")
+    has_offset = payload.anchor_start is not None
+
+    # 4. 錨點：存在、屬於 root 這棵樹、不在分支自己的訊息之下
+    anchor_msg = session.get(Message, payload.anchor_message_id)
+    if anchor_msg is None:
+        raise HTTPException(status_code=404, detail="Anchor message not found")
+    if not _is_ancestor_or_self(session, root_msg.id, anchor_msg.id):
+        raise HTTPException(status_code=400, detail="Anchor message does not belong to this chat")
+    if branch.root_message_id is not None and _is_ancestor_or_self(
+        session, branch.root_message_id, anchor_msg.id
+    ):
+        raise HTTPException(status_code=400, detail="Anchor message is inside this branch")
+
+    if has_offset:
+        content_len = len(anchor_msg.content or "")
+        if not (0 <= payload.anchor_start < payload.anchor_end <= content_len):
+            raise HTTPException(status_code=422, detail="anchor offsets out of range")
+
+        # 5. 409：同一則上範圍完全相同的非幽靈分支已存在（不能把兩條分支放在同一段）
+        same = session.exec(
+            select(Branch.id).where(
+                Branch.anchor_message_id == anchor_msg.id,
+                Branch.is_orphaned == False,  # noqa: E712
+                Branch.anchor_start == payload.anchor_start,
+                Branch.anchor_end == payload.anchor_end,
+            )
+        ).first()
+        if same is not None:
+            raise HTTPException(status_code=409, detail="A branch with the same range already exists")
+
+    # --- 寫入（同一個交易）---
+    demoted_ids: list[str] = []
+    if has_offset:
+        demoted_ids = demote_overlaps(
+            session, anchor_msg.id, payload.anchor_start, payload.anchor_end, exclude_id=branch.id
+        )
+
+    branch.anchor_message_id = anchor_msg.id
+    branch.anchor_start = payload.anchor_start
+    branch.anchor_end = payload.anchor_end
+    branch.anchor_text = payload.anchor_text
+    branch.is_orphaned = False
+    branch.attach_root_id = None
+    session.add(branch)
+
+    # 分支首則訊息接到新錨點：之後在分支裡對話，上下文來自新位置
+    if branch.root_message_id is not None:
+        first = session.get(Message, branch.root_message_id)
+        if first is not None:
+            first.parent_id = anchor_msg.id
+            first.anchor_message_id = anchor_msg.id
+            session.add(first)
+
+    tree_root = _find_tree_root(session, root_msg)
+    tree_root.has_branch = True
+    session.add(tree_root)
+
+    session.commit()
+    session.refresh(branch)
+    return _branch_response(branch, reused=False, demoted_ids=demoted_ids)
 
 
 @app.get("/api/free-models")

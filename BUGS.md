@@ -74,6 +74,37 @@
 - **修正**：最外層 `h-screen supports-[height:100dvh]:h-dvh`（支援 dvh 時用動態可見高度，舊瀏覽器退回 100vh）。教學：`docs/20261103_(B5)mobile-viewport-height-guide.html`
 - **狀態**：已完成（3300f1f，使用者手機驗證通過）
 
+---
+
+## B6：選取範圍的端點落在既有高亮內 → 新分支沒有 offset，直接變成底部入口
+
+- **發現於**：E3 瀏覽器驗收（2026-11-04，桌面）
+- **重現**：建立分支 A → 選一段「結尾落在 A 高亮裡」的文字（或選跟 A 完全相同的文字）→ 建立分支 B → B 直接出現在底部入口，A 仍是高亮
+- **預期**：B 成為 inline 高亮，A 降級為底部入口；完全相同的範圍 → 開既有分支 A（E 決策 4）
+- **原因（讀程式確認，尚未在瀏覽器量測）**：`rehypeHighlight` 產生的 `<mark>` 節點帶 `data-s／data-e`，但 `MessageList` 的 `mark` 元件渲染 DOM 時沒有把這兩個屬性傳下去。`selectionOffset.js` 從選取端點往上找 `data-s`，落在 mark 裡就找不到 → 回傳 null → 前端送出沒有 offset 的建立請求 → 後端依規則當成底部入口、不做重疊檢查。端點都落在 mark 外（例如選取完整包住 A）時正常，所以看起來「有時正常」。
+- **修正**：`mark` 元件（可點與純高亮兩種）把 `node.properties` 的 `data-s`、`data-e`、`data-branch` 轉到 DOM 上。
+- **狀態**：已修（873a440），待使用者瀏覽器驗證重疊情境
+
+---
+
+## B7：選取跨 Markdown 粗體時，高亮在粗體邊界斷成兩段
+
+- **發現於**：E3 瀏覽器驗收（2026-11-04，桌面）
+- **重現**：選取「最佳造訪季節**： 6–8 月白天」這種跨粗體結尾的文字建立分支 → 高亮看起來是兩段
+- **原因**：`rehypeHighlight` 依設計在每個 text node 內各包一個 `<mark>`（不破壞粗體結構），而 `ANCHOR_MARK_CLASS` 每段都有 `rounded-sm px-0.5`，相鄰兩段之間出現圓角與間隙；hover 也是各段各自變色（使用者截圖確認）。
+- **修正方向（使用者同意先做出來看效果）**：`rehypeHighlight` 在同一分支的第一段 mark 加 `data-first`、最後一段加 `data-last`；樣式只在 first 左側、last 右側有圓角與留白。滑過任一段 → 同一分支所有段一起變色（在 MessageList 容器用事件委派，對同 `data-branch` 的 mark 設 `data-hover` 屬性，樣式用 `data-[hover]:`，不經 React state，避免整段 Markdown 重新渲染）。
+- **狀態**：✅ 已修正 f785aed（使用者瀏覽器確認）
+
+---
+
+## B8：底部入口文字太長時不換行
+
+- **發現於**：E3 瀏覽器驗收（2026-11-04）
+- **現象（使用者截圖）**：底部入口與回覆內文都沒換行，AI 泡泡比畫面寬，底部出現水平捲軸。
+- **原因（讀程式＋截圖判斷）**：E3 的 `BRANCH_ENTRY_TEXT_CLASS` 用 `truncate`（`white-space: nowrap`）。泡泡寬度依內容決定，最長的入口不換行就把泡泡撐到它的全長，內文也跟著用這個寬度排版，看起來就像內文不換行。
+- **修正**：入口改成可換行（`whitespace-normal break-words`），併入 E3。
+- **狀態**：已完成（2bbf0af，使用者確認換行正常）
+
 ## B9：正式環境的 SQL 日誌可能記下使用者資料
 
 - **發生於**：`backend/database.py` 的 `create_engine(DATABASE_URL, echo=True)`，所有環境
