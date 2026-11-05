@@ -73,3 +73,13 @@
 - **疑似原因（待驗證）**：`App.jsx` 最外層用 `h-screen`（`height: 100vh`）。手機瀏覽器的 `100vh` 是「網址列收起時」的最大高度，網址列顯示時可見區域比它矮，整頁因此多出一截可以捲動，標題或輸入框被推出畫面。
 - **修正**：最外層 `h-screen supports-[height:100dvh]:h-dvh`（支援 dvh 時用動態可見高度，舊瀏覽器退回 100vh）。教學：`docs/20261103_(B5)mobile-viewport-height-guide.html`
 - **狀態**：已完成（3300f1f，使用者手機驗證通過）
+
+## B9：正式環境的 SQL 日誌可能記下使用者資料
+
+- **發生於**：`backend/database.py` 的 `create_engine(DATABASE_URL, echo=True)`，所有環境
+- **發現於**：H3 部署後檢查 `docker compose logs api`（2026-11-05）
+- **重現**：`sudo docker compose logs api --tail 5` → 看得到 SQL 與參數，例如 `{'session_id': ...}`
+- **預期**：正式環境不記錄 SQL 語句與參數，只在開發需要時打開
+- **影響**：SQLAlchemy 的 echo 會連參數一起輸出，寫入訊息時對話內容可能進入容器日誌
+- **修正**：預設關閉，只有環境變數 `SQL_ECHO` 為真時才開啟
+- **狀態**：修正中
