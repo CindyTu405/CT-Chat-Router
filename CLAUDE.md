@@ -27,7 +27,7 @@ Reply in the language the user writes in.
 - Frontend-only edits: `cd frontend && npm run build` is the quick gate (no UI test suite). Say explicitly in the report that visual behavior was not browser-verified when it wasn't.
 - Backend streaming: verify with a fake-LLM harness on a real uvicorn server, never real Gemini/OpenRouter calls (they cost money). Ask the user to run the real-model check.
 - Before any scripted file edit check line endings (`grep -c $'\r' <file>`). As of 2026-10-28 `backend/main.py` and `backend/models.py` are LF; frontend files are LF. Write back with the file's own ending.
-- `database.py` sets `echo=True`: any script importing it prints every SQL statement. Filter the output.
+- `database.py` echoes SQL only when `SQL_ECHO` is true (default off, B9). When on, any script importing it prints every SQL statement and its parameters. Filter the output.
 - DB gotcha: this machine has BOTH a docker pgvector (chat_db, port 5432) and a native PostgreSQL 16. Always `docker compose ps` first. If chat_db is down, STOP and report; do not start a throwaway native cluster.
 
 ## Commits and git
