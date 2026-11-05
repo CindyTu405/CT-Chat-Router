@@ -15,7 +15,7 @@ from slowapi.errors import RateLimitExceeded
 
 # 自訂模組
 from database import get_session, engine
-from auth_routes import router as auth_router
+from auth_routes import cookie_secure, router as auth_router
 from models import (
     Message,
     ChatRequest,
@@ -136,6 +136,10 @@ def is_model_allowed(model: str, session: Session | None = None) -> bool:
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-change-me"),
+    session_cookie="oauth_state",  # (B10) 不可與登入 cookie "session" 同名
+    max_age=600,
+    same_site="lax",
+    https_only=cookie_secure(),
 )
 
 # OAuth 登入 / 回呼 / 登出
