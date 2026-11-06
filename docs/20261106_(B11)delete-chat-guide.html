@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>刪除對話與外鍵教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · B11</span>
+    <h1>刪除對話與外鍵</h1>
+    <p>資料列互相引用時，要怎麼一次刪乾淨，而且失敗時什麼都不會被改。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>問題</h2>
+    <p>對話裡只要有錨定的分支，刪除就會回 500，連選字開了分支、還沒送訊息的空分支也一樣。前端又沒有檢查回應，所以對話還在，畫面卻沒有任何提示。</p>
+    <p>沒有分支的對話不受影響：2、4、10 則訊息的對話各測 30 次都成功。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：外鍵與循環引用</h2>
+    <p><b>外鍵</b>是資料庫的保證：「這個欄位指向的那一列一定存在」。要刪被引用的列，資料庫會拒絕。</p>
+    <p><code>message</code> 和 <code>branch</code> 互相引用：</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>欄位</th><th>指向</th><th>意思</th></tr>
+        <tr><td><code>branch.anchor_message_id</code></td><td>message</td><td>分支從哪則回覆分岔</td></tr>
+        <tr><td><code>branch.root_message_id</code></td><td>message</td><td>分支的第一則訊息</td></tr>
+        <tr><td><code>branch.attach_root_id</code></td><td>message</td><td>幽靈分支所屬對話的樹根</td></tr>
+        <tr><td><code>branch.parent_branch_id</code></td><td>branch</td><td>巢狀分支的上層</td></tr>
+        <tr><td><code>message.branch_id</code></td><td>branch</td><td>訊息屬於哪條分支</td></tr>
+      </table>
+    </div>
+    <p>因此「先刪訊息」會被 <code>branch.anchor_message_id</code> 擋住，「先刪分支」會被 <code>message.branch_id</code> 擋住。不管先刪哪一邊都會失敗，要先解開其中一邊的引用。</p>
+    <div class="flow">
+      <div class="box">清掉 branch 指向 message 的欄位</div>
+      <div class="arrow">→</div>
+      <div class="box">刪 message</div>
+      <div class="arrow">→</div>
+      <div class="box">刪 branch</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：交易</h2>
+    <p>上面三步放在同一個<b>交易</b>裡，只有 commit 成功才生效。中間任何一步失敗就 rollback，資料回到刪除前。使用者不會遇到「訊息刪了一半」的對話。</p>
+    <p>另外，PostgreSQL 的一般外鍵是在<b>每個 SQL 指令結束時</b>才檢查。用一條 <code>DELETE ... WHERE id IN (...)</code> 刪掉整棵樹，父子同時消失，不必再一層一層由深到淺刪。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>刪除範圍怎麼算</h2>
+    <p>沿 <code>parent_id</code> 往下走只找得到對話樹內的訊息。幽靈分支的第一則訊息已經斷開 <code>parent_id</code>，要透過 <code>attach_root_id</code> 才找得到，而幽靈的訊息上也可能還有分支。所以要重複擴大範圍，直到找不到新資料為止：</p>
+    <pre><code><span class="cm"># 示意，實際程式由 implementer 依規格撰寫</span>
+messages = 對話根的所有子孫
+repeat:
+    branches = 所有引用 messages 的分支
+             + messages 所屬的分支
+    messages += 這些分支的訊息與子孫
+until 兩個集合都不再變大</code></pre>
+    <div class="warn"><b>注意：</b>開始刪除前要確認範圍內的資料都屬於目前的使用者。正常情況不會混到別人的資料；萬一發生，整個刪除會中止，一筆都不動。</div>
+    <div class="table-wrap">
+      <table>
+        <tr><th>分支種類</th><th>刪除對話時</th></tr>
+        <tr><td>inline 高亮分支</td><td>一起刪</td></tr>
+        <tr><td>底部入口分支</td><td>一起刪</td></tr>
+        <tr><td>空分支（沒有訊息）</td><td>一起刪</td></tr>
+        <tr><td>屬於這個對話的幽靈分支</td><td>一起刪，連同它的訊息</td></tr>
+        <tr><td><code>attach_root_id</code> 為空的舊幽靈</td><td>不動：查不出屬於哪個對話</td></tr>
+        <tr><td>別的對話的分支</td><td>不動</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>概念：HTTP 錯誤不等於 fetch 失敗</h2>
+    <p><code>fetch</code> 只有連不上伺服器時才會丟錯。伺服器回 404 或 500 仍算「成功收到回應」，所以 <code>try/catch</code> 接不到，要自己檢查 <code>res.ok</code>：</p>
+    <pre><code><span class="cm">// 現在：500 也當成功，直接刷新列表</span>
+await apiFetch(`/chats/${chatId}`, { method: 'DELETE' });
+
+<span class="cm">// 修正後的判斷</span>
+const res = await apiFetch(`/chats/${chatId}`, { method: 'DELETE' });
+<span class="cm">// 401：apiFetch 已切到登入頁，不再提示
+// 404：對話已不存在（例如另一個分頁刪了），刷新列表即可
+// 其他非 ok：顯示錯誤，對話留在列表</span></code></pre>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>概念：錯誤細節不要回給使用者</h2>
+    <p>現在的 500 回應是 <code>f"刪除失敗: {str(e)}"</code>，資料庫錯誤字串可能包含 SQL、資料表名和資料 id。細節應該只寫進 server log，回應只放固定訊息。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>生成中刪除</h2>
+    <p>背景生成完成時，<code>run_generation</code> 會先查這則訊息；查不到就不寫入，所以生成途中刪除不會出錯，這部分不用改。規格仍會加一項測試，避免之後改壞。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+        <tr><td>1</td><td>對話內的分支</td><td>跟著對話一起刪</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>2</td><td>屬於這個對話的幽靈分支</td><td>一起刪，取代 E2「幽靈保留並清空 <code>attach_root_id</code>」</td><td>2026-11-06 使用者確認</td></tr>
+        <tr><td>3</td><td>前端失敗提示</td><td>非 ok 顯示錯誤；404 視為已刪除；確認框加上「分支也會一起刪除」</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>4</td><td>500 回應內容</td><td>固定訊息，細節寫 log</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>5</td><td>X1 刪除前匯出</td><td>不綁在 B11，之後另做</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>6</td><td>幽靈分支隸屬對話、顯示在分支列表</td><td>定義已確認；重連範圍、舊幽靈處理另外討論，不在 B11 實作</td><td>細節待確認</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>B11-1</td><td>後端刪除範圍、三步刪除、錯誤回應、harness</td><td>未開始</td></tr>
+        <tr><td>B11-2</td><td>前端失敗提示、確認文字、關閉已刪對話的分支面板</td><td>未開始</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>練習</h2>
+    <ol>
+      <li>為什麼單純調換 <code>message</code> 和 <code>branch</code> 的刪除順序解決不了問題？</li>
+      <li>對話 A 有一條幽靈分支，幽靈的回覆上又錨定一條分支。第 4 節的步驟會怎麼找到這兩條分支？</li>
+      <li>如果第三步刪 branch 失敗，第二步刪掉的訊息會怎樣？</li>
+      <li>後端回 500 時，<code>await fetch()</code> 會進 <code>catch</code> 嗎？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-06</p>
+
+</div>
+</body>
+</html>
