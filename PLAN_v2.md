@@ -70,7 +70,7 @@
 **V1-3 模型選項（`backend/main.py`、`docker-compose.prod.yml`、`docker-compose.yml`、`backend/dev/*`、`frontend/src/App.jsx`、`frontend/src/components/ModelSelector.jsx`）**
 - `GET /api/model-options`（需登入）：`presets` 列出 `ALLOWED_MODELS` 中可直接選的項目（`gemini*` 展開為 `gemini-2.5-flash-lite`；`none` 不列）；`default_model` 取 `DEFAULT_MODEL`，不可用時取第一個 preset 或第一個免費模型，都沒有就 `null`。
 - 前端：`model` 初始值與 Google 群組改由此端點決定，移除寫死的 `gemini-2.5-flash-lite`；`presets` 為空不顯示群組；`default_model` 為 `null` 時停用送出並提示暫無可用模型。
-- 正式站 `.env`：`ALLOWED_MODELS=none`、`DEFAULT_MODEL=<使用者選定>`。
+- 正式站 `.env`：`ALLOWED_MODELS=none`、`DEFAULT_MODEL=openrouter/free`（2026-11-06 使用者決定，Free Models Router）。
 
 驗收：
 1. `ALLOWED_MODELS=none` 時：`gemini-2.5-flash-lite` 送 `/chat` → 403；端點 `presets` 為 `[]`；未登入 → 401（harness）
