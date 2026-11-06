@@ -32,7 +32,6 @@ https://github.com/user-attachments/assets/78270ed4-3bd7-4a4c-9262-499483097318
 │   ├── database.py          # 資料庫連線與引擎設定
 │   ├── gemini_llm.py        # Google Gemini SDK 串接邏輯
 │   ├── openrouter_llm.py    # OpenRouter API 串接邏輯
-│   ├── migrate.py           # 資料庫遷移腳本
 │   └── Dockerfile           # 後端容器化設定
 ├── frontend/
 │   ├── src/

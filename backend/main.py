@@ -22,6 +22,7 @@ from models import (
     ChatRequest,
     UpdateTitleRequest,
     MessageWithActivity,
+    MessageRead,
     FreeModelsCache,
     Branch,
     CreateBranchRequest,
@@ -171,7 +172,7 @@ def read_root():
 def get_owned_message(
     session: Session, message_id: uuid.UUID, user: User, detail: str = "not found"
 ) -> Message:
-    """(S-U1-4) 取訊息：不存在或不屬於 user（user_id 為 NULL 也算）一律 404，不洩漏存在與否。"""
+    """(S-U1-4) 取訊息：不存在或不屬於 user 一律 404，不洩漏存在與否。"""
     msg = session.get(Message, message_id)
     if msg is None or msg.user_id != user.id:
         raise HTTPException(status_code=404, detail=detail)
@@ -181,7 +182,7 @@ def get_owned_message(
 def get_owned_branch(
     session: Session, branch_id: uuid.UUID, user: User, detail: str = "not found"
 ) -> Branch:
-    """(S-U1-4) 取分支：不存在或不屬於 user（user_id 為 NULL 也算）一律 404。"""
+    """(S-U1-4) 取分支：不存在或不屬於 user 一律 404。"""
     branch = session.get(Branch, branch_id)
     if branch is None or branch.user_id != user.id:
         raise HTTPException(status_code=404, detail=detail)
@@ -527,7 +528,7 @@ def get_chat_roots(
         # ★ 強制手動映射：把 RowMapping 拆解並塞入白名單模型，絕對不讓 FastAPI/Driver 偷偷丟掉欄位
         return [MessageWithActivity(**row) for row in results]
 
-@app.get("/chats/{root_id}/history", response_model=list[Message])
+@app.get("/chats/{root_id}/history", response_model=list[MessageRead])
 def get_chat_history(
     root_id: uuid.UUID,
     session: Session = Depends(get_session),
@@ -639,7 +640,7 @@ def delete_chat(
     return {"status": "ok", "deleted_count": len(all_ids)}
 
 # 取得整棵對話樹
-@app.get("/chats/{root_id}/tree", response_model=list[Message])
+@app.get("/chats/{root_id}/tree", response_model=list[MessageRead])
 def get_chat_tree(
     root_id: uuid.UUID,
     session: Session = Depends(get_session),
@@ -939,7 +940,7 @@ def list_orphaned_branches(
     """
     (E2) 幽靈分支清單（給分支面板的「幽靈分支」區與選字時的「連結幽靈分支」選單）。
 
-    (S-U1-4) 歸屬只看 Branch.user_id（等於目前登入者）；user_id 為 NULL 的舊資料不列出。
+    (S-U1-4) 歸屬只看 Branch.user_id（等於目前登入者）；其他使用者的分支不列出。
     依 created_at 新到舊。
     """
     rows = session.exec(
@@ -970,7 +971,7 @@ def relink_branch(
     (E2) 把幽靈分支接回 root 這棵對話上的一段文字（變成 inline 高亮）。
 
     檢查順序：
-    1. 404：分支、root、錨點訊息任一個不存在或不屬於目前登入者（user_id 為 NULL 也算）。
+    1. 404：分支、root、錨點訊息任一個不存在或不屬於目前登入者。
        一律 404，不洩漏是否存在；都在任何 409／422 之前。
     2. 409：不是幽靈（is_orphaned 不是 True）。
     3. 422：anchor_start／anchor_end 必須成對；有帶時 0 <= start < end <= 回覆長度。

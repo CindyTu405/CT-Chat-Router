@@ -54,8 +54,6 @@ async def fake_stream(message, history, model):
 main.gemini_chat_stream = fake_stream
 main.openrouter_chat_stream = fake_stream
 
-# 測試中建立、user_id 為 NULL 且沒有任何訊息可以反查的分支（清理時要明確刪）
-EXTRA_BRANCH_IDS: list = []
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -150,26 +148,21 @@ def chat(client: httpx.Client, message: str, parent_id, model: str, branch_id=No
         return r.status_code, r.headers, text_
 
 
-def make_legacy_ghost(uid, title: str, anchor_text: str, with_root: bool = True) -> dict:
-    """直接寫入一個 attach_root_id 為 NULL 的幽靈，歸屬 = Branch.user_id。
-    with_root=False → 沒有任何訊息，且 user_id 為 NULL（無人擁有的舊資料）。"""
+def make_legacy_ghost(uid, title: str, anchor_text: str) -> dict:
+    """直接寫入一個 attach_root_id 為 NULL 的幽靈，歸屬 = Branch.user_id。"""
     with Session(engine) as s:
         br = Branch(anchor_message_id=None, anchor_start=None, anchor_end=None,
                     anchor_text=anchor_text, title=title, is_orphaned=True, attach_root_id=None,
-                    user_id=uid if with_root else None)
+                    user_id=uid)
         s.add(br)
         s.flush()
-        root_id = None
-        if with_root:
-            m = Message(role="user", content=f"{title} question", parent_id=None,
-                        user_id=uid, branch_id=br.id)
-            s.add(m)
-            s.flush()
-            br.root_message_id = m.id
-            s.add(br)
-            root_id = m.id
-        else:
-            EXTRA_BRANCH_IDS.append(br.id)
+        m = Message(role="user", content=f"{title} question", parent_id=None,
+                    user_id=uid, branch_id=br.id)
+        s.add(m)
+        s.flush()
+        br.root_message_id = m.id
+        s.add(br)
+        root_id = m.id
         s.commit()
         return {"branch_id": br.id, "root_id": root_id}
 
@@ -420,20 +413,17 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
     except Exception as e:
         check("E2-2 orphaned list", False, f"exception: {e!r}")
 
-    # ---- E2-3. attach NULL 的幽靈（歸屬 = Branch.user_id；G_unowned 的 user_id 為 NULL）----
+    # ---- E2-3. attach NULL 的幽靈（歸屬 = Branch.user_id）----
     G_same = make_legacy_ghost(uid, "G-SAME", "same range")
     G_range = make_legacy_ghost(uid, "G-RANGE", "range")
     G_wrong = make_legacy_ghost(uid, "G-WRONG", "wrong tree")
     G_other = make_legacy_ghost(uid_other, "G-OTHER", "other user")
-    G_unowned = make_legacy_ghost(None, "G-UNOWNED", "nobody", with_root=False)
     try:
         st, items = orphaned(client)
         ids_sid = {i["id"] for i in items}
         check("E2-3 ghost (attach NULL) listed for its owner",
               str(G_range["branch_id"]) in ids_sid and str(G_same["branch_id"]) in ids_sid,
               f"ids={ids_sid}")
-        check("E2-3 unowned ghost (user_id NULL) not listed",
-              str(G_unowned["branch_id"]) not in ids_sid, "")
         st2, items2 = orphaned(client_b)
         ids_other = {i["id"] for i in items2}
         check("E2-3 ghost of other user listed only for that user",
@@ -458,7 +448,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
     except Exception as e:
         check("E2-5 random branch id", False, f"exception: {e!r}")
 
-    for label, g in [("other user ghost", G_other), ("unowned ghost", G_unowned)]:
+    for label, g in [("other user ghost", G_other)]:
         try:
             before = db_branch(g["branch_id"])
             r = relink(client, g["branch_id"], R, A2, 10, 18)
@@ -615,7 +605,7 @@ def make_user(label: str) -> tuple[uuid.UUID, str]:
 
 
 def cleanup(uids: list):
-    """清掉測試資料（只動這些測試 user 的列，外加 EXTRA_BRANCH_IDS）。
+    """清掉測試資料（只動這些測試 user 的列）。
     順序：先斷開 branch 指向訊息的 FK → 斷開訊息之間的 FK → 刪訊息 → 刪分支 → 刪 auth_session → 刪 user。
     分支由這些 user 的訊息（branch_id／anchor／root／attach）、Branch.user_id 反查。"""
     try:
@@ -623,7 +613,6 @@ def cleanup(uids: list):
             msgs = s.exec(select(Message).where(Message.user_id.in_(uids))).all()
             msg_ids = [m.id for m in msgs]
             branch_ids = {m.branch_id for m in msgs if m.branch_id}
-            branch_ids |= set(EXTRA_BRANCH_IDS)
             branch_ids |= set(s.exec(select(Branch.id).where(Branch.user_id.in_(uids))).all())
             if msg_ids:
                 branch_ids |= set(s.exec(select(Branch.id).where(
