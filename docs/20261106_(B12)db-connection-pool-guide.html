@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>資料庫連線池教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · B12</span>
+    <h1>資料庫連線池</h1>
+    <p>同時生成的回覆一多，整個網站就會卡住。這份教學說明原因和修法。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>症狀</h2>
+    <p>用假模型模擬「每則回覆生成 8 秒」，同時觀察另一位無關用戶的請求要等多久：</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>同時生成數</th><th>無關用戶的請求</th><th>生成中的請求</th></tr>
+        <tr><td>5</td><td>0.05 秒</td><td>全部成功</td></tr>
+        <tr><td>14</td><td>0.06 秒</td><td>全部成功</td></tr>
+        <tr><td>16</td><td>超過 45 秒沒有回應</td><td>全部逾時（測試等 70 秒）</td></tr>
+        <tr><td>22</td><td>超過 45 秒沒有回應</td><td>全部逾時（測試等 70 秒）</td></tr>
+      </table>
+    </div>
+    <p>連線池等不到空位時，生成結果也寫不回資料庫，紀錄裡出現 <code>QueuePool limit ... timed out</code>。這時回覆會遺失，次數也不會退回。</p>
+    <div class="warn"><b>為什麼重要：</b>只要 16 個回覆同時生成就會發生。免費模型回覆慢，人一多就不難碰到，有心人也能故意觸發。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：連線池</h2>
+    <p>開一條資料庫連線很花時間，所以後端會預先準備一批連線重複使用，這批連線就叫連線池。目前設定最多 15 條（基本 5 條，加上臨時 10 條）。</p>
+    <p>就像櫃檯只有 15 個座位：辦完事要立刻離開，下一位才坐得下。滿了就要排隊，最多等 30 秒，等不到就報錯。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：事件迴圈不能被擋住</h2>
+    <p>FastAPI 用單一的事件迴圈輪流處理所有串流，就像一位服務生同時照顧很多桌。只要服務生站著等一件事，其他桌全都沒人理。</p>
+    <p>資料庫的同步呼叫就是「站著等」。平常幾毫秒無感，但等連線池空位最多要等 30 秒。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>卡死是怎麼發生的</h2>
+    <ol>
+      <li>每個串流請求從開始到回覆結束，都一直佔著一條連線，其實生成期間根本用不到它。</li>
+      <li>16 個回覆同時生成時，15 條連線全被佔滿。</li>
+      <li>第一個回覆生成完，要寫回資料庫，於是在事件迴圈上等連線。</li>
+      <li>事件迴圈被擋住，其他串流都無法結束，也就沒有人釋放連線。</li>
+      <li>大家互相等，直到 30 秒逾時。逾時後下一個回覆又重複一次。</li>
+    </ol>
+    <div class="tip"><b>為什麼不直接把連線池加大？</b>加大只是把門檻往後移，有人佔著不放的問題還在。資料庫能開的連線也有上限，所以要修的是佔用方式。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>修法</h2>
+    <pre><code><span class="cm">// 示意，實際程式由 implementer 撰寫</span>
+<span class="cm">// 1. 開始串流之前先把連線還回去</span>
+需要的資料存成區域變數
+session.close()
+return StreamingResponse(...)
+
+<span class="cm">// 2. 寫資料庫的工作放到別的執行緒，事件迴圈不用站著等</span>
+await asyncio.to_thread(寫回訊息)
+await asyncio.to_thread(退回次數)</code></pre>
+    <p>影響三個端點：<code>/chat</code>、重新生成、續讀 <code>/messages/{id}/stream</code>，再加上背景的 <code>run_generation</code>。用戶操作和畫面都不變。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>怎麼驗收</h2>
+    <ul>
+      <li>30 個回覆同時生成時，無關用戶的請求 2 秒內回應。</li>
+      <li>30 個回覆全部成功，內容完整寫回資料庫。</li>
+      <li>紀錄中沒有 <code>QueuePool</code> 錯誤。</li>
+      <li><code>quota_harness</code> 連跑 5 次都 <code>ALL PASS</code>（修正前 5 次失敗 3 次，第 4 次才看到通過）。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+        <tr><td>1</td><td>什麼時候修</td><td>V1-4a 之前，併入這批一起部署</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>2</td><td>連線池大小</td><td>維持 15 條，不調整</td><td>建議，說「開始」即視為確認</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>B12</td><td>串流前釋放連線；背景寫入移出事件迴圈</td><td>未開始</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>練習</h2>
+    <ol>
+      <li>為什麼 14 個同時生成完全正常，16 個卻整站卡住，而不是慢慢變慢？</li>
+      <li>只做修法 2、不做修法 1，會發生什麼事？</li>
+      <li>串流開始前呼叫 <code>session.close()</code> 之後，為什麼不能再讀 ORM 物件的欄位？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-06</p>
+
+</div>
+</body>
+</html>
