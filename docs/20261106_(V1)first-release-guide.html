@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>正式初版教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · V1</span>
+    <h1>正式初版</h1>
+    <p>額度、模型、安全標頭、備份、監控與隱私權說明。每一項都先講它防的是什麼。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>額度：為什麼要自己記次數</h2>
+    <p>現有的「每分鐘 10 次」只擋短時間連發。一個人慢慢送，一天仍可能送上千次。每日額度要有地方記住今天用了幾次，所以需要一張新資料表：</p>
+    <pre><code>daily_usage
+  user_id, day, count      <span class="cm"># 每人每天一列，day 是台灣日期</span></code></pre>
+    <p><b>為什麼不直接數訊息？</b>因為訊息可以刪。用數的話，刪掉對話就等於退回額度。</p>
+    <h3>同時送出時不能多算</h3>
+    <p>兩個分頁同時送出時，如果先讀「用了 19 次」再寫回 20，兩邊都會通過。要把檢查和加一放進同一條 SQL，由資料庫保證一次只處理一個：</p>
+    <pre><code>INSERT INTO daily_usage (user_id, day, count) VALUES (:u, :d, 1)
+ON CONFLICT (user_id, day) DO UPDATE SET count = daily_usage.count + 1
+WHERE daily_usage.count &lt; :limit
+RETURNING count;   <span class="cm">-- 沒有回傳任何列 = 額度已滿</span></code></pre>
+    <h3>全站上限</h3>
+    <p>OpenRouter 免費模型的每日額度是整個帳號共用。全站上限的作用，是在 OpenRouter 開始拒絕之前先告訴用戶今天額度已滿。它是保護用的軟上限，同時送出時多幾次也無妨。</p>
+    <div class="tip"><b>OpenRouter 額度（2026-11-06 查詢）：</b>累計購買未滿 10 美元每日 50 次，達到後每日 1000 次，每分鐘都是 20 次。失敗的請求也算。數字可能變動。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>拔掉 Gemini：前後端要一致</h2>
+    <p>後端白名單決定「能不能用」，前端選單決定「看得到什麼」。兩邊不一致，用戶就會選到不能用的模型。所以改成由後端告訴前端：</p>
+    <pre><code>GET /api/model-options
+{ "presets": [], "default_model": "某個免費模型" }  <span class="cm">// 正式站</span>
+{ "presets": ["gemini-2.5-flash-lite"], ... }       <span class="cm">// 本機</span></code></pre>
+    <p>正式站把 <code>ALLOWED_MODELS</code> 設成 <code>none</code>，沒有模型叫這個名字，等於不開放任何固定模型，只留 OpenRouter 免費清單。不能留空，因為 compose 設定遇到空值會退回 <code>gemini*</code>。</p>
+    <p>免費模型會隨時下架，所以設定的預設模型不在清單裡時，要自動改用清單第一個。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>輸出上限</h2>
+    <p>限制每則回覆最多 1500 tokens，避免單次請求跑太久。代價是很長的回答可能被截斷，所以做成環境變數，之後可以調整。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>安全標頭：請瀏覽器幫忙把關</h2>
+    <p>回應標頭是伺服器附給瀏覽器的指示。程式有疏漏時，這些標頭是第二道防線。</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>標頭</th><th>防什麼</th></tr>
+        <tr><td><code>Strict-Transport-Security</code></td><td>之後都強制走 HTTPS，避免被降級成明文連線</td></tr>
+        <tr><td><code>Content-Security-Policy</code></td><td>限制腳本來源。就算有人塞進惡意腳本，瀏覽器也拒絕執行</td></tr>
+        <tr><td><code>X-Frame-Options</code></td><td>不讓別的網站嵌入，防止誘騙點擊</td></tr>
+        <tr><td><code>X-Content-Type-Options</code></td><td>不讓瀏覽器猜檔案類型，避免把檔案當腳本執行</td></tr>
+        <tr><td><code>Referrer-Policy</code></td><td>點外部連結時，不把完整網址洩漏給對方</td></tr>
+        <tr><td><code>Permissions-Policy</code></td><td>關閉用不到的相機、麥克風、定位權限</td></tr>
+      </table>
+    </div>
+    <div class="warn"><b>注意：</b>CSP 太嚴會讓網站壞掉，部署後要實際操作一輪，並檢查瀏覽器 Console 有沒有被擋的項目。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>日誌上限</h2>
+    <p>Docker 預設會一直累積容器日誌。硬碟滿了，資料庫也會無法寫入。設定每個容器最多 5 個、每個 10 MB 的檔案，舊的自動刪除。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>備份：有備份不等於能還原</h2>
+    <p>備份要防的是硬碟損毀、誤刪和錯誤的 migration。建議用 AWS 的 EBS 快照：每天把 VM 硬碟拍一份，存在硬碟之外。</p>
+    <ol>
+      <li>到 AWS 主控台：EC2 → Elastic Block Store → Lifecycle Manager。</li>
+      <li>建立 EBS snapshot 政策，目標選 VM 的硬碟（先幫硬碟或 VM 加一個標籤，例如 <code>Backup=daily</code>）。</li>
+      <li>排程每天一次，保留 7 份。</li>
+      <li>隔天確認 Snapshots 頁面出現新快照。</li>
+    </ol>
+    <h3>還原演練</h3>
+    <p>從快照建立一顆新硬碟，掛到一台臨時 VM，啟動 PostgreSQL 並查詢訊息筆數。確認後刪除臨時 VM 和硬碟，正式站完全不受影響。實際操作時我會逐步帶你做。</p>
+    <div class="warn"><b>費用：</b>快照和臨時 VM 都會收少量 AWS 費用，實際金額以 AWS 帳單為準。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>當機通知</h2>
+    <p>外部監控服務每隔幾分鐘連一次網站，連不上就寄信給你，例如 UptimeRobot 的免費方案。它必須在外部運作，因為 VM 掛掉時，VM 上的程式也沒辦法通知你。等 Cloudflare Access 拿掉後再設定，否則它測到的只是 Access 的登入頁。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>隱私權說明</h2>
+    <p>別人的對話會存在你的資料庫，用戶有權知道。第一版用白話寫清楚：</p>
+    <ul>
+      <li><b>收集什麼：</b>登入 email、登入服務商，以及對話內容。</li>
+      <li><b>給誰：</b>對話會送到 OpenRouter 和模型供應商。免費模型可能記錄內容，請勿輸入敏感資料。</li>
+      <li><b>誰看得到：</b>其他用戶看不到；站長有資料庫權限，技術上可以存取。</li>
+      <li><b>怎麼刪除：</b>用戶可以自己刪對話；刪帳號要聯絡站長。</li>
+    </ul>
+    <p>頁面做成靜態檔 <code>privacy.html</code>，不用登入也能看。公開開放前必須補上聯絡信箱。</p>
+    <div class="warn"><b>注意：</b>這是基本說明，不是法律意見。要收費或用戶變多時，建議請專業人士看過。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+        <tr><td>1</td><td>每日額度</td><td>每人每日 20 次</td><td>2026-11-06 使用者決定</td></tr>
+        <tr><td>2</td><td>計算方式</td><td>主對話、分支、重新生成每次都算 1 次；台灣時間 00:00 重置；刪對話不退次數</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>3</td><td>模型沒有回應</td><td>一個字都沒回就失敗時，退回用戶次數</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>4</td><td>全站上限</td><td>環境變數可調，預設 900，買滿 10 美元前在 VM 設成 45</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>5</td><td>輸出上限與限流</td><td>每則 1500 tokens；每人每分鐘 10 次</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>6</td><td>Gemini</td><td>正式站拔掉，本機保留</td><td>2026-11-06 使用者決定</td></tr>
+        <tr><td>7</td><td>預設模型</td><td>實測幾個免費模型後由使用者選</td><td>待選</td></tr>
+        <tr><td>8</td><td>備份方式</td><td>EBS 快照，每日一次，保留 7 份</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>9</td><td>聯絡信箱</td><td>親友階段先不放，公開開放前補上</td><td>2026-11-06 使用者決定</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>V1-2</td><td>每日額度、全站上限、依使用者限流、輸出上限</td><td>未開始</td></tr>
+        <tr><td>V1-3</td><td>模型選項端點、前端移除寫死的 Gemini</td><td>未開始</td></tr>
+        <tr><td>V1-4a</td><td>安全標頭、日誌上限</td><td>未開始</td></tr>
+        <tr><td>V1-4b</td><td>備份、還原演練（使用者操作）</td><td>未開始</td></tr>
+        <tr><td>V1-4c</td><td>上線前安全檢查</td><td>未開始</td></tr>
+        <tr><td>V1-5</td><td>隱私權頁</td><td>未開始</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">11</span>練習</h2>
+    <ol>
+      <li>為什麼每日額度不直接從 <code>message</code> 表計算？</li>
+      <li>檢查和加一分成兩條 SQL，同時送出兩則訊息時可能發生什麼事？</li>
+      <li>只拔後端的 Gemini、不改前端，用戶會看到什麼？</li>
+      <li>為什麼當機通知不能裝在同一台 VM 上？</li>
+      <li>備份之外，為什麼還要演練還原？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-06</p>
+
+</div>
+</body>
+</html>
