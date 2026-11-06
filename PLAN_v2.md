@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：S-U1 已完成（2026-11-06）；Cloudflare Access 保留到 S-U2 完成。B11（優先，見第八節「B11 規格與驗收」）→ S-U2（待討論）→ E5（暫停中，幽靈分支定義已改，細節待確認，見 BACKLOG E6）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
+**下一步**：S-U1 已完成（2026-11-06）；Cloudflare Access 保留到 S-U2 完成。B11 本機完成，待部署 → S-U2（待討論）→ E5（暫停中，幽靈分支定義已改，細節待確認，見 BACKLOG E6）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
 
 ---
 
@@ -298,8 +298,8 @@ chat-{root_id}-{date}/
 
 | 編號 | 負責 | 內容 | 狀態 |
 |---|---|---|---|
-| B11-1 | implementer | 後端：刪除範圍、三步刪除、錯誤回應、harness | ⏳ 待「開始」 |
-| B11-2 | implementer | 前端：失敗提示、確認文字、關閉已刪對話的分支面板 | ⏳ 待 B11-1 |
+| B11-1 | implementer | 後端：刪除範圍、三步刪除、錯誤回應、harness | ✅ 431b4fd（branch_entries 107、regenerate 47、auth 131 PASS；本機資料副本 32 個對話全量刪除無失敗、無多刪） |
+| B11-2 | implementer | 前端：失敗提示、確認文字、關閉已刪對話的分支面板 | ✅ 2026-11-06 本機桌面與手機瀏覽器驗收通過；VM 未部署 |
 
 **B11-1 後端（`backend/main.py`、`backend/dev/branch_entries_harness.py`、`backend/dev/auth_harness.py`）**
 - `DELETE /chats/{root_id}` 維持開頭的 `get_owned_message` 檢查，不是本人的回 404。
