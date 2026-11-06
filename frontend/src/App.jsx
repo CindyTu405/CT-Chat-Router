@@ -773,23 +773,36 @@ function App({ user }) {
     e.stopPropagation(); // 防止觸發 "載入對話"
     
     // 加上簡單的防呆，避免手滑
-    if (!confirm("確定要刪除這個對話串嗎？此動作無法復原。")) return;
+    if (!confirm("確定要刪除這個對話串嗎？其中的分支也會一起刪除。此動作無法復原。")) return;
 
     try {
-      await apiFetch(`/chats/${chatId}`, { method: 'DELETE' });
-      
+      const res = await apiFetch(`/chats/${chatId}`, { method: 'DELETE' });
+
+      // 401：apiFetch 已通知切換到登入頁，這裡不提示也不改狀態
+      if (res.status === 401) return;
+
+      // 404 代表對話已不存在（例如另一個分頁已刪除），視同成功
+      if (!res.ok && res.status !== 404) {
+        alert("刪除失敗，請稍後再試");
+        return;
+      }
+
       // ★★★ 清理後的邏輯 ★★★
       // 如果現在畫面上顯示的對話 (messages[0]) 就是我們剛刪除的那個 (chatId)
-      // 那就清空畫面，回到 "New Chat" 狀態
+      // 那就清空畫面，回到 "New Chat" 狀態，並關閉分支面板、清空分支狀態
       if (messages.length > 0 && messages[0].id === chatId) {
          startNewChat();
+         setBranchPanelOpen(false);
+         setActiveBranchId(null);
+         setBranches([]);
+         setBranchList([]); // 目前對話的分支高亮資料也屬於被刪的對話
       }
-      
+
       // 重新抓取側邊欄列表
       fetchHistory();
     } catch (error) {
       console.error("刪除失敗", error);
-      alert("刪除失敗，請檢查後端連線");
+      alert("刪除失敗，請稍後再試");
     }
   };
 
