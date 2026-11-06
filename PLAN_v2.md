@@ -298,7 +298,7 @@ chat-{root_id}-{date}/
 
 | 編號 | 負責 | 內容 | 狀態 |
 |---|---|---|---|
-| M1 | implementer | `frontend/src/components/Sidebar.jsx` 的 `ChatRow` | ⏳ 待「開始」 |
+| M1 | implementer | `frontend/src/components/Sidebar.jsx` 的 `ChatRow` | ✅ 2026-11-06 使用者瀏覽器驗收通過；VM 未部署 |
 
 - 三點外層：開啟中同現狀；已選取 → 手機常駐、桌面 hover 才顯示；未選取 → 手機透明且 `pointer-events-none`，桌面 hover 才顯示（`md:` 斷點）。
 - 長按：掛在列的主按鈕。`touchstart` 重設旗標並開始 500ms 計時；移動超過 10px、`touchend`、`touchcancel` 取消；時間到打開選單並設旗標；`click` 遇到旗標 → 重設並略過；touch 引發的 `contextmenu` 要 `preventDefault`；手機關閉列內文字選取與 touch callout；unmount 清計時器。
