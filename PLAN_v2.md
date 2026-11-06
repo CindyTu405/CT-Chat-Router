@@ -57,6 +57,16 @@
 3. `branch_entries_harness`、`regenerate_harness`、`auth_harness` → 都 `ALL PASS`
 4. `cd frontend && npm run build` → `✓ built`；瀏覽器：額度設成 1，第二次送出看到提示，輸入內容不遺失（桌面、手機）
 
+**B12 規格與驗收（`backend/main.py`、新檔 `backend/dev/pool_harness.py`）**
+- `/chat`、regenerate、`/messages/{id}/stream`：回傳 `StreamingResponse` 前，把需要的值存成區域變數，再 `session.close()`。
+- `run_generation`：寫回訊息與 `refund_daily_quota` 改用 `await asyncio.to_thread(...)`；寫回失敗只記 log，不能中斷後面的緩衝清理。
+- 連線池大小不變。
+
+驗收（假模型、臨時資料庫）：
+1. `POSTGRES_DB=<臨時庫> SQL_ECHO=false uv run python dev/pool_harness.py 2>&1 | grep -v sqlalchemy | tail -5` → `ALL PASS`，涵蓋：30 個慢串流同時進行時無關用戶的 `GET /auth/me` 2 秒內回 200；30 個都回 200 且內容完整寫回 DB；續讀端點同樣不佔連線；輸出沒有 `QueuePool`
+2. `quota_harness` 連跑 5 次都 `ALL PASS`
+3. `model_options_harness`、`regenerate_harness`、`branch_entries_harness`、`auth_harness` → 都 `ALL PASS`
+
 **V1-3 模型選項（`backend/main.py`、`docker-compose.prod.yml`、`docker-compose.yml`、`backend/dev/*`、`frontend/src/App.jsx`、`frontend/src/components/ModelSelector.jsx`）**
 - `GET /api/model-options`（需登入）：`presets` 列出 `ALLOWED_MODELS` 中可直接選的項目（`gemini*` 展開為 `gemini-2.5-flash-lite`；`none` 不列）；`default_model` 取 `DEFAULT_MODEL`，不可用時取第一個 preset 或第一個免費模型，都沒有就 `null`。
 - 前端：`model` 初始值與 Google 群組改由此端點決定，移除寫死的 `gemini-2.5-flash-lite`；`presets` 為空不顯示群組；`default_model` 為 `null` 時停用送出並提示暫無可用模型。
