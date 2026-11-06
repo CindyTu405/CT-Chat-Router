@@ -185,7 +185,7 @@ RETURNING count;   <span class="cm">-- 沒有回傳任何列 = 額度已滿</spa
         <tr><td>4</td><td>全站上限</td><td>環境變數可調，預設 900，買滿 10 美元前在 VM 設成 45</td><td>建議，說「開始」即視為確認</td></tr>
         <tr><td>5</td><td>輸出上限與限流</td><td>每則 3000 tokens；每人每分鐘 10 次</td><td>2026-11-06 使用者決定（原建議 1500）</td></tr>
         <tr><td>6</td><td>Gemini</td><td>正式站拔掉，本機保留</td><td>2026-11-06 使用者決定</td></tr>
-        <tr><td>7</td><td>預設模型</td><td>實測幾個免費模型後由使用者選</td><td>待選</td></tr>
+        <tr><td>7</td><td>預設模型</td><td><code>openrouter/free</code>（Free Models Router，由 OpenRouter 分配免費模型）</td><td>2026-11-06 使用者決定</td></tr>
         <tr><td>8</td><td>備份方式</td><td>EBS 快照，每日一次，保留 7 份</td><td>建議，說「開始」即視為確認</td></tr>
         <tr><td>9</td><td>聯絡信箱</td><td>親友階段先不放，公開開放前補上</td><td>2026-11-06 使用者決定</td></tr>
       </table>
