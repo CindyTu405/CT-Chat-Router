@@ -40,6 +40,51 @@
 
 初版之後：BYOK、E5、E6、T1、Phase 4、X1、S-U3、窄面板微調、模型選單改版、OpenRouter 授權連線。
 
+教學與決策表：`docs/20261106_(V1)first-release-guide.html`。使用者讀完說「開始」才動工。隱私權頁的聯絡信箱：親友階段先不放，V1-6 公開開放前必須補上。
+
+**V1-2 額度（`backend/models.py`、新 migration、`backend/main.py`、`backend/gemini_llm.py`、`backend/openrouter_llm.py`、`backend/dev/*`，前端提示另一個 commit 改 `frontend/src/App.jsx`）**
+- 新表 `daily_usage`：`user_id`（FK）、`day`（date，台灣日期）、`count`，主鍵 `(user_id, day)`。
+- 環境變數：`DAILY_MESSAGE_LIMIT`（預設 20）、`SITE_DAILY_MESSAGE_LIMIT`（預設 900）、`MAX_OUTPUT_TOKENS`（預設 1500）；同時加進兩個 compose 檔。
+- `/chat`、`POST /messages/{id}/regenerate`：在白名單與擁有者檢查之後、任何寫入與 LLM 呼叫之前扣額度。先查全站當日總和，達上限 → 503 `{"detail": {"code": "site_quota_exceeded"}}`；再用單條 `INSERT ... ON CONFLICT DO UPDATE ... WHERE count < :limit RETURNING` 扣使用者額度，無回傳列 → 429 `{"detail": {"code": "daily_quota_exceeded", "reset_at": <下一個台灣 00:00 的 UTC ISO>}}`。扣額度與訊息寫入同一個交易，後續檢查失敗不留下扣款。
+- `run_generation`：生成例外且尚無任何輸出 → 退回 1 次（用扣款當時的 `day`，不低於 0）。
+- `/chat`、regenerate 的 slowapi key 改為依登入 cookie（雜湊後），沒有 cookie 才用 IP；維持 `10/minute`。
+- 兩個 LLM 串流函式都套用 `MAX_OUTPUT_TOKENS`。
+- 前端：`/chat`、regenerate、分支送出遇到 429 → 顯示「今日額度已用完，將於台灣時間 00:00 重置」；503 → 顯示「今日服務額度已滿，請明天再試」；輸入內容與訊息狀態依現有失敗流程還原。訊息文字變更需瀏覽器確認後才 commit。
+
+驗收（一律用假 LLM、臨時資料庫）：
+1. `alembic upgrade head`、`alembic check` → 無差異；downgrade 再 upgrade 成功
+2. 新 harness `POSTGRES_DB=<臨時庫> SQL_ECHO=false uv run python dev/quota_harness.py 2>&1 | grep -v sqlalchemy | tail -5` → `ALL PASS`，涵蓋：第 20 次成功、第 21 次 429 且沒有新增訊息、沒有呼叫 LLM；主對話、分支、regenerate 共用次數；20 個併發請求只成功剩餘次數；刪對話不退次數；跨台灣日期重置；A 用完不影響 B；全站上限 503；模型未回字就失敗退 1 次，回到一半才失敗不退；白名單或擁有者檢查失敗不扣次數；每分鐘限流依使用者（同 IP 兩人互不影響）；傳給 LLM 的參數含輸出上限
+3. `branch_entries_harness`、`regenerate_harness`、`auth_harness` → 都 `ALL PASS`
+4. `cd frontend && npm run build` → `✓ built`；瀏覽器：額度設成 1，第二次送出看到提示，輸入內容不遺失（桌面、手機）
+
+**V1-3 模型選項（`backend/main.py`、`docker-compose.prod.yml`、`docker-compose.yml`、`backend/dev/*`、`frontend/src/App.jsx`、`frontend/src/components/ModelSelector.jsx`）**
+- `GET /api/model-options`（需登入）：`presets` 列出 `ALLOWED_MODELS` 中可直接選的項目（`gemini*` 展開為 `gemini-2.5-flash-lite`；`none` 不列）；`default_model` 取 `DEFAULT_MODEL`，不可用時取第一個 preset 或第一個免費模型，都沒有就 `null`。
+- 前端：`model` 初始值與 Google 群組改由此端點決定，移除寫死的 `gemini-2.5-flash-lite`；`presets` 為空不顯示群組；`default_model` 為 `null` 時停用送出並提示暫無可用模型。
+- 正式站 `.env`：`ALLOWED_MODELS=none`、`DEFAULT_MODEL=<使用者選定>`。
+
+驗收：
+1. `ALLOWED_MODELS=none` 時：`gemini-2.5-flash-lite` 送 `/chat` → 403；端點 `presets` 為 `[]`；未登入 → 401（harness）
+2. `DEFAULT_MODEL` 不在清單 → 回傳第一個免費模型（harness）
+3. `cd frontend && npm run build` → `✓ built`；瀏覽器：`ALLOWED_MODELS=none` 選單沒有 Gemini，開新對話直接送出可用；本機預設設定仍可選 Gemini（桌面、手機）
+
+**V1-4a 安全標頭與日誌（`frontend/nginx.prod.conf`、`docker-compose.prod.yml`）**
+- nginx 主站 server 加上教學第 4 節的標頭（`always`）；CSP 依實際載入資源撰寫，`script-src` 不用 `unsafe-inline`、`unsafe-eval`。
+- 所有服務加 `logging`：`json-file`、`max-size: 10m`、`max-file: 5`。
+
+驗收：
+1. nginx 以測試憑證 `nginx -t` → `test is successful`；`docker compose -f docker-compose.prod.yml config --quiet`（測試環境變數）→ exit 0
+2. 部署後 `curl -sI https://fluentbranch.com/` 經 Access 登入後或 VM 上 `curl -skI --resolve fluentbranch.com:443:127.0.0.1 https://fluentbranch.com/` → 六個標頭都在
+3. 瀏覽器：登入、串流、分支、Markdown 圖片都正常，Console 沒有 CSP 錯誤（桌面、手機）
+
+**V1-4b 備份（使用者操作，步驟見教學第 6 節）**：Snapshots 頁面出現新快照；還原演練查得到訊息筆數。
+
+**V1-4c 上線前安全檢查**：對 main 做一次安全審查，發現的問題記入 `BUGS.md` 並逐項處理。
+
+**V1-5 隱私權頁（新檔 `frontend/public/privacy.html`、`frontend/src/components/AuthGate.jsx`、`frontend/src/components/Sidebar.jsx`）**
+- 靜態頁，內容見教學第 8 節；登入頁與側邊欄底部各一個連結。視覺變更需瀏覽器確認後才 commit。
+
+驗收：`cd frontend && npm run build` → `✓ built`、`dist/privacy.html` 存在；瀏覽器：未登入與已登入都打得開（桌面、手機）。
+
 ---
 
 ## 一、核心決策
