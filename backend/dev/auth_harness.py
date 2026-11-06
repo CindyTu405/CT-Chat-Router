@@ -618,12 +618,14 @@ def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str)
         ), params={"u": uids}).scalar()
     check("parent/child user_id mismatch count (this run) == 0", mismatch == 0, str(mismatch))
 
-    # 刪除用沒有分支的那串（生成中測試建立的）。含分支根訊息的對話目前刪除會被 FK 擋成 500（既有行為，
-    # 與擁有者檢查無關），由 cleanup_iso 清掉 R 那串。
-    r = ca.delete(f"/chats/{user_if}")
-    check("A flow: delete -> 200 (2 messages)", r.status_code == 200 and r.json().get("deleted_count") == 2,
+    # 刪除含分支的那串 R（B11）：R、A1、分支 BR 的首則與回覆、重連後的兩則 → 6 則訊息、1 條分支，回 200。
+    r = ca.delete(f"/chats/{R}")
+    check("A flow: delete chat with branch -> 200 (6 messages, 1 branch)",
+          r.status_code == 200 and r.json() == {"status": "ok", "deleted_count": 6, "deleted_branches": 1},
           f"{r.status_code} {r.text[:200]}")
-    check("A flow: history after delete -> 404", ca.get(f"/chats/{user_if}/history").status_code == 404)
+    check("A flow: history after delete -> 404", ca.get(f"/chats/{R}/history").status_code == 404)
+    with Session(engine) as s:
+        check("A flow: branch BR gone after delete", s.get(Branch, uuid.UUID(BR)) is None)
     check("B rows still exist after A delete", snap([uid_b])[0].keys() == {k for k, v in snap0[0].items()
                                                                           if v[-1] == uid_b})
 

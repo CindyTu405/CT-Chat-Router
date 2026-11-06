@@ -10,7 +10,9 @@
 - 在 127.0.0.1:8766 起真的 uvicorn（背景 thread），用 HTTP 打 API。
 - E1：建立分支的重疊降級、範圍相同重用、offset 驗證（422 且不寫入）、回傳欄位。
 - E2：regenerate 幽靈化寫 attach_root_id、幽靈清單（user 歸屬）、重連的各種拒絕、重連成功後的欄位與
-  分支對話上下文（假 LLM 收到的 history）、刪除對話時清掉 attach_root_id。
+  分支對話上下文（假 LLM 收到的 history）、刪除對話時幽靈連同訊息一起刪（B11）。
+- B11：刪除對話連同分支（inline／降級／空分支）、幽靈與其巢狀分支、保留範圍、範圍內混到他人資料 → 500、
+  commit 失敗 → 500 固定訊息、生成中刪除（假 LLM 慢速串流）。
 """
 import asyncio
 import os
@@ -24,6 +26,7 @@ sys.path.insert(0, BACKEND_DIR)
 
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
 from sqlmodel import Session, select  # noqa: E402
 
 import main  # noqa: E402
@@ -46,6 +49,9 @@ LLM_CALLS: list[dict] = []
 
 async def fake_stream(message, history, model):
     LLM_CALLS.append({"message": message, "history": [(m.role, m.content) for m in history]})
+    if message.startswith("SLOW"):  # (B11 g) 生成中刪除：等 SLOW_GATE 再吐字
+        while not SLOW_GATE.is_set():
+            await asyncio.sleep(0.02)
     for chunk in ["MOCK-E2-", "REPLY"]:
         await asyncio.sleep(0.01)
         yield chunk
@@ -558,7 +564,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
     except Exception as e:
         check("E2-8 chat after relink", False, f"exception: {e!r}")
 
-    # ---- E2-9. 原對話被刪：幽靈保留，attach_root_id 變 NULL ----
+    # ---- E2-9. 原對話被刪：幽靈連同它的訊息一起刪（B11，取代舊的「幽靈保留、attach 清成 NULL」）----
     try:
         RT = _make_root(uid, "E2 tree T")
         AT = _make_ai(RT, uid, "T-AI-" * 8)
@@ -566,18 +572,20 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
         BT = r.json()["branch_id"]
         st, h, _ = chat(client, "T branch Q", AT, model, branch_id=BT)
         RT_B1 = h.get("x-user-message-id")
+        RT_B1_AI = h.get("x-message-id")
         st_r, _, _ = regen(client, AT, model)
         check("E2-9 setup: T branch ghosted", st_r == 200 and db_branch(BT)["is_orphaned"] is True
               and db_branch(BT)["attach_root_id"] == RT, f"regen={st_r} br={db_branch(BT)}")
         d = client.delete(f"/chats/{RT}")
-        check("E2-9 DELETE root with attach pointing to it → 200", d.status_code == 200,
+        check("E2-9 DELETE root with ghost attached to it -> 200, 4 messages, 1 branch",
+              d.status_code == 200 and d.json() == {"status": "ok", "deleted_count": 4, "deleted_branches": 1},
               f"status={d.status_code} body={d.text[:200]}")
-        b = db_branch(BT)
-        check("E2-9 ghost survives with attach_root_id NULL", b["is_orphaned"] is True and b["attach_root_id"] is None,
-              f"b={b}")
-        check("E2-9 branch first message survives", db_msg(RT_B1)["exists"] is True, "")
+        check("E2-9 ghost branch deleted", not branch_exists(BT), "")
+        check("E2-9 ghost's messages deleted (root, AI, branch first msg, its reply)",
+              not msg_exists(RT) and not msg_exists(AT) and not msg_exists(RT_B1) and not msg_exists(RT_B1_AI),
+              "")
         st3, items3 = orphaned(client)
-        check("E2-9 ghost still listed for its owner", any(i["id"] == str(BT) for i in items3),
+        check("E2-9 ghost no longer listed for its owner", not any(i["id"] == str(BT) for i in items3),
               f"ids={[i['id'] for i in items3]}")
     except Exception as e:
         check("E2-9 delete with ghost", False, f"exception: {e!r}")
@@ -670,6 +678,272 @@ def start_server() -> uvicorn.Server:
     return server
 
 
+# ===== (B11-1) 刪除對話連同分支與幽靈 =====
+
+# f/g 用：假 LLM 在 message 以 "SLOW" 開頭時等這個事件，用來測「生成中刪除」。
+SLOW_GATE = threading.Event()
+SLOW_GATE.set()
+
+
+def branch_exists(branch_id) -> bool:
+    with Session(engine) as s:
+        return s.get(Branch, uuid.UUID(str(branch_id))) is not None
+
+
+def msg_exists(msg_id) -> bool:
+    with Session(engine) as s:
+        return s.get(Message, uuid.UUID(str(msg_id))) is not None
+
+
+def rows_of(msg_ids, branch_ids) -> dict:
+    """指定 id 的列欄位快照（不存在的記 None），用來證明保留的資料沒被改動。"""
+    with Session(engine) as s:
+        out = {}
+        for mid in msg_ids:
+            m = s.get(Message, uuid.UUID(str(mid)))
+            out[("m", str(mid))] = None if m is None else (
+                m.content, m.title, m.parent_id, m.branch_id, m.anchor_message_id,
+                m.has_branch, m.model_used, m.role, m.user_id)
+        for bid in branch_ids:
+            b = s.get(Branch, uuid.UUID(str(bid)))
+            out[("b", str(bid))] = None if b is None else (
+                b.root_message_id, b.anchor_message_id, b.attach_root_id, b.is_orphaned,
+                b.anchor_text, b.anchor_start, b.anchor_end, b.title, b.parent_branch_id, b.user_id)
+        return out
+
+
+def _make_nested_branch(uid, anchor_id) -> tuple[uuid.UUID, uuid.UUID]:
+    """直接寫入：錨在 anchor_id 上的分支 + 它的第一則訊息（掛在 anchor 底下）。回傳 (branch_id, root_id)。"""
+    with Session(engine) as s:
+        nb = Branch(anchor_message_id=uuid.UUID(str(anchor_id)), anchor_text="nested", user_id=uid)
+        s.add(nb)
+        s.flush()
+        nm = Message(role="user", content="nested question", parent_id=uuid.UUID(str(anchor_id)),
+                     user_id=uid, branch_id=nb.id)
+        s.add(nm)
+        s.flush()
+        nb.root_message_id = nm.id
+        s.add(nb)
+        s.commit()
+        return nb.id, nm.id
+
+
+def _make_foreign_branch(owner_uid, anchor_id) -> uuid.UUID:
+    """直接寫入：屬於 owner_uid、錨在 anchor_id（別人的對話）上的分支，用來製造「範圍內混到他人資料」。"""
+    with Session(engine) as s:
+        fb = Branch(anchor_message_id=uuid.UUID(str(anchor_id)), anchor_text="foreign", user_id=owner_uid)
+        s.add(fb)
+        s.commit()
+        return fb.id
+
+
+def _drop_foreign_branch(branch_id):
+    """清掉 _make_foreign_branch 建的分支（先解開錨點再刪）。"""
+    with Session(engine) as s:
+        b = s.get(Branch, uuid.UUID(str(branch_id)))
+        if b is not None:
+            b.anchor_message_id = None
+            s.add(b)
+            s.commit()
+    with Session(engine) as s:
+        b = s.get(Branch, uuid.UUID(str(branch_id)))
+        if b is not None:
+            s.delete(b)
+            s.commit()
+
+
+class _CommitFailSession(Session):
+    """(B11 f) commit() 一律丟出含 SQL／表名的錯誤，模擬資料庫在最後一步失敗。"""
+
+    def commit(self):
+        raise RuntimeError(
+            'simulated: DELETE FROM message WHERE message.id IN (...); '
+            'UPDATE branch SET anchor_message_id=NULL; table "branch" constraint fk_branch_anchor_message_id_message'
+        )
+
+
+def run_b11_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, uid_other, model: str):
+    # ---------- 先把所有 fixture 建好，再逐一刪除 ----------
+
+    # a. 含 inline 分支（多輪）、底部入口（降級）、空分支的對話
+    RA = AIA1 = AIA2 = BI = BD = BD2 = None
+    BI1 = BI1_AI = BI2 = BI2_AI = BD1 = BD1_AI = None
+    fixture_a_ok = False
+    try:
+        RA = _make_root(uid, "B11-a root")
+        AIA1 = _make_ai(RA, uid, "B11-a-AI1 " * 4)
+        AIA2 = _make_ai(RA, uid, "B11-a-AI2 " * 4)
+        BI = create(client, RA, AIA1, "inline", 0, 6).json()["branch_id"]
+        _, h, _ = chat(client, "BI round 1", AIA1, model, branch_id=BI)
+        BI1, BI1_AI = h.get("x-user-message-id"), h.get("x-message-id")
+        _, h, _ = chat(client, "BI round 2", BI1_AI, model, branch_id=BI)
+        BI2, BI2_AI = h.get("x-user-message-id"), h.get("x-message-id")
+        BD = create(client, RA, AIA2, "demoted", 0, 4).json()["branch_id"]
+        BD2 = create(client, RA, AIA2, "covers", 2, 6).json()["branch_id"]  # 降級 BD；BD2 沒有訊息（空分支）
+        _, h, _ = chat(client, "BD round", AIA2, model, branch_id=BD)
+        BD1, BD1_AI = h.get("x-user-message-id"), h.get("x-message-id")
+        bd_row = db_branch(BD)
+        fixture_a_ok = (bd_row["anchor_start"] is None and bd_row["anchor_message_id"] == AIA2
+                        and db_branch(BD2)["root_message_id"] is None and BI1 and BI2_AI)
+    except Exception as e:
+        check("B11-a fixture", False, f"exception: {e!r}")
+    check("B11-a fixture: inline (2 rounds), demoted anchor, empty branch built", bool(fixture_a_ok),
+          "")
+
+    # b. 幽靈（attach 指向對話根）＋ 錨在幽靈訊息 AI 回覆上的巢狀分支
+    RG = AG = BG = NB = NM = RG_B1 = RG_B1_AI = None
+    fixture_b_ok = False
+    try:
+        RG = _make_root(uid, "B11-b root")
+        AG = _make_ai(RG, uid, "B11-b-AI " * 4)
+        BG = create(client, RG, AG, "ghost src", 0, 5).json()["branch_id"]
+        _, h, _ = chat(client, "BG Q", AG, model, branch_id=BG)
+        RG_B1, RG_B1_AI = h.get("x-user-message-id"), h.get("x-message-id")
+        st_r, _, _ = regen(client, AG, model)
+        pre = db_branch(BG)
+        fixture_b_ok = (st_r == 200 and pre["is_orphaned"] is True and pre["attach_root_id"] == RG)
+        NB, NM = _make_nested_branch(uid, RG_B1_AI)
+    except Exception as e:
+        check("B11-b fixture", False, f"exception: {e!r}")
+    check("B11-b fixture: BG is a ghost attached to RG, nested branch built", bool(fixture_b_ok),
+          f"regen/ghost state={db_branch(BG) if BG else None}")
+
+    # c. 保留的資料：legacy 幽靈（attach NULL）、同一使用者的另一個對話、另一使用者的對話
+    snap_c = None
+    LEG = make_legacy_ghost(uid, "B11-c legacy", "legacy anchor")
+    RC = AC = BC = RC_B1 = RC_B1_AI = None
+    RO_B1 = AO = BO = None
+    RD = AD = XD = None
+    try:
+        RC = _make_root(uid, "B11-c other chat")
+        AC = _make_ai(RC, uid, "B11-c-AI " * 4)
+        BC = create(client, RC, AC, "c branch", 0, 4).json()["branch_id"]
+        _, h, _ = chat(client, "BC Q", AC, model, branch_id=BC)
+        RC_B1, RC_B1_AI = h.get("x-user-message-id"), h.get("x-message-id")
+        AO = _make_ai(ids["R_other"], uid_other, "B11-c other user AI " * 3)
+        BO = create(client_b, ids["R_other"], AO, "other user branch", 0, 4).json()["branch_id"]
+        _, h, _ = chat(client_b, "other user Q", AO, model, branch_id=BO)
+        RO_B1 = h.get("x-user-message-id")
+        # d 的準備：另一個對話 RD 上的分支 XD，parent_branch_id 指向 a 的 BI（BI 會被刪）
+        RD = _make_root(uid, "B11-d other chat")
+        AD = _make_ai(RD, uid, "B11-d-AI")
+        with Session(engine) as s:
+            xd = Branch(anchor_message_id=uuid.UUID(str(AD)), anchor_text="x", parent_branch_id=uuid.UUID(str(BI)),
+                        user_id=uid)
+            s.add(xd)
+            s.commit()
+            XD = xd.id
+    except Exception as e:
+        check("B11-c/d fixture", False, f"exception: {e!r}")
+    retained_msgs = [LEG["root_id"], RC, AC, RC_B1, RC_B1_AI, ids["R_other"], AO, RO_B1, RD, AD]
+    retained_brs = [LEG["branch_id"], BC, BO]
+    snap_c = rows_of(retained_msgs, retained_brs)
+    check("B11-c fixture: retained rows all exist", all(v is not None for v in snap_c.values()),
+          str([k for k, v in snap_c.items() if v is None]))
+
+    # ---------- 刪除 a ----------
+    if RA is not None:
+        r = client.delete(f"/chats/{RA}")
+        check("B11-a delete chat with inline/demoted/empty branches -> 200, 9 messages, 3 branches",
+              r.status_code == 200 and r.json() == {"status": "ok", "deleted_count": 9, "deleted_branches": 3},
+              f"status={r.status_code} body={r.text[:200]}")
+        gone_msgs = [RA, AIA1, AIA2, BI1, BI1_AI, BI2, BI2_AI, BD1, BD1_AI]
+        check("B11-a all 9 messages gone (DB level)", not any(msg_exists(m) for m in gone_msgs),
+              str([m for m in gone_msgs if msg_exists(m)]))
+        check("B11-a all 3 branches gone (DB level)", not any(branch_exists(b) for b in [BI, BD, BD2]),
+              str([b for b in [BI, BD, BD2] if branch_exists(b)]))
+
+    # ---------- 刪除 b ----------
+    if RG is not None:
+        r = client.delete(f"/chats/{RG}")
+        check("B11-b delete chat with ghost and nested branch -> 200, 5 messages, 2 branches",
+              r.status_code == 200 and r.json() == {"status": "ok", "deleted_count": 5, "deleted_branches": 2},
+              f"status={r.status_code} body={r.text[:200]}")
+        gone_msgs = [RG, AG, RG_B1, RG_B1_AI, NM]
+        check("B11-b ghost messages and nested-branch message gone (DB level)",
+              not any(msg_exists(m) for m in gone_msgs), str([m for m in gone_msgs if msg_exists(m)]))
+        check("B11-b ghost branch and nested branch gone (DB level)",
+              not branch_exists(BG) and not branch_exists(NB), "")
+
+    # ---------- c：保留的資料欄位不變 ----------
+    snap_after = rows_of(retained_msgs, retained_brs)
+    check("B11-c retained: legacy ghost, other chat, other user rows unchanged",
+          snap_c is not None and snap_after == snap_c,
+          str({k: (snap_c[k], snap_after.get(k)) for k in (snap_c or {}) if snap_c[k] != snap_after.get(k)})[:300])
+    check("B11-c retained: legacy ghost still exists with attach NULL",
+          db_branch(LEG["branch_id"])["attach_root_id"] is None and db_branch(LEG["branch_id"])["is_orphaned"] is True,
+          "")
+
+    # ---------- d：不在範圍內、parent_branch_id 指向 B 的分支 ----------
+    if XD is not None:
+        with Session(engine) as s:
+            xd = s.get(Branch, XD)
+            parent_now = None if xd is None else xd.parent_branch_id
+            anchor_now = None if xd is None else xd.anchor_message_id
+        check("B11-d outside branch retained with parent_branch_id NULL and anchor unchanged",
+              xd is not None and parent_now is None and anchor_now == AD,
+              f"exists={xd is not None} parent={parent_now} anchor={anchor_now}")
+        check("B11-d parent branch BI itself deleted", not branch_exists(BI), "")
+
+    # ---------- e：範圍內混到他人的列 → 500，什麼都不刪 ----------
+    RE = _make_root(uid, "B11-e root")
+    AE = _make_ai(RE, uid, "B11-e-AI")
+    BE = create(client, RE, AE, "e own", 0, 4).json()["branch_id"]
+    FB = _make_foreign_branch(uid_other, AE)
+    before_e = rows_of([RE, AE], [BE, FB])
+    r = client.delete(f"/chats/{RE}")
+    check("B11-e scope contains another user's branch -> 500 'Failed to delete chat'",
+          r.status_code == 500 and r.json() == {"detail": "Failed to delete chat"},
+          f"status={r.status_code} body={r.text[:200]}")
+    check("B11-e nothing deleted: every row still exists and unchanged",
+          rows_of([RE, AE], [BE, FB]) == before_e and all(v is not None for v in before_e.values()), "")
+    _drop_foreign_branch(FB)
+    r = client.delete(f"/chats/{RE}")
+    check("B11-e cleanup: own chat deletes normally after foreign row removed (2 messages, 1 branch)",
+          r.status_code == 200 and r.json() == {"status": "ok", "deleted_count": 2, "deleted_branches": 1},
+          f"status={r.status_code} body={r.text[:200]}")
+
+    # ---------- f：commit 失敗 → 500 固定訊息、資料不變 ----------
+    RF = _make_root(uid, "B11-f root")
+    AF = _make_ai(RF, uid, "B11-f-AI")
+    BF = create(client, RF, AF, "f branch", 0, 4).json()["branch_id"]
+    before_f = rows_of([RF, AF], [BF])
+    try:
+        with _CommitFailSession(engine) as fs:
+            user_f = fs.get(User, uid)
+            try:
+                main.delete_chat(RF, session=fs, user=user_f)
+                check("B11-f forced commit failure raises HTTPException", False, "no exception raised")
+            except HTTPException as he:
+                check("B11-f forced commit failure -> 500", he.status_code == 500, str(he.status_code))
+                check("B11-f detail is exactly 'Failed to delete chat' (no SQL / table name)",
+                      he.detail == "Failed to delete chat", repr(he.detail))
+    except Exception as e:
+        check("B11-f forced commit failure", False, f"exception: {e!r}")
+    check("B11-f rows still exist and unchanged (new session)",
+          rows_of([RF, AF], [BF]) == before_f and all(v is not None for v in before_f.values()), "")
+
+    # ---------- g：生成中刪除（假 LLM 慢速串流）----------
+    SLOW_GATE.clear()
+    try:
+        with client.stream("POST", "/chat", json={"message": "SLOW gen", "parent_id": None, "model": model}) as rg:
+            st_g = rg.status_code
+            ai_g = rg.headers.get("x-message-id")
+            user_g = rg.headers.get("x-user-message-id")
+            dg = client.delete(f"/chats/{user_g}")
+            check("B11-g delete during generation -> 200, 2 messages, 0 branches",
+                  dg.status_code == 200 and dg.json() == {"status": "ok", "deleted_count": 2, "deleted_branches": 0},
+                  f"status={dg.status_code} body={dg.text[:200]}")
+            SLOW_GATE.set()
+            body_g = rg.read().decode("utf-8")
+        check("B11-g generation response: 200 and no error text", st_g == 200 and body_g == "MOCK-E2-REPLY",
+              f"status={st_g} body={body_g!r}")
+        check("B11-g AI message does not reappear after generation", not msg_exists(ai_g), "")
+        check("B11-g user message stays deleted", not msg_exists(user_g), "")
+    finally:
+        SLOW_GATE.set()
+
+
 def main_entry() -> int:
     created_uids: list = []
     server = None
@@ -691,6 +965,7 @@ def main_entry() -> int:
             run_e1_tests(client, ids, out)
             if model is not None:
                 run_e2_tests(client, client_b, ids, uid, uid_other, model)
+                run_b11_tests(client, client_b, ids, uid, uid_other, model)
     except Exception as e:
         check("harness setup", False, f"exception: {e!r}")
     finally:

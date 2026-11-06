@@ -4,9 +4,11 @@ from fastapi.responses import StreamingResponse
 import asyncio
 from types import SimpleNamespace
 from sqlmodel import Session, select, text
+from sqlalchemy import delete as sa_delete, update as sa_update
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+import logging
 import os
 import uuid
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -40,6 +42,8 @@ from scraper import get_free_models
 # 生成在獨立的 asyncio task 裡跑，不綁 HTTP 連線；切走對話或斷線不會停止生成。
 # 注意：只存在程序記憶體，後端重啟即遺失（D：接受遺失）。
 GENERATIONS: dict[str, dict] = {}
+
+logger = logging.getLogger(__name__)
 
 # (G6-1) 生成完成後緩衝保留秒數（讓續讀端讀到 done）。做成模組常數，harness 可以調短來測競態。
 BUFFER_RETENTION_SECONDS = 60
@@ -581,6 +585,67 @@ def update_chat_title(
     return {"status": "ok", "title": msg.title}
 
 # ★★★ 功能 2: 刪除對話串 ★★★
+def _descendant_message_ids(session: Session, seed_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """(B11) 種子訊息本身加上所有子孫（沿 parent_id）。UNION 會去重，循環也不會無限迴圈。"""
+    if not seed_ids:
+        return set()
+    rows = session.exec(
+        text("""
+        WITH RECURSIVE chat_descendants AS (
+            SELECT id FROM message WHERE id = ANY(CAST(:seeds AS uuid[]))
+            UNION
+            SELECT m.id FROM message m JOIN chat_descendants cd ON m.parent_id = cd.id
+        )
+        SELECT id FROM chat_descendants;
+        """),
+        params={"seeds": [str(i) for i in seed_ids]},
+    ).all()
+    return {uuid.UUID(str(r[0])) for r in rows}
+
+
+def _collect_delete_scope(session: Session, root_id: uuid.UUID) -> tuple[set[uuid.UUID], set[uuid.UUID]]:
+    """(B11) 算出刪除 root_id 這串對話的範圍：(訊息 id 集合 D, 分支 id 集合 B)。
+
+    規則，重複擴大直到兩個集合都不再變大：
+    - D 起始為 root_id 與它的所有子孫。
+    - B = 錨在 D、根在 D、attach_root_id 在 D 的分支，加上 id 被 D 內訊息的 branch_id 引用的分支。
+    - D 再加入：B 內每條分支 root_message_id 的子孫，以及 branch_id 屬於 B 的訊息（連同子孫）。
+    attach_root_id 為 NULL 的舊幽靈連不到這串對話，不會被收進來。
+    """
+    D = _descendant_message_ids(session, {root_id})
+    B: set[uuid.UUID] = set()
+    while True:
+        # 由訊息找分支：錨點／根／attach 落在 D，或 D 內訊息屬於該分支
+        B_new = set(session.exec(select(Branch.id).where(
+            Branch.anchor_message_id.in_(list(D))
+            | Branch.root_message_id.in_(list(D))
+            | Branch.attach_root_id.in_(list(D))
+        )).all())
+        B_new |= {
+            b for b in session.exec(select(Message.branch_id).where(
+                Message.id.in_(list(D)), Message.branch_id.is_not(None)
+            )).all()
+        }
+        B_new |= B
+
+        # 由分支找訊息：分支的根，以及 branch_id 屬於 B 的訊息
+        seeds = set(D)
+        if B_new:
+            seeds |= set(session.exec(select(Message.id).where(
+                Message.branch_id.in_(list(B_new))
+            )).all())
+            seeds |= {
+                r for r in session.exec(select(Branch.root_message_id).where(
+                    Branch.id.in_(list(B_new)), Branch.root_message_id.is_not(None)
+                )).all()
+            }
+        D_new = _descendant_message_ids(session, seeds)
+
+        if B_new == B and D_new == D:
+            return D, B
+        B, D = B_new, D_new
+
+
 @app.delete("/chats/{root_id}")
 def delete_chat(
     root_id: uuid.UUID,
@@ -588,56 +653,79 @@ def delete_chat(
     user: User = Depends(get_current_user),
 ):
     """
-    刪除整串對話 (終極修正版：Depth-First Deletion)
-    策略：計算每一則訊息的「層級 (Level)」，從最深層的葉子節點開始刪除。
-    這能完美解決 Foreign Key Constraint 問題，不管有沒有分支或改名。
+    (B11) 刪除整串對話，連同分支與幽靈分支。
+
+    流程：
+    1. 起點必須屬於本人（不是本人或不存在 → 404），在任何刪除之前檢查。
+    2. 算出範圍（見 _collect_delete_scope）：訊息集合 D、分支集合 B，
+       包含錨在對話內的分支、底部入口、空分支，以及 attach_root_id 落在對話內的幽靈（連同它的訊息）。
+       attach_root_id 為 NULL 的舊幽靈不屬於任何對話，保留不動。
+    3. D 或 B 內任何一列不屬於本人 → rollback、寫 log、回 500（固定訊息），不刪任何資料。
+    4. 同一個交易：B 的 anchor／root／attach／parent_branch_id 設 NULL；
+       不在 B 但 parent_branch_id 落在 B 的分支，parent_branch_id 設 NULL；
+       一條 DELETE 刪 D；一條 DELETE 刪 B。PostgreSQL 的一般外鍵在每個 SQL 指令結束時才檢查，
+       所以同一條 DELETE 裡父子一起消失不會擋。
+    5. 任何資料庫錯誤（含 commit）→ rollback、完整錯誤寫 log、回 500「Failed to delete chat」，不回傳錯誤細節。
+    6. 成功回 {"status": "ok", "deleted_count": 訊息數, "deleted_branches": 分支數}。
     """
-    # (S-U1-4) 起點必須屬於本人，在任何刪除之前
+    # 1. 起點必須屬於本人，在任何刪除之前
     get_owned_message(session, root_id, user, detail="Chat not found")
 
-    # 1. 使用遞迴查詢找出所有子孫，並計算「層級 (level)」
-    # Root 的 level = 0, 子 = 1, 孫 = 2 ...
-    query = text("""
-    WITH RECURSIVE chat_descendants AS (
-        SELECT id, 0 as level FROM message WHERE id = :root_id
-        UNION ALL
-        SELECT m.id, cd.level + 1 FROM message m
-        JOIN chat_descendants cd ON m.parent_id = cd.id
-    )
-    SELECT id FROM chat_descendants ORDER BY level DESC;
-    """)
-    
-    # 執行查詢
-    results = session.exec(query, params={"root_id": root_id}).all()
-    all_ids = [r[0] for r in results]
-    
-    if not all_ids:
-        raise HTTPException(status_code=404, detail="Chat not found")
+    # 2. 範圍
+    D, B = _collect_delete_scope(session, root_id)
+    D_list = list(D)
+    B_list = list(B)
 
-    # (E2) 幽靈分支的 attach_root_id 若指向即將刪除的訊息，先清成 NULL（同一個交易），否則 FK 會擋住刪除。
-    # 幽靈本身保留（歸屬由 Branch.user_id 決定）。
-    doomed_ids = [uuid.UUID(str(i)) for i in all_ids]
-    for br in session.exec(select(Branch).where(Branch.attach_root_id.in_(doomed_ids))).all():
-        br.attach_root_id = None
-        session.add(br)
+    # 3. 擁有者檢查：範圍內任何一列不是本人的，整個中止
+    foreign_msgs = session.exec(select(Message.id).where(
+        Message.id.in_(D_list), Message.user_id != user.id
+    )).all() if D_list else []
+    foreign_branches = session.exec(select(Branch.id).where(
+        Branch.id.in_(B_list), Branch.user_id != user.id
+    )).all() if B_list else []
+    if foreign_msgs or foreign_branches:
+        session.rollback()
+        logger.error(
+            "(B11) 刪除對話 %s 的範圍內有他人資料，已中止：messages=%s branches=%s",
+            root_id, foreign_msgs, foreign_branches,
+        )
+        raise HTTPException(status_code=500, detail="Failed to delete chat")
 
-    # 2. 依照算出來的順序 (由深到淺) 逐一刪除
-    # 這裡我們直接對每個 ID 執行刪除指令，確保順序絕對正確
-    for msg_id in all_ids:
-        msg = session.get(Message, msg_id)
-        if msg:
-            session.delete(msg)
-            # 這裡可以選擇是否每刪一個就 flush，但通常全部標記完再一次 commit 即可
-            # SQLAlchemy 會盡量安排順序，但我們手動餵給它的順序已經是安全的了
-    
+    # 4. 同一個交易：先解開分支指向訊息與分支的引用，再刪訊息、刪分支
+    # (B11) 只用 Core 語法的批次 UPDATE／DELETE，不 add／delete ORM 物件，避免過期物件造成的副作用。
     try:
+        if B_list:
+            session.execute(
+                sa_update(Branch)
+                .where(Branch.id.in_(B_list))
+                .values(anchor_message_id=None, root_message_id=None,
+                        attach_root_id=None, parent_branch_id=None)
+                .execution_options(synchronize_session=False)
+            )
+            session.execute(
+                sa_update(Branch)
+                .where(Branch.parent_branch_id.in_(B_list), Branch.id.not_in(B_list))
+                .values(parent_branch_id=None)
+                .execution_options(synchronize_session=False)
+            )
+        session.execute(
+            sa_delete(Message)
+            .where(Message.id.in_(D_list))
+            .execution_options(synchronize_session=False)
+        )
+        if B_list:
+            session.execute(
+                sa_delete(Branch)
+                .where(Branch.id.in_(B_list))
+                .execution_options(synchronize_session=False)
+            )
         session.commit()
-    except Exception as e:
-        # 如果還是失敗，可能是資料庫鎖定或其他問題
-        print(f"刪除失敗細節: {e}")
-        raise HTTPException(status_code=500, detail=f"刪除失敗: {str(e)}")
-        
-    return {"status": "ok", "deleted_count": len(all_ids)}
+    except Exception:
+        session.rollback()
+        logger.exception("(B11) 刪除對話 %s 失敗（訊息 %d 筆、分支 %d 筆）", root_id, len(D_list), len(B_list))
+        raise HTTPException(status_code=500, detail="Failed to delete chat")
+
+    return {"status": "ok", "deleted_count": len(D_list), "deleted_branches": len(B_list)}
 
 # 取得整棵對話樹
 @app.get("/chats/{root_id}/tree", response_model=list[MessageRead])
