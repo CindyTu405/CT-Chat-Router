@@ -12,13 +12,13 @@ genai.configure(api_key=GOOGLE_API_KEY)
 
 
 def _max_output_tokens() -> int:
-    """(V1-2) 單次回覆輸出上限：環境變數 MAX_OUTPUT_TOKENS，預設 1500，每次呼叫時讀取。
+    """(V1-2) 單次回覆輸出上限：環境變數 MAX_OUTPUT_TOKENS，預設 3000，每次呼叫時讀取。
     不從 main 匯入（main 會 import 本檔，會循環）。"""
     raw = (os.getenv("MAX_OUTPUT_TOKENS") or "").strip()
     try:
         return int(raw)
     except ValueError:
-        return 1500
+        return 3000
 
 
 async def gemini_chat_stream(message: str, history: list, model_name: str = "gemini-2.5-flash-lite"):

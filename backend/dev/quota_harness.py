@@ -28,7 +28,7 @@ sys.path.insert(0, BACKEND_DIR)
 
 # 測試預設值；各案例需要不同額度時自行設定（見 reset_env）
 os.environ["ALLOWED_MODELS"] = "gemini*"
-os.environ["MAX_OUTPUT_TOKENS"] = "1500"
+os.environ["MAX_OUTPUT_TOKENS"] = "3000"
 
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
@@ -564,7 +564,7 @@ def t11_output_cap_and_provider_errors():
         check("11f gemini propagates provider exception (not yielded as text)",
               raised == "GEM-PROVIDER-DOWN", str(raised))
     finally:
-        os.environ["MAX_OUTPUT_TOKENS"] = "1500"
+        os.environ["MAX_OUTPUT_TOKENS"] = "3000"
 
 
 def t12_rollback():
