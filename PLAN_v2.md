@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：S-U1 已完成（2026-11-06）；Cloudflare Access 保留到 S-U2 完成。S-U2（待討論）與 B11（修法待討論）→ E5（暫停中）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
+**下一步**：S-U1 已完成（2026-11-06）；Cloudflare Access 保留到 S-U2 完成。B11（優先，見第八節「B11 規格與驗收」）→ S-U2（待討論）→ E5（暫停中，幽靈分支定義已改，細節待確認，見 BACKLOG E6）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
 
 ---
 
@@ -292,6 +292,50 @@ chat-{root_id}-{date}/
 5. 瀏覽器（桌面）：分支無頭像；字級與主對話相同；AI 訊息下有模型標籤、user 訊息下有送出時間；輸入框下有模型選單與「分支訊息與主對話各自獨立…」；在分支換模型 → 主對話選單同步變；分支往上捲 → 按鈕在分支面板右下；切 tab → 捲到底；送出 → 捲到底；拖曳把手調寬仍正常、重整後寬度保留
 6. 瀏覽器（手機）：分支滿版時有模型選單與「回到底部」按鈕；X 可關閉；選取分支內 AI 文字不出現「建立分支」
 
+### B11 規格與驗收：刪除有分支的對話（2026-11-06）
+
+教學與決策表：`docs/20261106_(B11)delete-chat-guide.html`。使用者讀完說「開始」才動工。不需要 migration。
+
+| 編號 | 負責 | 內容 | 狀態 |
+|---|---|---|---|
+| B11-1 | implementer | 後端：刪除範圍、三步刪除、錯誤回應、harness | ⏳ 待「開始」 |
+| B11-2 | implementer | 前端：失敗提示、確認文字、關閉已刪對話的分支面板 | ⏳ 待 B11-1 |
+
+**B11-1 後端（`backend/main.py`、`backend/dev/branch_entries_harness.py`、`backend/dev/auth_harness.py`）**
+- `DELETE /chats/{root_id}` 維持開頭的 `get_owned_message` 檢查，不是本人的回 404。
+- 刪除範圍取到不再變大為止：訊息集合 D 起始為 `root_id` 的所有子孫（含自己）；分支集合 B＝`anchor_message_id`、`root_message_id` 或 `attach_root_id` 落在 D，或 `id` 被 D 內訊息的 `branch_id` 引用的分支；再把 B 內分支的 `root_message_id` 子孫與 `branch_id` 屬於 B 的訊息加入 D，重複。
+- 刪除前檢查 D、B 全部的 `user_id` 都等於目前使用者；不符 → rollback、寫 log、回 500（固定訊息），不刪任何資料。
+- 同一個交易依序：B 的 `anchor_message_id`、`root_message_id`、`attach_root_id` 設 NULL；不在 B 但 `parent_branch_id` 落在 B 的分支，`parent_branch_id` 設 NULL；B 自身的 `parent_branch_id` 設 NULL；一條 SQL 刪 D；一條 SQL 刪 B。取代原本由深到淺逐則刪除與清空 `attach_root_id` 的做法。
+- commit 失敗：rollback、完整錯誤寫 log、回 500 `{"detail": "Failed to delete chat"}`，不回傳 `str(e)`。
+- 成功回 `{"status": "ok", "deleted_count": <D 筆數>, "deleted_branches": <B 筆數>}`。
+- `attach_root_id` 為 NULL 的舊幽靈不在範圍內，保留不動。
+- harness：E2-9 改成新行為（幽靈與其訊息一起刪）；`auth_harness.py` 的 A flow 刪除改用含分支的對話，移除 B11 註解。
+
+驗收：
+1. `docker compose ps` → chat_db running
+2. 三支 harness 在臨時資料庫執行（`POSTGRES_DB=<臨時庫> SQL_ECHO=false uv run python dev/<名稱>.py 2>&1 | grep -v sqlalchemy | tail -5`）：`branch_entries_harness`、`regenerate_harness`、`auth_harness` → 都 `ALL PASS`。新增涵蓋：
+   - inline 分支、底部入口、空分支、分支內有多輪訊息的對話 → 200，訊息與分支都不存在，`deleted_count`、`deleted_branches` 正確
+   - 有幽靈（含幽靈的訊息、幽靈回覆上再錨定的分支）→ 全部刪除
+   - `attach_root_id` 為 NULL 的舊幽靈、別的對話及其分支、別的使用者的資料 → 欄位與筆數不變
+   - `parent_branch_id` 指向 B、自身不在 B 的分支 → 保留，`parent_branch_id` 為 NULL
+   - B 刪 A 的對話 → 404，資料不變；範圍內混到別人的資料 → 500、不刪任何資料
+   - 強制 commit 失敗 → 500、回應不含 SQL 或表名、資料不變
+   - 生成中刪除（假 LLM）→ 200，生成結束不報錯、訊息不會重新出現
+3. `grep -n 'str(e)' backend/main.py` → `delete_chat` 範圍內無輸出
+4. `git show --stat HEAD` → 只有上列 3 個檔案
+
+**B11-2 前端（`frontend/src/App.jsx`）**
+- `handleDeleteChat`：檢查回應。`res.ok` 或 404 → 走成功流程；401 → 不提示（`apiFetch` 已處理）；其他 → `alert("刪除失敗，請稍後再試")`，對話留在列表，畫面不變。
+- 確認文字改為「確定要刪除這個對話串嗎？其中的分支也會一起刪除。此動作無法復原。」
+- 刪的是目前開著的對話：除了 `startNewChat()`，也關閉分支面板、清空 `activeBranchId`、`branches`。
+- 視覺變更：build 後先不 commit，瀏覽器確認後才 commit。
+
+驗收：
+1. `cd frontend && npm run build` → `✓ built`
+2. `grep -c "res.ok\|response.ok" frontend/src/App.jsx` 比修改前多 1 以上；`grep -c "其中的分支也會一起刪除" frontend/src/App.jsx` → 1
+3. `git show --stat HEAD` → 只有 `frontend/src/App.jsx`
+4. 瀏覽器（桌面 ≥ 768、手機 < 768 各一次）：刪含高亮分支的對話 → 從列表消失；開著該對話和分支面板時刪除 → 回到新對話、面板關閉；刪別的對話 → 目前畫面與面板不變；模擬 500 → 看到錯誤、對話仍在；重新整理後狀態一致
+
 ### S-U1 規格與驗收：資料綁定使用者（2026-11-05 定稿）
 
 教學與決策表：`docs/20261105_(S-U1)user-ownership-guide.html`。對應安全性清單第 1 項。Cloudflare Access 在 S-U1 全程保留；移除前提是 S-U2（BACKLOG）。
@@ -489,7 +533,7 @@ H3／H4 驗收：教學第 6 節「驗收指令」。
 
 **E2 後端：幽靈清單與重連（`backend/main.py`、`backend/dev/branch_entries_harness.py`）**
 - `POST /messages/{id}/regenerate` 幽靈化時：`attach_root_id` = 該 AI 回覆所在對話的樹根 id（parent_id 為 NULL 的祖先）。
-- `DELETE /chats/{root_id}`：刪訊息前，把 `attach_root_id` 落在要刪的訊息 id 內的分支設為 NULL（同一個交易）。
+- `DELETE /chats/{root_id}`：刪訊息前，把 `attach_root_id` 落在要刪的訊息 id 內的分支設為 NULL（同一個交易）。（2026-11-06 將由 B11-1 取代：幽靈跟著對話一起刪）
 - `GET /branches/orphaned?session_id=`：`is_orphaned=True`，且（`attach_root_id` 那則訊息的 `session_id` 等於參數，或 `attach_root_id` 為 NULL 且分支首則訊息 `root_message_id` 的 `session_id` 等於參數）；依 `created_at` 新到舊；欄位 `id, title, anchor_text, root_message_id, created_at`。
 - `POST /branches/{branch_id}/relink`，body `{ root_id, anchor_message_id, anchor_start, anchor_end, anchor_text }`：分支不存在，或幽靈的歸屬 session（`attach_root_id` 那則訊息的 session_id；為 NULL 時用分支首則訊息的 session_id；兩者都沒有 → 視為不屬於任何人）與 `root_id` 那則訊息的 session_id 不同 → 一律 404（不洩漏是否存在，安全性）；`is_orphaned` 不是 True → 409；offset 驗證同 E1（422）；錨點不存在 → 404、不在 root 這棵樹 → 400（沿用 create_branch 的檢查）；同一則上有範圍完全相同的非幽靈分支 → 409（不寫入）。通過後同一個 commit：`demote_overlaps(..., exclude_id=branch_id)`；設 `anchor_message_id／anchor_start／anchor_end／anchor_text`、`is_orphaned=False`、`attach_root_id=None`、`title` 不變；分支首則訊息（若有）`parent_id` 與 `anchor_message_id` 設為新錨點；樹根 `has_branch=True`。回傳格式同建立分支（`reused=false`）。
 
