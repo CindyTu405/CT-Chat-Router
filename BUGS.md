@@ -140,7 +140,7 @@
 ## B12：同時生成 16 個回覆時整站卡住，回覆遺失
 
 - **發生於**：`backend/main.py` 的 `/chat`、regenerate、`/messages/{id}/stream`、`run_generation`
-- **發現於**：V1-3 重跑 `quota_harness`（2026-11-06），`t03b_http_concurrency` 間歇失敗，5 次失敗 3 次
+- **發現於**：V1-3 重跑 `quota_harness`（2026-11-06），間歇失敗（`t03b_http_concurrency`、`t04`、`t06`），連跑 5 次失敗 4 次
 - **重現**：假模型每則生成 8 秒，14 個同時生成時無關用戶的 `GET /auth/me` 0.06 秒；16 個以上時該請求超過 45 秒沒有回應，串流全部逾時（測試等 70 秒），紀錄出現 `QueuePool limit of size 5 overflow 10 reached`
 - **預期**：多人同時生成時，其他請求不受影響，回覆完整寫回
 - **原因**：串流請求全程佔著一條連線（連線池上限 15）；生成結束時 `run_generation` 在事件迴圈上同步取連線。取不到就擋住事件迴圈，其他串流無法結束，連線也放不掉，要等 30 秒逾時
