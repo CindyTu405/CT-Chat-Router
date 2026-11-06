@@ -21,7 +21,24 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：S-U1 已完成（2026-11-06）；Cloudflare Access 保留到 S-U2 完成。B11 本機完成，待部署 → S-U2（待討論）→ E5（暫停中，幽靈分支定義已改，細節待確認，見 BACKLOG E6）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
+**下一步**：S-U1 已完成（2026-11-06）；Cloudflare Access 保留到 S-U2 完成。B11、M1 已部署 → 正式初版（見下方「V1 範圍」）。以下為初版之後：S-U2 之外的項目依序 → → E5（暫停中，幽靈分支定義已改，細節待確認，見 BACKLOG E6）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
+
+### V1 範圍：正式初版（2026-11-06 使用者定方向，細節待確認）
+
+目標：陌生人能安全使用的網站，完成後告一段落。
+
+| 編號 | 內容 | 狀態 |
+|---|---|---|
+| V1-1 | 部署 B11、M1 | ✅ 2026-11-06 使用者已部署 |
+| V1-2 | S-U2：每人每日 20 次（使用者決定，取代第四節的 10 則）、依使用者限流 | ⏳ 細節待確認 |
+| V1-3 | 正式站拔掉 Gemini，只留 OpenRouter 免費模型（使用者決定：平台 Gemini key 短時間就被限制） | ⏳ 細節待確認 |
+| V1-4 | 安全標頭、自動備份與還原演練、基本監控、日誌大小上限、上線前安全檢查 | ⏳ 細節待確認，先寫教學 |
+| V1-5 | 隱私權說明與聯絡方式 | ⏳ 細節待確認，先寫教學 |
+| V1-6 | 移除 Cloudflare Access、確認 Google OAuth 對外開放、上線驗證 | ⏳ 最後做 |
+
+風險：OpenRouter `:free` 模型的額度是整個帳號共用（查詢日 2026-11-06：累計購買未滿 10 美元每日 50 次，達到後每日 1000 次，每分鐘 20 次）。
+
+初版之後：BYOK、E5、E6、T1、Phase 4、X1、S-U3、窄面板微調、模型選單改版、OpenRouter 授權連線。
 
 ---
 
@@ -298,7 +315,7 @@ chat-{root_id}-{date}/
 
 | 編號 | 負責 | 內容 | 狀態 |
 |---|---|---|---|
-| M1 | implementer | `frontend/src/components/Sidebar.jsx` 的 `ChatRow` | ✅ 2026-11-06 使用者瀏覽器驗收通過；VM 未部署 |
+| M1 | implementer | `frontend/src/components/Sidebar.jsx` 的 `ChatRow` | ✅ 2026-11-06 使用者瀏覽器驗收通過，已部署 |
 
 - 三點外層：開啟中同現狀；已選取 → 手機常駐、桌面 hover 才顯示；未選取 → 手機透明且 `pointer-events-none`，桌面 hover 才顯示（`md:` 斷點）。
 - 長按：掛在列的主按鈕。`touchstart` 重設旗標並開始 500ms 計時；移動超過 10px、`touchend`、`touchcancel` 取消；時間到打開選單並設旗標；`click` 遇到旗標 → 重設並略過；touch 引發的 `contextmenu` 要 `preventDefault`；手機關閉列內文字選取與 touch callout；unmount 清計時器。
@@ -317,7 +334,7 @@ chat-{root_id}-{date}/
 | 編號 | 負責 | 內容 | 狀態 |
 |---|---|---|---|
 | B11-1 | implementer | 後端：刪除範圍、三步刪除、錯誤回應、harness | ✅ 431b4fd（branch_entries 107、regenerate 47、auth 131 PASS；本機資料副本 32 個對話全量刪除無失敗、無多刪） |
-| B11-2 | implementer | 前端：失敗提示、確認文字、關閉已刪對話的分支面板 | ✅ 2026-11-06 本機桌面與手機瀏覽器驗收通過；VM 未部署 |
+| B11-2 | implementer | 前端：失敗提示、確認文字、關閉已刪對話的分支面板 | ✅ 2026-11-06 本機桌面與手機瀏覽器驗收通過，已部署 |
 
 **B11-1 後端（`backend/main.py`、`backend/dev/branch_entries_harness.py`、`backend/dev/auth_harness.py`）**
 - `DELETE /chats/{root_id}` 維持開頭的 `get_owned_message` 檢查，不是本人的回 404。
