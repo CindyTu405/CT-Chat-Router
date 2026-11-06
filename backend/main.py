@@ -252,7 +252,11 @@ app.add_middleware(
 # 模型白名單（免費 tier）：環境變數 ALLOWED_MODELS，逗號分隔。
 # 支援 `prefix*` 前綴匹配（例如 "gemini*" 允許所有 gemini 開頭的模型），其餘為精確比對。
 # 目的：避免使用者填入任意 OpenRouter 付費 model ID，燒掉平台金鑰。
-ALLOWED_MODELS = [m.strip() for m in os.getenv("ALLOWED_MODELS", "gemini*").split(",") if m.strip()]
+# (V1-3) 字面值 "none" 不是模型名，代表空白名單（只剩免費模型清單可用）。
+def _parse_allowed_models(raw: str) -> list[str]:
+    return [m.strip() for m in raw.split(",") if m.strip() and m.strip() != "none"]
+
+ALLOWED_MODELS = _parse_allowed_models(os.getenv("ALLOWED_MODELS", "gemini*"))
 
 def is_model_allowed(model: str, session: Session | None = None) -> bool:
     for entry in ALLOWED_MODELS:
@@ -274,6 +278,41 @@ def is_model_allowed(model: str, session: Session | None = None) -> bool:
             print(f"[whitelist] 取得免費模型清單失敗，忽略: {e}")
 
     return False
+
+# (V1-3) 模型選單：presets 來自 ALLOWED_MODELS（每次呼叫時讀取，harness 可替換），
+# default_model 來自 DEFAULT_MODEL（同樣每次讀取）。
+GEMINI_PRESET = {"value": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash Lite"}
+
+def _model_presets() -> list[dict]:
+    presets: list[dict] = []
+    seen: set[str] = set()
+    for entry in ALLOWED_MODELS:
+        if entry == "gemini*":
+            items = [GEMINI_PRESET]
+        elif entry.endswith("*"):
+            continue  # 其他萬用字元不列入選單
+        else:
+            items = [{"value": entry, "label": entry}]
+        for item in items:
+            if item["value"] not in seen:
+                seen.add(item["value"])
+                presets.append(item)
+    return presets
+
+def _default_model(session: Session, presets: list[dict]) -> str | None:
+    configured = (os.getenv("DEFAULT_MODEL") or "").strip()
+    if configured and is_model_allowed(configured, session):
+        return configured
+    if presets:
+        return presets[0]["value"]
+    # 這段包 try/except：免費模型清單取得失敗時回傳 null，不能讓端點 500。
+    try:
+        for item in get_free_models(session):
+            if isinstance(item, dict) and item.get("id"):
+                return item["id"]
+    except Exception as e:
+        print(f"[model-options] 取得免費模型清單失敗，忽略: {e}")
+    return None
 
 # authlib 的 authorize_redirect 需要 session 存 OAuth state（CSRF 防護）。
 # 生產環境務必用環境變數覆寫 SESSION_SECRET_KEY。
@@ -1284,3 +1323,12 @@ def get_free_models_endpoint(
 ):
     models = get_free_models(session)
     return {"models": models}
+
+
+@app.get("/api/model-options")
+def get_model_options_endpoint(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    presets = _model_presets()
+    return {"presets": presets, "default_model": _default_model(session, presets)}

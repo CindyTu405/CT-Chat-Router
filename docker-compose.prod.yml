@@ -31,6 +31,7 @@ services:
       - FRONTEND_URL=https://fluentbranch.com
       - CORS_ORIGINS=https://fluentbranch.com
       - ALLOWED_MODELS=${ALLOWED_MODELS:-gemini*}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-}
       - DAILY_MESSAGE_LIMIT=${DAILY_MESSAGE_LIMIT:-20}
       - SITE_DAILY_MESSAGE_LIMIT=${SITE_DAILY_MESSAGE_LIMIT:-900}
       - MAX_OUTPUT_TOKENS=${MAX_OUTPUT_TOKENS:-3000}

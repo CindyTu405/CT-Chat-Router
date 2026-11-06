@@ -5,10 +5,10 @@ import asyncio
 # 設定 API Key
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-if not GOOGLE_API_KEY:
-    raise ValueError("❌ 錯誤：找不到 GOOGLE_API_KEY！請檢查 .env 檔案或 docker-compose.yml 設定。")
-
-genai.configure(api_key=GOOGLE_API_KEY)
+# (V1-3) 沒有金鑰時不在 import 階段報錯：正式站可能移除 Gemini，金鑰也可能不設。
+# 真正要呼叫 Gemini 時才在 gemini_chat_stream 內拋出錯誤。
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
 
 
 def _max_output_tokens() -> int:
@@ -27,6 +27,8 @@ async def gemini_chat_stream(message: str, history: list, model_name: str = "gem
     (V1-2) 整體失敗時不再 yield 錯誤文字（會外洩供應商訊息、也讓上層無法退額度），改為往上拋，
     由 main.run_generation 統一處理。
     """
+    if not GOOGLE_API_KEY:
+        raise RuntimeError("GOOGLE_API_KEY 未設定，無法呼叫 Gemini")
     print(f"🤖 正在使用模型: {model_name}")
     model = genai.GenerativeModel(model_name)
 
