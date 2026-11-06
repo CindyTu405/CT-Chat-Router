@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手機側邊欄選單教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · M1</span>
+    <h1>手機側邊欄選單</h1>
+    <p>手機沒有滑鼠，hover 不可靠。這份教學說明怎麼讓三點選單在手機上隨手可得，並加上長按。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>問題</h2>
+    <p>側邊欄每一列的三點按鈕平常是透明的，要靠 <code>group-hover</code> 才顯示。這在手機上有兩個問題：</p>
+    <ul>
+      <li>沒有滑鼠，使用者看不到三點，也不知道有選單。</li>
+      <li>按鈕只是透明，仍然點得到。點到列的右側時，可能打開選單，而不是進入對話。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：透明不等於不能點</h2>
+    <p><code>opacity: 0</code> 只影響看不看得到，元素仍會接收點擊。要讓它真的點不到，還要加 <code>pointer-events: none</code>。</p>
+    <pre><code><span class="cm">// 依視窗寬度分開（md = 768px 以上）</span>
+未選取的列  手機：透明、點不到        桌面：hover 才顯示
+已選取的列  手機：常駐顯示、可點      桌面：hover 才顯示（維持現狀）
+選單開啟中  手機與桌面都顯示</code></pre>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：長按是自己算出來的</h2>
+    <p>瀏覽器沒有通用的「長按事件」，要用計時器判斷：手指按下開始計時，時間到就打開選單；手指提早放開或開始滑動就取消。</p>
+    <div class="flow">
+      <div class="box">touchstart<br>開始 500ms 計時</div>
+      <div class="arrow">→</div>
+      <div class="box">移動超過 10px 或放開<br>取消</div>
+      <div class="arrow">→</div>
+      <div class="box">時間到<br>打開選單</div>
+    </div>
+    <p>有 10px 的容許範圍，是因為手指按著時本來就會微微移動；超過就視為捲動列表。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>三個容易出錯的地方</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>狀況</th><th>結果</th><th>做法</th></tr>
+        <tr><td>長按放開後，瀏覽器可能再送出一次 click</td><td>選單開了，同時又切換對話</td><td>用一個旗標略過這次 click</td></tr>
+        <tr><td>iOS 長按後可能不送 click，旗標沒被清掉</td><td>下一次正常點擊被吃掉</td><td>每次 touchstart 都先重設旗標</td></tr>
+        <tr><td>瀏覽器本身也有長按行為</td><td>選到文字，或跳出系統選單</td><td>手機上關閉文字選取；touch 引發的 <code>contextmenu</code> 要擋掉，桌面右鍵不受影響</td></tr>
+      </table>
+    </div>
+    <pre><code><span class="cm">// 示意，實際程式由 implementer 撰寫</span>
+onTouchStart: 重設旗標；記下位置；500ms 後 → 打開選單、設旗標
+onTouchMove:  移動超過 10px → 取消計時
+onTouchEnd:   取消計時
+onClick:      旗標為真 → 重設並略過；否則載入對話</code></pre>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+        <tr><td>1</td><td>手機上已選取的對話</td><td>三點常駐顯示</td><td>2026-11-06 使用者提出</td></tr>
+        <tr><td>2</td><td>手機上未選取的對話</td><td>不顯示三點，也點不到</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>3</td><td>哪些列可以長按</td><td>所有列；長按只開選單，不切換對話</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>4</td><td>長按時間與容許移動</td><td>500ms、10px</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>5</td><td>桌面版</td><td>完全不變</td><td>建議，說「開始」即視為確認</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>M1</td><td>手機三點常駐、未選取列點不到、長按開選單</td><td>未開始</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>練習</h2>
+    <ol>
+      <li>為什麼只把未選取列的按鈕設成透明還不夠？</li>
+      <li>如果不重設旗標，iOS 上長按之後會發生什麼事？</li>
+      <li>使用者想捲動列表，手指卻剛好按在某一列上。程式怎麼判斷這不是長按？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-06</p>
+
+</div>
+</body>
+</html>
