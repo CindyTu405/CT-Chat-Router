@@ -59,10 +59,8 @@ class Branch(SQLModel, table=True):
     parent_branch_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="branch.id"
     )
-    # (S-U1-3) 擁有者；暫時允許 NULL（舊資料），API 回應不輸出
-    user_id: Optional[uuid.UUID] = Field(
-        default=None, foreign_key="user.id", index=True, exclude=True
-    )
+    # (S-U1-9) 擁有者，必填（DB NOT NULL）；API 回應不輸出
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True, exclude=True)
     # naive UTC，理由同 Message.created_at
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
@@ -84,9 +82,6 @@ class MessageBase(SQLModel):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
-
-    # 用戶 Session (用來隔離不同訪客的內容)
-    session_id: str = Field(default="default")
 
     # --- 樹狀結構核心 ---
     # 指向父節點的 ID (上一則訊息)
@@ -124,10 +119,8 @@ class MessageBase(SQLModel):
 class Message(MessageBase, table=True):
     # 使用 UUID 作為 ID，比數字 1,2,3 更適合分散式系統
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    # (S-U1-3) 擁有者；暫時允許 NULL（舊資料），API 回應不輸出
-    user_id: Optional[uuid.UUID] = Field(
-        default=None, foreign_key="user.id", index=True, exclude=True
-    )
+    # (S-U1-9) 擁有者，必填（DB NOT NULL）；API 回應不輸出
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True, exclude=True)
 
 # 第三層：回傳給前端的白名單 (繼承 Base，並加入擴充欄位)
 # 注意：這裡必須重新定義 id，確保序列化時能正確導出
@@ -139,6 +132,12 @@ class MessageWithActivity(MessageBase):
     @field_serializer("last_activity")
     def serialize_last_activity(self, value: Optional[datetime], _info) -> Optional[str]:
         return to_utc_iso(value)
+
+
+# (S-U1-9) 對話歷史／樹的回應模型：與 Message 同欄位但不含 user_id（不回傳擁有者）
+class MessageRead(MessageBase):
+    id: uuid.UUID
+    model_config = {"from_attributes": True}
 
 # Pydantic 模型 (用於 API 請求驗證，不存入資料庫)
 class ChatRequest(SQLModel):
