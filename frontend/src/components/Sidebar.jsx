@@ -27,6 +27,14 @@ function ChatRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
+  // (M1) 手機長按開選單：計時器、觸控起點、長按後略過下一次 click 的旗標、
+  // touch 期間擋掉 contextmenu 的旗標與其延遲清除計時器。全部用 ref，不觸發重新渲染。
+  const longPressTimerRef = useRef(null);
+  const touchStartRef = useRef({ x: 0, y: 0 });
+  const suppressClickRef = useRef(false);
+  const touchActiveRef = useRef(false);
+  const touchClearTimerRef = useRef(null);
+
   // 點擊外部或按 Escape 關閉選單
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -44,9 +52,74 @@ function ChatRow({
     };
   }, [menuOpen]);
 
+  // (M1) unmount 時清掉長按與 contextmenu 延遲計時器
+  useEffect(() => () => {
+    clearTimeout(longPressTimerRef.current);
+    clearTimeout(touchClearTimerRef.current);
+  }, []);
+
   const runAction = (e, fn) => {
     setMenuOpen(false);
     fn(e);
+  };
+
+  // (M1) 長按計時：500ms 內移動超過 10px 或放開就取消
+  const LONG_PRESS_MS = 500;
+  const LONG_PRESS_MOVE_PX = 10;
+  const CONTEXT_CLEAR_MS = 300;
+
+  const cancelLongPress = () => {
+    clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  };
+
+  const onRowTouchStart = (e) => {
+    // 每次按下都先重設旗標，避免 iOS 長按後沒送 click 時旗標殘留，吃掉下一次正常點擊
+    suppressClickRef.current = false;
+    // 手指還在螢幕上，取消上一次延遲清除，保持 touch 中的 contextmenu 擋截狀態
+    clearTimeout(touchClearTimerRef.current);
+    touchActiveRef.current = true;
+    const t = e.touches[0];
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
+    clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      setMenuOpen(true);
+      suppressClickRef.current = true;
+      longPressTimerRef.current = null;
+    }, LONG_PRESS_MS);
+  };
+
+  const onRowTouchMove = (e) => {
+    const t = e.touches[0];
+    if (!t) return;
+    const dx = Math.abs(t.clientX - touchStartRef.current.x);
+    const dy = Math.abs(t.clientY - touchStartRef.current.y);
+    // 超過容許範圍視為捲動列表，不是長按
+    if (dx > LONG_PRESS_MOVE_PX || dy > LONG_PRESS_MOVE_PX) cancelLongPress();
+  };
+
+  const onRowTouchEnd = () => {
+    cancelLongPress();
+    // Android 可能在放開前後才送 contextmenu，延後一小段時間再解除擋截
+    clearTimeout(touchClearTimerRef.current);
+    touchClearTimerRef.current = setTimeout(() => {
+      touchActiveRef.current = false;
+      touchClearTimerRef.current = null;
+    }, CONTEXT_CLEAR_MS);
+  };
+
+  const onRowClick = () => {
+    // 剛由長按開啟選單：略過這次 click，不切換對話
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    onLoadChat(lastViewedNode || chat.id);
+  };
+
+  const onRowContextMenu = (e) => {
+    // 只擋觸控引發的選單（手機長按）；桌面右鍵沒有觸控，維持瀏覽器選單
+    if (touchActiveRef.current) e.preventDefault();
   };
 
   const menuItemClass =
@@ -56,12 +129,27 @@ function ChatRow({
   // 目前開啟中的對話（isActive）保持同樣底色，點進去後不會因滑鼠離開而消失
   const isActive = chat.id === activeChatId;
 
+  // (M1) 三點外層樣式：選單開啟中同現狀；手機（< 768px）已選取的列常駐顯示，
+  // 未選取的列透明且 pointer-events-none（點不到）；桌面（md 以上）維持 hover 才顯示
+  const menuWrapClass = menuOpen
+    ? 'z-50 opacity-100'
+    : isActive
+      ? 'z-0 opacity-100 md:opacity-0 md:group-hover:opacity-100'
+      : 'z-0 opacity-0 pointer-events-none md:pointer-events-auto md:group-hover:opacity-100';
+
   return (
     <div className={`group relative rounded-xl transition-all ${isActive ? 'bg-white/80 shadow-sm' : 'hover:bg-white/80 hover:shadow-sm'}`}>
+      {/* (M1) 手機長按：觸控事件掛在主按鈕上；不呼叫 preventDefault，列表捲動不受影響。
+          select-none 讓長按不選到文字（子元素會繼承）；touch-callout 關掉 iOS 長按選單 */}
       <button
         type="button"
-        onClick={() => onLoadChat(lastViewedNode || chat.id)}
-        className="w-full text-left p-3 pr-2 rounded-xl cursor-pointer transition-all flex items-center gap-3"
+        onClick={onRowClick}
+        onTouchStart={onRowTouchStart}
+        onTouchMove={onRowTouchMove}
+        onTouchEnd={onRowTouchEnd}
+        onTouchCancel={onRowTouchEnd}
+        onContextMenu={onRowContextMenu}
+        className="w-full text-left p-3 pr-2 rounded-xl cursor-pointer transition-all flex items-center gap-3 max-md:select-none [-webkit-touch-callout:none]"
       >
         {/* ★★★ 判斷是否有分支來決定圖示（純顯示用，操作交給右側選單）★★★ */}
         {chat.has_branch ? (
@@ -88,10 +176,11 @@ function ChatRow({
 
       {/* ★★★ 三點選單：預設隱藏，滑過或聚焦時浮現；展開時保持可見 ★★★ */}
       {/* P3b-F2-fix2：外層容器本身是 absolute（已建立定位），選單展開時把它的 z-index 拉到
-          50，才會蓋過 sticky 的分組標題（h3 z-10）。未展開時不開新的堆疊層級，避免影響其他列的滑過效果。 */}
+          50，才會蓋過 sticky 的分組標題（h3 z-10）。未展開時不開新的堆疊層級，避免影響其他列的滑過效果。
+          (M1) 樣式依 menuWrapClass：手機版已選取的列常駐、未選取的列點不到（見上方 menuWrapClass）。 */}
       <div
         ref={menuRef}
-        className={`absolute right-2 top-1/2 -translate-y-1/2 ${menuOpen ? 'z-50 opacity-100' : 'z-0 opacity-0 group-hover:opacity-100'} transition-opacity`}
+        className={`absolute right-2 top-1/2 -translate-y-1/2 ${menuWrapClass} transition-opacity`}
       >
         <button
           type="button"
