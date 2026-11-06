@@ -176,11 +176,11 @@ const res = await apiFetch(`/chats/${chatId}`, { method: 'DELETE' });
     <div class="table-wrap">
       <table>
         <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
-        <tr><td>1</td><td>對話內的分支</td><td>跟著對話一起刪</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>1</td><td>對話內的分支</td><td>跟著對話一起刪</td><td>2026-11-06 確認</td></tr>
         <tr><td>2</td><td>屬於這個對話的幽靈分支</td><td>一起刪，取代 E2「幽靈保留並清空 <code>attach_root_id</code>」</td><td>2026-11-06 使用者確認</td></tr>
-        <tr><td>3</td><td>前端失敗提示</td><td>非 ok 顯示錯誤；404 視為已刪除；確認框加上「分支也會一起刪除」</td><td>建議，說「開始」即視為確認</td></tr>
-        <tr><td>4</td><td>500 回應內容</td><td>固定訊息，細節寫 log</td><td>建議，說「開始」即視為確認</td></tr>
-        <tr><td>5</td><td>X1 刪除前匯出</td><td>不綁在 B11，之後另做</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>3</td><td>前端失敗提示</td><td>非 ok 顯示錯誤；404 視為已刪除；確認框加上「分支也會一起刪除」</td><td>2026-11-06 確認</td></tr>
+        <tr><td>4</td><td>500 回應內容</td><td>固定訊息，細節寫 log</td><td>2026-11-06 確認</td></tr>
+        <tr><td>5</td><td>X1 刪除前匯出</td><td>不綁在 B11，之後另做</td><td>2026-11-06 確認</td></tr>
         <tr><td>6</td><td>幽靈分支隸屬對話、顯示在分支列表</td><td>定義已確認；重連範圍、舊幽靈處理另外討論，不在 B11 實作</td><td>細節待確認</td></tr>
       </table>
     </div>
@@ -191,8 +191,8 @@ const res = await apiFetch(`/chats/${chatId}`, { method: 'DELETE' });
     <div class="table-wrap">
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
-        <tr><td>B11-1</td><td>後端刪除範圍、三步刪除、錯誤回應、harness</td><td>未開始</td></tr>
-        <tr><td>B11-2</td><td>前端失敗提示、確認文字、關閉已刪對話的分支面板</td><td>未開始</td></tr>
+        <tr><td>B11-1</td><td>後端刪除範圍、三步刪除、錯誤回應、harness</td><td>完成 431b4fd，harness 全過，本機資料副本全量刪除無失敗、無多刪</td></tr>
+        <tr><td>B11-2</td><td>前端失敗提示、確認文字、關閉已刪對話的分支面板</td><td>完成，2026-11-06 本機桌面與手機瀏覽器驗收通過，尚未部署</td></tr>
       </table>
     </div>
   </section>
