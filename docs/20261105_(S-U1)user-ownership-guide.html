@@ -258,7 +258,7 @@ python claim_legacy_data.py --provider google --email you@example.com --session-
         <tr><td>S-U1-6</td><td>前端 <code>apiFetch</code>，移除 <code>session_id</code></td><td>完成 61a2733</td></tr>
         <tr><td>S-U1-7</td><td>登入閘門、登入頁、帳號區</td><td>完成 a721e2e、3ebc03e（本機 compose 傳 OAuth 變數），本機真實 Google/GitHub 登入與隔離驗收通過</td></tr>
         <tr><td>S-U1-8</td><td>你：設定 OAuth、部署、認領、真實登入與隔離驗證</td><td>未開始</td></tr>
-        <tr><td>S-U1-9</td><td>NOT NULL、刪 <code>session_id</code></td><td>未開始。第 4 項已定：認領最多的 session，其餘匯出 JSON 後刪除；等 VM 上 NULL 筆數為 0</td></tr>
+        <tr><td>S-U1-9</td><td>NOT NULL、刪 <code>session_id</code></td><td>完成 fc3e92d（分支 <code>feat/s-u1-9</code>），臨時資料庫驗收通過；尚未 merge 與部署。實作時發現 <code>user_id</code> 必填後回應模型不能再用 <code>Message</code>，改用不含擁有者的 <code>MessageRead</code></td></tr>
       </table>
     </div>
   </section>

@@ -30,7 +30,6 @@ https://github.com/user-attachments/assets/78270ed4-3bd7-4a4c-9262-499483097318
 │   ├── database.py          # Database connection & engine setup
 │   ├── gemini_llm.py        # Google Gemini SDK integration
 │   ├── openrouter_llm.py    # OpenRouter API (OpenAI SDK) integration
-│   ├── migrate.py           # Database migration scripts
 │   ├── Dockerfile           # Backend container setup
 │   └── requirements.txt     # Python dependencies
 ├── frontend/

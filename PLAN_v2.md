@@ -308,8 +308,8 @@ chat-{root_id}-{date}/
 | S-U1-5 | implementer | 舊資料認領腳本 | ✅ 897d976（auth_harness 187 PASS） |
 | S-U1-6 | implementer | 前端 `apiFetch`、移除 `session_id` | ✅ 61a2733 |
 | S-U1-7 | implementer | 登入閘門、登入頁、帳號區 | ✅ a721e2e、3ebc03e（本機 compose 傳 OAuth 變數）；2026-11-05 本機真實 Google/GitHub 登入與隔離驗收通過 |
-| S-U1-8 | 使用者 | OAuth 主控台與 VM 設定、部署、認領、真實登入與隔離驗證 | ⏳ 部署與驗收 1～15 通過（2026-11-05）；認領、匯出、刪除未做 |
-| S-U1-9 | implementer | `user_id` NOT NULL、刪 `session_id` | ⏳ 決策 4 已定（認領 `sess_6f9afo7l4zu`，其餘匯出 JSON 後刪除），等 VM 上 NULL 筆數為 0 |
+| S-U1-8 | 使用者 | OAuth 主控台與 VM 設定、部署、認領、真實登入與隔離驗證 | ⏳ 部署與驗收 1～15 通過（2026-11-05）；使用者回報認領、刪除完成（2026-11-06），待確認 VM NULL 筆數與 dump |
+| S-U1-9 | implementer | `user_id` NOT NULL、刪 `session_id` | ✅ fc3e92d 於 `feat/s-u1-9`，臨時資料庫驗收通過（auth 130、regenerate 47、branch_entries 84 PASS）；未 merge、未部署，本機 chat_db 舊資料已認領給 fezseven7（未跑此 migration） |
 
 **S-U1-1 B10（`backend/main.py`、新檔 `backend/dev/auth_harness.py`）**
 - `SessionMiddleware` 加 `session_cookie="oauth_state"`、`max_age=600`、`same_site="lax"`、`https_only=cookie_secure()`（`cookie_secure` 從 `auth_routes` import）。
