@@ -30,7 +30,7 @@
 | 編號 | 內容 | 狀態 |
 |---|---|---|
 | V1-1 | 部署 B11、M1 | ✅ 2026-11-06 使用者已部署 |
-| V1-2 | S-U2：每人每日 20 次（使用者決定，取代第四節的 10 則）、依使用者限流 | ⏳ 細節待確認 |
+| V1-2 | S-U2：每人每日 20 次（使用者決定，取代第四節的 10 則）、依使用者限流 | ✅ 2026-11-06 完成，使用者瀏覽器驗收通過，尚未部署（部署要跑 migration） |
 | V1-3 | 正式站拔掉 Gemini，只留 OpenRouter 免費模型（使用者決定：平台 Gemini key 短時間就被限制） | ⏳ 細節待確認 |
 | V1-4 | 安全標頭、自動備份與還原演練、基本監控、日誌大小上限、上線前安全檢查 | ⏳ 細節待確認，先寫教學 |
 | V1-5 | 隱私權說明與聯絡方式 | ⏳ 細節待確認，先寫教學 |
@@ -44,12 +44,12 @@
 
 **V1-2 額度（`backend/models.py`、新 migration、`backend/main.py`、`backend/gemini_llm.py`、`backend/openrouter_llm.py`、`backend/dev/*`，前端提示另一個 commit 改 `frontend/src/App.jsx`）**
 - 新表 `daily_usage`：`user_id`（FK）、`day`（date，台灣日期）、`count`，主鍵 `(user_id, day)`。
-- 環境變數：`DAILY_MESSAGE_LIMIT`（預設 20）、`SITE_DAILY_MESSAGE_LIMIT`（預設 900）、`MAX_OUTPUT_TOKENS`（預設 1500）；同時加進兩個 compose 檔。
+- 環境變數：`DAILY_MESSAGE_LIMIT`（預設 20）、`SITE_DAILY_MESSAGE_LIMIT`（預設 900）、`MAX_OUTPUT_TOKENS`（預設 3000，2026-11-06 使用者決定，取代原本的 1500）；同時加進兩個 compose 檔。
 - `/chat`、`POST /messages/{id}/regenerate`：在白名單與擁有者檢查之後、任何寫入與 LLM 呼叫之前扣額度。先查全站當日總和，達上限 → 503 `{"detail": {"code": "site_quota_exceeded"}}`；再用單條 `INSERT ... ON CONFLICT DO UPDATE ... WHERE count < :limit RETURNING` 扣使用者額度，無回傳列 → 429 `{"detail": {"code": "daily_quota_exceeded", "reset_at": <下一個台灣 00:00 的 UTC ISO>}}`。扣額度與訊息寫入同一個交易，後續檢查失敗不留下扣款。
-- `run_generation`：生成例外且尚無任何輸出 → 退回 1 次（用扣款當時的 `day`，不低於 0）。
+- `run_generation`：生成例外且尚無任何輸出 → 退回 1 次（用扣款當時的 `day`，不低於 0）。兩個 LLM 函式改為往上拋例外，不再把錯誤文字當回覆；使用者只看到固定的「生成中斷，請稍後再試」，供應商錯誤只寫 log。
 - `/chat`、regenerate 的 slowapi key 改為依登入 cookie（雜湊後），沒有 cookie 才用 IP；維持 `10/minute`。
 - 兩個 LLM 串流函式都套用 `MAX_OUTPUT_TOKENS`。
-- 前端：`/chat`、regenerate、分支送出遇到 429 → 顯示「今日額度已用完，將於台灣時間 00:00 重置」；503 → 顯示「今日服務額度已滿，請明天再試」；輸入內容與訊息狀態依現有失敗流程還原。訊息文字變更需瀏覽器確認後才 commit。
+- 前端：`/chat`、regenerate、分支送出遇到 429 → 顯示「今日額度已用完，將於台灣時間 00:00 重置」；503 → 顯示「今日服務額度已滿，請明天再試」；每分鐘限流的 429（沒有 `detail.code`）→ 顯示「傳送太頻繁，請稍後再試」。被拒絕時撤掉樂觀訊息、文字放回輸入框；重新生成還原舊回覆與模型。訊息文字變更需瀏覽器確認後才 commit。
 
 驗收（一律用假 LLM、臨時資料庫）：
 1. `alembic upgrade head`、`alembic check` → 無差異；downgrade 再 upgrade 成功
