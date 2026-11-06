@@ -10,43 +10,55 @@ if not GOOGLE_API_KEY:
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
+
+def _max_output_tokens() -> int:
+    """(V1-2) 單次回覆輸出上限：環境變數 MAX_OUTPUT_TOKENS，預設 1500，每次呼叫時讀取。
+    不從 main 匯入（main 會 import 本檔，會循環）。"""
+    raw = (os.getenv("MAX_OUTPUT_TOKENS") or "").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return 1500
+
+
 async def gemini_chat_stream(message: str, history: list, model_name: str = "gemini-2.5-flash-lite"):
     """
-    呼叫 Google Gemini API 並產生串流
+    呼叫 Google Gemini API 並產生串流。
+    (V1-2) 整體失敗時不再 yield 錯誤文字（會外洩供應商訊息、也讓上層無法退額度），改為往上拋，
+    由 main.run_generation 統一處理。
     """
     print(f"🤖 正在使用模型: {model_name}")
-    try:
-        model = genai.GenerativeModel(model_name)
-        
-        # 1. 將我們的 Message 物件轉換成 Gemini 看得懂的格式
-        # Gemini 的格式是: [{'role': 'user', 'parts': ['...']}, {'role': 'model', 'parts': ['...']}]
-        gemini_history = []
-        for msg in history:
-            role = "user" if msg.role == "user" else "model"
-            gemini_history.append({"role": role, "parts": [msg.content]})
-        
-        # 2. 建立聊天物件 (ChatSession)
-        chat = model.start_chat(history=gemini_history)
-        
-        # 3. 發送訊息 (stream=True 代表要串流)
-        # 這裡要注意：Gemini 的 send_message_async 目前是回傳整個 response，
-        # 但它的 stream=True 可以讓我們用迭代器讀取。
-        # 為了配合 FastAPI 的 async generator，我們需要包裝一下。
-        
-        response = await chat.send_message_async(message, stream=True)
-        
-        # 4. 逐段回傳
-        async for chunk in response:
-            try:
-                # 檢查是否有候選內容且不為空
-                if chunk.candidates and chunk.candidates[0].content.parts:
-                    yield chunk.text
-            except ValueError:
-                # 如果遇到 "Invalid operation" (代表這個 chunk 沒文字)，就直接略過
-                continue
-            except Exception as e:
-                print(f"Gemini Chunk Error: {e}")
-                continue
+    model = genai.GenerativeModel(model_name)
 
-    except Exception as e:
-        yield f"⚠️ 模型錯誤: {str(e)}"
+    # 1. 將我們的 Message 物件轉換成 Gemini 看得懂的格式
+    # Gemini 的格式是: [{'role': 'user', 'parts': ['...']}, {'role': 'model', 'parts': ['...']}]
+    gemini_history = []
+    for msg in history:
+        role = "user" if msg.role == "user" else "model"
+        gemini_history.append({"role": role, "parts": [msg.content]})
+
+    # 2. 建立聊天物件 (ChatSession)
+    chat = model.start_chat(history=gemini_history)
+
+    # 3. 發送訊息 (stream=True 代表要串流)
+    # 這裡要注意：Gemini 的 send_message_async 目前是回傳整個 response，
+    # 但它的 stream=True 可以讓我們用迭代器讀取。
+    # 為了配合 FastAPI 的 async generator，我們需要包裝一下。
+    response = await chat.send_message_async(
+        message,
+        stream=True,
+        generation_config={"max_output_tokens": _max_output_tokens()},
+    )
+
+    # 4. 逐段回傳
+    async for chunk in response:
+        try:
+            # 檢查是否有候選內容且不為空
+            if chunk.candidates and chunk.candidates[0].content.parts:
+                yield chunk.text
+        except ValueError:
+            # 如果遇到 "Invalid operation" (代表這個 chunk 沒文字)，就直接略過
+            continue
+        except Exception as e:
+            print(f"Gemini Chunk Error: {e}")
+            continue

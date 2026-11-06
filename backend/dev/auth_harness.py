@@ -27,6 +27,9 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+# (V1-2) 每日額度改為很大的值：這些案例要測的不是額度，避免大量請求撞到每日上限。
+os.environ["DAILY_MESSAGE_LIMIT"] = "100000"
+os.environ["SITE_DAILY_MESSAGE_LIMIT"] = "1000000"
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 

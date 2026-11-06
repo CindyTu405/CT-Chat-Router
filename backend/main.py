@@ -2,12 +2,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 import asyncio
+from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from sqlmodel import Session, select, text
-from sqlalchemy import delete as sa_delete, update as sa_update
+from sqlalchemy import delete as sa_delete, update as sa_update, func as sa_func
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+import hashlib
 import logging
 import os
 import uuid
@@ -17,7 +19,7 @@ from slowapi.errors import RateLimitExceeded
 
 # 自訂模組
 from database import get_session, engine
-from auth_routes import cookie_secure, get_current_user, router as auth_router
+from auth_routes import cookie_secure, get_current_user, router as auth_router, SESSION_COOKIE_NAME
 from models import (
     User,
     Message,
@@ -29,6 +31,7 @@ from models import (
     Branch,
     CreateBranchRequest,
     RegenerateRequest,
+    DailyUsage,
     to_utc_iso,
 )
 # from mock_llm import mock_chat_stream
@@ -49,8 +52,110 @@ logger = logging.getLogger(__name__)
 BUFFER_RETENTION_SECONDS = 60
 
 
-async def run_generation(ai_msg_id: str, message: str, history: list, model: str):
-    """背景執行一次 AI 生成：邊收 chunk 邊寫入緩衝，完成後寫回 DB。"""
+# (V1-2) 每日額度：以台灣日期計算（固定 UTC+8，不用 zoneinfo：slim 映像可能缺 tzdata）
+TAIPEI_TZ = timezone(timedelta(hours=8))
+# 生成失敗時給使用者看的固定提示（不含供應商的錯誤訊息）
+GENERATION_FAILED_TEXT = "\n\n⚠️ 生成中斷，請稍後再試"
+
+
+def taiwan_date_of(utc_now: datetime) -> date:
+    """(V1-2) 把一個時間點換成台灣日期。純函式，給 harness 測日界（16:00Z 即台灣次日 00:00）。"""
+    return utc_now.astimezone(TAIPEI_TZ).date()
+
+
+def taiwan_today() -> date:
+    """(V1-2) 目前的台灣日期。"""
+    return taiwan_date_of(datetime.now(timezone.utc))
+
+
+def next_reset_at_utc(day: date) -> str:
+    """(V1-2) day 的下一個台灣 00:00，轉成 UTC ISO 字串（結尾 Z）。"""
+    next_midnight = datetime.combine(day + timedelta(days=1), time(0), tzinfo=TAIPEI_TZ)
+    return to_utc_iso(next_midnight)
+
+
+def _int_env(name: str, default: int) -> int:
+    """(V1-2) 讀整數環境變數；空白或不是整數就用預設值。"""
+    raw = (os.getenv(name) or "").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def daily_message_limit() -> int:
+    """(V1-2) 每位使用者每個台灣日期的次數上限（DAILY_MESSAGE_LIMIT，預設 20）。"""
+    return _int_env("DAILY_MESSAGE_LIMIT", 20)
+
+
+def site_daily_message_limit() -> int:
+    """(V1-2) 全站每個台灣日期的總次數上限（SITE_DAILY_MESSAGE_LIMIT，預設 900）。"""
+    return _int_env("SITE_DAILY_MESSAGE_LIMIT", 900)
+
+
+def _daily_quota_exceeded(day: date) -> HTTPException:
+    return HTTPException(
+        status_code=429,
+        detail={"code": "daily_quota_exceeded", "reset_at": next_reset_at_utc(day)},
+    )
+
+
+def charge_daily_quota(session: Session, user_id: uuid.UUID) -> date:
+    """(V1-2) 扣一次當日額度。不 commit：由呼叫端之後的 commit 與訊息寫入同一交易，
+    之後的檢查失敗或交易失敗都不會留下扣款。回傳扣款的台灣日期（退額度時要用同一天）。
+
+    1. 全站當日總和 >= SITE_DAILY_MESSAGE_LIMIT → 503 site_quota_exceeded
+    2. 使用者額度：單一 INSERT ... ON CONFLICT DO UPDATE ... WHERE count < limit；沒有回傳列 → 429
+    """
+    day = taiwan_today()
+
+    site_used = session.exec(
+        select(sa_func.coalesce(sa_func.sum(DailyUsage.count), 0)).where(DailyUsage.day == day)
+    ).one()
+    if site_used >= site_daily_message_limit():
+        raise HTTPException(status_code=503, detail={"code": "site_quota_exceeded"})
+
+    user_limit = daily_message_limit()
+    if user_limit < 1:
+        raise _daily_quota_exceeded(day)
+
+    row = session.execute(
+        text("""
+        INSERT INTO daily_usage (user_id, day, count) VALUES (:u, :d, 1)
+        ON CONFLICT (user_id, day) DO UPDATE SET count = daily_usage.count + 1
+        WHERE daily_usage.count < :limit
+        RETURNING count
+        """),
+        {"u": user_id, "d": day, "limit": user_limit},
+    ).first()
+    if row is None:
+        # 被拒絕時立刻結束交易：ON CONFLICT 已對該列取得鎖，若留到 session 關閉才釋放，
+        # 同一個事件迴圈裡的其他 DB 呼叫會卡住（實測造成死結）。此時尚無其他待寫入的變更。
+        session.rollback()
+        raise _daily_quota_exceeded(day)
+    return day
+
+
+def refund_daily_quota(user_id: uuid.UUID, day: date) -> None:
+    """(V1-2) 退 1 次（不低於 0）。自己開 session，不依賴請求的 session 生命週期。"""
+    with Session(engine) as db_session:
+        db_session.execute(
+            text("UPDATE daily_usage SET count = GREATEST(count - 1, 0) WHERE user_id = :u AND day = :d"),
+            {"u": user_id, "d": day},
+        )
+        db_session.commit()
+
+
+async def run_generation(
+    ai_msg_id: str,
+    message: str,
+    history: list,
+    model: str,
+    usage_user_id: uuid.UUID | None = None,
+    usage_day: date | None = None,
+):
+    """背景執行一次 AI 生成：邊收 chunk 邊寫入緩衝，完成後寫回 DB。
+    (V1-2) 失敗時：不記錄訊息內容、只給固定提示；若一個字都還沒產出，退回扣款的 1 次。"""
     buf = GENERATIONS[ai_msg_id]
     try:
         if model.startswith("gemini"):
@@ -59,8 +164,15 @@ async def run_generation(ai_msg_id: str, message: str, history: list, model: str
             stream = openrouter_chat_stream(message, history, model)
         async for chunk in stream:
             buf["text"] += chunk
-    except Exception as e:
-        buf["text"] += f"\n\n⚠️ 生成中斷：{e}"
+    except Exception:
+        logger.exception("(V1-2) 生成失敗 ai_msg=%s model=%s", ai_msg_id, model)
+        had_output = bool(buf["text"])
+        buf["text"] += GENERATION_FAILED_TEXT
+        if not had_output and usage_user_id is not None and usage_day is not None:
+            try:
+                refund_daily_quota(usage_user_id, usage_day)
+            except Exception:
+                logger.exception("(V1-2) 退回額度失敗 user=%s day=%s", usage_user_id, usage_day)
     finally:
         buf["done"] = True
         # 用獨立 session 寫回，避免依賴請求的 session 生命週期
@@ -103,11 +215,21 @@ app = FastAPI(
     openapi_url="/openapi.json" if _DOCS_ON else None,
 )
 
-# 2. Rate limit (slowapi)：以來源 IP 為 key。
+# 2. Rate limit (slowapi)：預設 key 仍是來源 IP；/chat 與 regenerate 改用 rate_limit_key（依登入者）。
 # /chat 會觸發付費 LLM 呼叫，限制每分鐘 10 次，避免被刷。
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+def rate_limit_key(request: Request) -> str:
+    """(V1-2) 限流 key：有登入 cookie 時用 "user:" + sha256(cookie)，同一 IP 的不同使用者互不影響；
+    沒有 cookie 才退回來源 IP。沒有 cookie 的請求在限流前就被 get_current_user 擋成 401。
+    cookie 只存雜湊，不在限流表裡留下原始 token。"""
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if token:
+        return "user:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return get_remote_address(request)
 
 # CORS 設定：只允許白名單來源（環境變數 CORS_ORIGINS，逗號分隔）。
 # 不可用 "*"：allow_credentials=True 時萬用 origin 會讓任何網站帶著 cookie 呼叫 API。
@@ -218,7 +340,7 @@ def get_conversation_history(session: Session, parent_id: uuid.UUID | None) -> l
     return history
 
 @app.post("/chat")
-@limiter.limit("10/minute")
+@limiter.limit("10/minute", key_func=rate_limit_key)
 async def chat_endpoint(
     payload: ChatRequest,
     request: Request,
@@ -242,6 +364,10 @@ async def chat_endpoint(
     # ★★★ 修正補上：先取得歷史對話紀錄 ★★★
     # 這行是為了讓後面的 gemini_chat_stream / openrouter_chat_stream 有 history 可以用
     history = get_conversation_history(session, payload.parent_id)
+
+    # (V1-2) 扣每日額度：在任何寫入之前；不 commit，下面第一個 commit 與訊息寫入同一交易
+    user_id = user.id  # 先取出，commit 之後 ORM 物件會過期
+    usage_day = charge_daily_quota(session, user_id)
 
     # 1. 先存使用者的訊息 (User Message)
     user_msg = Message(role="user", content=payload.message, parent_id=payload.parent_id,
@@ -294,7 +420,10 @@ async def chat_endpoint(
     GENERATIONS[ai_id] = {"text": "", "done": False}
     # 背景 task 不能拿請求 session 的 ORM 物件（commit 後會過期），先轉成純資料
     history_plain = [SimpleNamespace(role=m.role, content=m.content) for m in history]
-    asyncio.create_task(run_generation(ai_id, payload.message, history_plain, payload.model))
+    asyncio.create_task(run_generation(
+        ai_id, payload.message, history_plain, payload.model,
+        usage_user_id=user_id, usage_day=usage_day,
+    ))
 
     async def stream_generator():
         # 用續讀端點的同一套邏輯：從 0 開始讀到 done
@@ -360,7 +489,7 @@ async def stream_message(
                              headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 @app.post("/messages/{message_id}/regenerate")
-@limiter.limit("10/minute")  # (G6-1) 跟 /chat 一樣會打付費 LLM，限流同等級
+@limiter.limit("10/minute", key_func=rate_limit_key)  # (G6-1) 跟 /chat 一樣會打付費 LLM，限流同等級
 async def regenerate_message(
     message_id: str,
     payload: RegenerateRequest,
@@ -413,6 +542,10 @@ async def regenerate_message(
     if later_child is not None:
         raise HTTPException(status_code=409, detail="not the last message")
 
+    # (V1-2) 扣每日額度：通過所有 4xx 檢查之後、任何改寫之前；不 commit，f 的 commit 一併提交
+    usage_user_id = user.id  # 先取出，commit 之後 ORM 物件會過期
+    usage_day = charge_daily_quota(session, usage_user_id)
+
     # (F9-1) 編輯 user 訊息：與下面的幽靈化、AI 清空同一個 commit，不能分開寫
     if payload.content is not None:
         user_msg.content = payload.content
@@ -452,7 +585,10 @@ async def regenerate_message(
     history = get_conversation_history(session, user_parent_id)
     history_plain = [SimpleNamespace(role=m.role, content=m.content) for m in history]
     GENERATIONS[ai_id] = {"text": "", "done": False}
-    asyncio.create_task(run_generation(ai_id, user_content, history_plain, payload.model))
+    asyncio.create_task(run_generation(
+        ai_id, user_content, history_plain, payload.model,
+        usage_user_id=usage_user_id, usage_day=usage_day,
+    ))
 
     # h. 串流：與 /chat 相同，讀緩衝直到 done
     return StreamingResponse(

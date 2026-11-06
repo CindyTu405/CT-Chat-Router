@@ -1,7 +1,7 @@
 from typing import Optional, List
 from sqlmodel import SQLModel, Field
 from sqlalchemy import UniqueConstraint
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pydantic import BaseModel, field_serializer
 import uuid
 
@@ -216,3 +216,12 @@ class AuthSession(SQLModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
+
+# ===== V1-2：每日額度（台灣日期）=====
+# 每位使用者每個台灣日期一列，count 為當日已扣次數；主鍵 (user_id, day)。
+# 使用者刪除時一併刪除（ON DELETE CASCADE）；刪除對話不退次數。
+class DailyUsage(SQLModel, table=True):
+    __tablename__ = "daily_usage"
+    user_id: uuid.UUID = Field(foreign_key="user.id", primary_key=True, ondelete="CASCADE")
+    day: date = Field(primary_key=True)
+    count: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
