@@ -9,6 +9,29 @@ import { scrollToMessage } from './scrollUtils';
 
 import { apiFetch } from './api';
 
+// (V1-2) 後端在送出前就拒絕（額度用完／太頻繁）時丟出；後端沒寫入 DB，畫面要還原到送出前的狀態
+class QuotaError extends Error {}
+
+// 429 / 503 時依 detail.code 轉成 QuotaError；其他回應不做任何事
+async function throwIfQuotaError(response) {
+  if (response.status !== 429 && response.status !== 503) return;
+  let code = null;
+  try {
+    const body = await response.json();
+    code = body?.detail?.code ?? null;
+  } catch { /* 忽略解析錯誤（例如 rate limiter 回的是 {"error": ...}） */ }
+
+  if (response.status === 429 && code === 'daily_quota_exceeded') {
+    throw new QuotaError("今日額度已用完，將於台灣時間 00:00 重置");
+  }
+  if (response.status === 429) {
+    throw new QuotaError("傳送太頻繁，請稍後再試");
+  }
+  if (response.status === 503 && code === 'site_quota_exceeded') {
+    throw new QuotaError("今日服務額度已滿，請明天再試");
+  }
+}
+
 function App({ user }) {
   // 清掉舊版的匿名 session id（已改用登入 cookie），只在掛載時執行一次
   useEffect(() => {
@@ -283,6 +306,7 @@ function App({ user }) {
         })
       });
 
+      await throwIfQuotaError(response);
       if (!response.ok) throw new Error("API Error");
       
       if (messages.length === 0) {
@@ -355,6 +379,18 @@ function App({ user }) {
       // (P3b) 切換對話造成的 abort 不是錯誤，也不要再往畫面塞訊息
       if (error?.name === 'AbortError' || activeRootIdRef.current !== sendConvId) {
         // 已被切換的對話：靜默結束
+      } else if (error instanceof QuotaError) {
+        // (V1-2) 額度／速率限制：後端沒寫入，撤掉這次樂觀加入的 user + 空 AI 佔位，文字放回輸入框
+        setMessages(prev => {
+          const n = prev.length;
+          const last = prev[n - 1];
+          const userMsg = prev[n - 2];
+          const trailingPair = n >= 2 && last?.role === 'assistant' && !last.id && !last.content
+            && userMsg?.role === 'user' && !userMsg.id;
+          return trailingPair ? prev.slice(0, n - 2) : prev;
+        });
+        setInput(userMessageContent);
+        alert(error.message);
       } else {
         console.error("Error:", error);
         setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 連線錯誤，請檢查後端是否啟動。" }]);
@@ -377,6 +413,9 @@ function App({ user }) {
     const retryId = msg.id;
     const editing = content != null && !!userMsg;
     const oldUser = userMsg?.content; // (F9-2) 先記下舊內容（失敗還原用），必須在任何 setState 之前
+    // (V1-2) 額度拒絕時還原這則回覆的舊內容與舊模型，同樣必須在 setState 之前記下
+    const oldContent = msg.content;
+    const oldModel = msg.model_used;
 
     // 同 handleSend：記下這串對話，切走就停止寫入
     const convId = messages[0]?.id ?? null;
@@ -404,6 +443,7 @@ function App({ user }) {
         body: JSON.stringify(content != null ? { model, content } : { model }),
       });
 
+      await throwIfQuotaError(response);
       if (!response.ok) throw new Error("API Error");
       accepted = true;
 
@@ -457,6 +497,12 @@ function App({ user }) {
       // 切換對話造成的 abort 不是錯誤，靜默結束
       if (error?.name === 'AbortError' || activeRootIdRef.current !== convId) {
         // 已被切換的對話：靜默結束
+      } else if (error instanceof QuotaError) {
+        // (V1-2) 額度／速率限制：後端沒寫入，把這則回覆還原成送出前的內容與模型（user 已由上面 F9 還原）
+        setMessages(prev => prev.map(m => (
+          m.id === retryId ? { ...m, content: oldContent, model_used: oldModel } : m
+        )));
+        alert(error.message);
       } else {
         console.error("重新生成失敗:", error);
         setMessages(prev => prev.map(m => (
@@ -636,6 +682,7 @@ function App({ user }) {
         }),
       });
 
+      await throwIfQuotaError(response);
       if (!response.ok) throw new Error("API Error");
 
       const reader = response.body.getReader();
@@ -680,6 +727,20 @@ function App({ user }) {
         });
       }
     } catch (error) {
+      if (error instanceof QuotaError) {
+        // (V1-2) 額度／速率限制：後端沒寫入，撤掉這次樂觀加入的 user + 空 AI 佔位，文字放回分支輸入框
+        updateBranch(branchId, b => {
+          const msgs = b.messages;
+          const n = msgs.length;
+          const last = msgs[n - 1];
+          const userMsg = msgs[n - 2];
+          const trailingPair = n >= 2 && last?.role === 'assistant' && !last.id && !last.content
+            && userMsg?.role === 'user' && !userMsg.id;
+          return { ...b, messages: trailingPair ? msgs.slice(0, n - 2) : msgs, input: content };
+        });
+        alert(error.message);
+        return; // finally 仍會執行（關掉 isLoading、重抓分支訊息）
+      }
       console.error("分支訊息送出失敗:", error);
       updateBranch(branchId, b => {
         const msgs = [...b.messages];
@@ -709,6 +770,9 @@ function App({ user }) {
     const retryId = msg.id;
     const editing = content != null && !!userMsg;
     const oldUser = userMsg?.content; // (F9-2) 先記下舊內容，必須在任何 setState 之前
+    // (V1-2) 額度拒絕時還原這則回覆的舊內容與舊模型，同樣必須在 setState 之前記下
+    const oldContent = msg.content;
+    const oldModel = msg.model_used;
 
     // 先清空這則回覆並標示分支忙碌中；編輯時同時把 user 那則換成新內容
     updateBranch(branchId, b => ({
@@ -729,6 +793,7 @@ function App({ user }) {
         body: JSON.stringify(content != null ? { model, content } : { model }),
       });
 
+      await throwIfQuotaError(response);
       if (!response.ok) throw new Error("API Error");
       accepted = true;
 
@@ -755,6 +820,17 @@ function App({ user }) {
           ...b,
           messages: b.messages.map(m => (m.id === userMsg.id ? { ...m, content: oldUser } : m)),
         }));
+      }
+      if (error instanceof QuotaError) {
+        // (V1-2) 額度／速率限制：後端沒寫入，把這則回覆還原成送出前的內容與模型（user 已由上面 F9 還原）
+        updateBranch(branchId, b => ({
+          ...b,
+          messages: b.messages.map(m => (
+            m.id === retryId ? { ...m, content: oldContent, model_used: oldModel } : m
+          )),
+        }));
+        alert(error.message);
+        return; // finally 仍會執行（關掉 isLoading）
       }
       console.error("分支重新生成失敗:", error);
       updateBranch(branchId, b => ({
