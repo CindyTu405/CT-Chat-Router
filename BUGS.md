@@ -124,7 +124,7 @@
 - **原因**：authlib 清掉 state 後暫存內容變空，middleware 在回應最後補上刪除同名 cookie 的標頭
 - **注意**：Python cookie jar（`TestClient`／httpx）重播時 token 仍在，會誤判沒問題；測試要用 curl 並檢查 `Set-Cookie` 標頭
 - **修正方向**：`SessionMiddleware` 改用 `session_cookie="oauth_state"`（S-U1-1）。教學：`docs/20261105_(S-U1)user-ownership-guide.html`
-- **狀態**：已修（6541856），auth_harness 通過（含移除修正後測試會失敗）；2026-11-05 本機真實瀏覽器與真實 OAuth 驗證通過（登入後重新整理仍維持登入）；正式環境待 S-U1-8
+- **狀態**：已修（6541856），auth_harness 通過（含移除修正後測試會失敗）；2026-11-05 本機真實瀏覽器與真實 OAuth 驗證通過（登入後重新整理仍維持登入）；2026-11-06 正式環境 S-U1-8 真實登入驗收通過
 
 ## B11：刪除有分支的對話會失敗，前端沒有提示
 

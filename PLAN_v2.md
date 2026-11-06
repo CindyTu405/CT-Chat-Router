@@ -21,7 +21,7 @@
 | Phase 4 Obsidian 匯出 | ⏳ 未開始 | |
 | Phase 5 收尾（BYOK／額度／監控） | ⏳ 未開始 | |
 
-**下一步**：S-U1 資料綁定使用者（已確認規格，教學待使用者讀完說「開始」，見第八節「S-U1 規格與驗收」）→ S-U2（待討論）→ E5（暫停中）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
+**下一步**：S-U1 已完成（2026-11-06）；Cloudflare Access 保留到 S-U2 完成。S-U2（待討論）與 B11（修法待討論）→ E5（暫停中）→ 窄面板微調（G3-2 延後項）→ T1 → Phase 4 → Phase 5。B4 待重新評估。
 
 ---
 
@@ -309,7 +309,7 @@ chat-{root_id}-{date}/
 | S-U1-6 | implementer | 前端 `apiFetch`、移除 `session_id` | ✅ 61a2733 |
 | S-U1-7 | implementer | 登入閘門、登入頁、帳號區 | ✅ a721e2e、3ebc03e（本機 compose 傳 OAuth 變數）；2026-11-05 本機真實 Google/GitHub 登入與隔離驗收通過 |
 | S-U1-8 | 使用者 | OAuth 主控台與 VM 設定、部署、認領、真實登入與隔離驗證 | ✅ 2026-11-06 完成：部署與驗收 1～15 通過；認領後正式站可見舊對話；VM `message`、`branch` 的 NULL 筆數皆為 0，dump 存在 |
-| S-U1-9 | implementer | `user_id` NOT NULL、刪 `session_id` | ⏳ fc3e92d 已 merge 到 main，本機 chat_db 已升級（revision e8f9a0b1c2d3）；臨時資料庫驗收通過（auth 130、regenerate 47、branch_entries 84 PASS）；VM 未部署 |
+| S-U1-9 | implementer | `user_id` NOT NULL、刪 `session_id` | ✅ fc3e92d（merge ca491d1，revision e8f9a0b1c2d3）；臨時資料庫驗收通過（auth 130、regenerate 47、branch_entries 84 PASS）；2026-11-06 VM 部署完成，備份、migration、欄位檢查與正式站對話驗證皆通過 |
 
 **S-U1-1 B10（`backend/main.py`、新檔 `backend/dev/auth_harness.py`）**
 - `SessionMiddleware` 加 `session_cookie="oauth_state"`、`max_age=600`、`same_site="lax"`、`https_only=cookie_secure()`（`cookie_secure` 從 `auth_routes` import）。
