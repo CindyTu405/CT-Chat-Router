@@ -150,8 +150,8 @@ await asyncio.to_thread(退回次數)</code></pre>
     <div class="table-wrap">
       <table>
         <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
-        <tr><td>1</td><td>什麼時候修</td><td>V1-4a 之前，併入這批一起部署</td><td>建議，說「開始」即視為確認</td></tr>
-        <tr><td>2</td><td>連線池大小</td><td>維持 15 條，不調整</td><td>建議，說「開始」即視為確認</td></tr>
+        <tr><td>1</td><td>什麼時候修</td><td>V1-4a 之前，併入這批一起部署</td><td>2026-11-08 確認</td></tr>
+        <tr><td>2</td><td>連線池大小</td><td>維持 15 條，不調整</td><td>2026-11-08 確認</td></tr>
       </table>
     </div>
   </section>
@@ -161,7 +161,7 @@ await asyncio.to_thread(退回次數)</code></pre>
     <div class="table-wrap">
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
-        <tr><td>B12</td><td>串流前釋放連線；背景寫入移出事件迴圈</td><td>未開始</td></tr>
+        <tr><td>B12</td><td>串流前釋放連線；背景寫入移出事件迴圈</td><td>完成（2bf164c），2026-11-08 驗收通過：30 個同時生成時無關請求 2 秒內回應，修正前同一測試逾時；尚未部署</td></tr>
       </table>
     </div>
   </section>
