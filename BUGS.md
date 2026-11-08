@@ -186,3 +186,13 @@
 - **影響**：每天最多發生一次，平常的 DB 呼叫只有幾毫秒。屬於穩定性問題，不是資料外洩
 - **修正方向**：這些端點改成 `def`，或把同步呼叫包進 `asyncio.to_thread`。可以放到 V1 之後
 - **狀態**：未修
+
+## B17：串流結束時 DB 可能還沒寫入回覆（B12 引入）
+
+- **發生於**：`backend/main.py` 的 `run_generation` 的 `finally`：先設 `buf["done"] = True`，才 `await asyncio.to_thread(_persist_generation, ...)`
+- **發現於**：B13-1 驗收重跑 `quota_harness`（2026-11-08），`08e` 連跑 5 次失敗 1 次，讀到的內容是 `''`
+- **重現**：`cd backend && POSTGRES_DB=v1_models SQL_ECHO=false uv run python dev/quota_harness.py` 多跑幾次，`08e` 偶爾失敗
+- **預期**：前端收到串流結束時，DB 已經有完整回覆
+- **原因**：B12 之前寫入是同步的，設完 done 後事件迴圈被寫入擋住，讀緩衝的串流要等寫完才看得到 done。改成 `to_thread` 之後，串流先看到 done 就結束，寫入還在另一條執行緒進行。這時重新載入對話，AI 回覆會是空的
+- **修正方向**：寫入完成（或失敗記 log）之後才設 `done = True`
+- **狀態**：未修；B12 尚未部署，修好再一起部署
