@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>套件漏洞升級教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · B14</span>
+    <h1>套件漏洞升級</h1>
+    <p>程式用到的第三方套件有已知漏洞。這份教學說明怎麼找出來、只升需要升的、升完怎麼確認沒弄壞。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>問題</h2>
+    <p>V1-4c 用兩個工具掃描（2026-11-08）：</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>範圍</th><th>工具</th><th>結果</th><th>影響</th></tr>
+        <tr><td>後端</td><td><code>pip-audit</code></td><td>11 個套件、66 筆</td><td>正式站實際執行的程式，影響大</td></tr>
+        <tr><td>前端</td><td><code>npm audit --omit=dev</code></td><td>vite、source-map-js，2 筆 high</td><td>只在 build 時使用，正式站由 nginx 提供靜態檔，影響小</td></tr>
+      </table>
+    </div>
+    <p>後端最重要的是 <b>starlette</b>（FastAPI 底下處理 HTTP 請求、cookie session 的那一層）和 <b>python-multipart</b>（解析表單上傳）。它們直接處理外部送進來的資料。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：鎖檔</h2>
+    <p><code>pyproject.toml</code> 寫的是「可以接受的版本範圍」，例如 <code>fastapi&gt;=0.124.2</code>。真正安裝的確切版本記在 <code>uv.lock</code>（前端是 <code>package-lock.json</code>）。Docker build 時照鎖檔安裝，所以每次部署裝到的版本都一樣。</p>
+    <p>這也代表：鎖檔不更新，漏洞就一直在。升級就是更新鎖檔，再重新 build。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：只升需要升的</h2>
+    <p>全部升到最新版（<code>uv lock --upgrade</code>）會動到 50 個套件，包括 <code>openai</code> 2 → 3、<code>sqlalchemy</code> 2.0 → 2.1 這類大改版，出問題時很難知道是哪一個造成的。</p>
+    <p>這次只升有漏洞的套件，以及因此必須跟著升的套件：</p>
+    <pre><code><span class="cm"># 示意，實際由 implementer 執行</span>
+uv lock --upgrade-package starlette --upgrade-package fastapi \
+        --upgrade-package python-multipart --upgrade-package cryptography \
+        --upgrade-package urllib3 --upgrade-package anyio \
+        --upgrade-package requests --upgrade-package idna --upgrade-package certifi</code></pre>
+    <p>試算結果（2026-11-09 dry-run）：</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>套件</th><th>現在</th><th>升級後</th><th>備註</th></tr>
+        <tr><td>starlette</td><td>0.50.0</td><td>1.10.0</td><td><b>大改版</b>，舊的過時 API 被移除</td></tr>
+        <tr><td>fastapi</td><td>0.128.0</td><td>0.162.2</td><td>要跟著升才能用 starlette 1.x</td></tr>
+        <tr><td>python-multipart</td><td>0.0.21</td><td>0.0.33</td><td></td></tr>
+        <tr><td>cryptography</td><td>46.0.4</td><td>50.0.2</td><td>authlib 用來驗證登入</td></tr>
+        <tr><td>urllib3、requests、idna、certifi、anyio</td><td colspan="2">小版本升級</td><td></td></tr>
+      </table>
+    </div>
+    <div class="warn"><b>風險：</b>starlette 1.x 移除了一些舊寫法。本專案用的是 <code>lifespan</code>、<code>SessionMiddleware</code>、<code>StreamingResponse</code>，都是新寫法，但 <code>slowapi</code>（限流）和 <code>authlib</code>（OAuth）是第三方套件，是否相容要靠測試確認。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>步驟</h2>
+    <ol>
+      <li><b>B14-1 後端：</b>照上面升級鎖檔；重建本機 api 映像；跑全部 harness；再跑一次 <code>pip-audit</code>，確認剩下的漏洞數。</li>
+      <li><b>B14-2 前端：</b><code>npm audit fix</code>（vite 7.3.6 → 7.3.7，同一個大版本）；<code>npm run build</code>；再跑一次 <code>npm audit --omit=dev</code>。</li>
+      <li><b>你的瀏覽器驗收：</b>登入、登出、聊天串流、重新生成、分支，重點是登入（authlib + cryptography + starlette session）。</li>
+    </ol>
+    <p>如果 slowapi 或 authlib 跟 starlette 1.x 不相容，就退一步：starlette 停在 0.x 最後一個修掉漏洞的版本，先上線，大改版留到 V1 之後。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>怎麼驗收</h2>
+    <ul>
+      <li><code>uv.lock</code> 裡 starlette ≥ 1.3.1、python-multipart ≥ 0.0.31、cryptography ≥ 50.0.0（各自漏洞清單裡最高的修正版）。</li>
+      <li><code>pip-audit</code> 對升級後的鎖檔：0 筆，或剩下的每一筆都寫明原因。</li>
+      <li><code>regenerate</code>、<code>branch_entries</code>、<code>auth</code>、<code>model_options</code>、<code>quota</code>、<code>pool</code>、<code>limits</code> 七個 harness 全部 <code>ALL PASS</code>。</li>
+      <li><code>npm audit --omit=dev</code>：0 筆；<code>npm run build</code> 通過。</li>
+      <li>瀏覽器：GitHub 登入、登出再登入、聊天串流、重新生成、建立分支都正常。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>部署注意</h2>
+    <p>正式站的 api 映像沒有掛載原始碼，<code>git pull</code> 之後要 <code>sudo docker compose up -d --build</code> 才會照新的鎖檔安裝。這批還有 V1-2 的 migration，記得跑 <code>alembic upgrade head</code>。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>建議</th><th>狀態</th></tr>
+        <tr><td>1</td><td>升級範圍</td><td>只升有漏洞的套件和必須跟著升的，不全部升到最新</td><td>待確認</td></tr>
+        <tr><td>2</td><td>starlette 1.x 不相容時</td><td>退回 0.x 最後一個修掉漏洞的版本，大改版留到 V1 後</td><td>待確認</td></tr>
+        <tr><td>3</td><td>前端</td><td>只跑 <code>npm audit fix</code>，不升 vite 8</td><td>待確認</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>B14-1</td><td>後端鎖檔升級、harness、pip-audit</td><td>未開始</td></tr>
+        <tr><td>B14-2</td><td>前端 npm audit fix、build</td><td>未開始</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>練習</h2>
+    <ol>
+      <li><code>pyproject.toml</code> 寫 <code>fastapi&gt;=0.124.2</code>，為什麼正式站裝的不是最新版？</li>
+      <li>為什麼前端 vite 的漏洞對正式站影響小，後端 starlette 的影響大？</li>
+      <li>為什麼這次不用 <code>uv lock --upgrade</code> 全部升級？</li>
+      <li>升完鎖檔但只 <code>git pull</code>、沒有 <code>--build</code>，正式站跑的是哪個版本？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-09</p>
+
+</div>
+</body>
+</html>
