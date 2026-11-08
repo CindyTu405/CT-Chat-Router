@@ -56,6 +56,14 @@ function LoginPage() {
           <FaGithub className="w-5 h-5" aria-hidden="true" />
           使用 GitHub 繼續
         </a>
+        <a
+          href="/privacy.html"
+          target="_blank"
+          rel="noopener"
+          className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2"
+        >
+          隱私權說明
+        </a>
       </div>
     </div>
   );

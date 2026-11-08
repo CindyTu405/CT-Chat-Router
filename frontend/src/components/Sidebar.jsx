@@ -508,6 +508,14 @@ function Sidebar({
             登出
           </button>
         </div>
+        <a
+          href="/privacy.html"
+          target="_blank"
+          rel="noopener"
+          className="block pl-7 text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2"
+        >
+          隱私權說明
+        </a>
       </div>
     </aside>
   );
