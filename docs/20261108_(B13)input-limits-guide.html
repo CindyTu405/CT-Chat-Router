@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>輸入長度上限與限流教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · B13</span>
+    <h1>輸入長度上限與限流</h1>
+    <p>任何登入者都能一直寫入大量資料、塞滿磁碟。這份教學說明怎麼用「欄位上限」和「限流」把它擋住。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>問題</h2>
+    <p>目前後端收到的文字欄位都沒有長度限制，唯一的關卡是 nginx 預設的請求大小上限 1 MB。所以：</p>
+    <ul>
+      <li><code>/chat</code> 一則訊息可以接近 1 MB。生成失敗會退回額度，所以每日 20 次也擋不住寫入。</li>
+      <li>建立分支、改標題、relink 這三個端點完全沒有限流，可以用程式一秒打好幾次，每次寫進接近 1 MB 的 <code>anchor_text</code>。</li>
+    </ul>
+    <div class="warn"><b>為什麼重要：</b>EC2 的磁碟（EBS）有固定大小。寫滿之後 PostgreSQL 停止寫入，整站無法使用，連正常用戶也受影響。只要一個帳號就能做到。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：輸入驗證</h2>
+    <p>FastAPI 用 Pydantic 模型檢查請求內容。欄位加上 <code>max_length</code> 之後，太長的請求在進到端點程式之前就被擋下，自動回 <code>422</code>，不會碰到資料庫，也不會扣額度。</p>
+    <p><code>max_length</code> 算的是「字元數」，中文一個字算 1，英文一個字母也算 1。</p>
+    <div class="tip"><b>前端也要擋，但不能只靠前端：</b>前端的檢查是為了讓正常用戶早點看到提示；攻擊者可以直接呼叫 API 跳過前端，所以後端的檢查才是真正的防線。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：限流</h2>
+    <p>限流就是「每人每段時間最多幾次」。<code>/chat</code> 和重新生成已經用 slowapi 限制每人每分鐘 10 次（V1-2）。這次把同一套套用到其他會寫入資料的端點，key 一樣用登入 cookie 的雜湊，同一個網路下的不同用戶互不影響。</p>
+    <p>上限 + 限流合起來，就能算出一個人最多寫得進多少資料：每分鐘 30 次 × 5,000 字，大約是 /chat 一次的上限量級，而不是無限。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>要改的地方</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>欄位</th><th>位置</th><th>上限</th></tr>
+        <tr><td>訊息 <code>message</code></td><td><code>ChatRequest</code></td><td>20,000 字</td></tr>
+        <tr><td>編輯內容 <code>content</code></td><td><code>RegenerateRequest</code></td><td>20,000 字</td></tr>
+        <tr><td>標題 <code>title</code></td><td><code>UpdateTitleRequest</code></td><td>200 字</td></tr>
+        <tr><td>錨點文字 <code>anchor_text</code></td><td><code>CreateBranchRequest</code>、<code>RelinkBranchRequest</code></td><td>5,000 字</td></tr>
+        <tr><td>模型名稱 <code>model</code></td><td><code>ChatRequest</code>、<code>RegenerateRequest</code></td><td>200 字（順手加，白名單本來就會擋）</td></tr>
+      </table>
+    </div>
+    <pre><code><span class="cm"># 示意，實際程式由 implementer 撰寫</span>
+<span class="cm"># 後端：schema 加上限</span>
+class ChatRequest(SQLModel):
+    message: str = Field(max_length=20000)
+
+<span class="cm"># 後端：寫入端點加限流（slowapi 需要 request 參數）</span>
+@app.post("/chats/{root_id}/branches")
+@limiter.limit("30/minute", key_func=rate_limit_key)
+def create_branch(..., request: Request, ...):
+
+<span class="cm">// 前端：送出前先檢查</span>
+if (text.length > 20000) {
+  alert("內容太長，上限 20,000 字")
+  return  <span class="cm">// 輸入框內容保留</span>
+}</code></pre>
+    <p>前端的處理：</p>
+    <ul>
+      <li><b>送訊息、編輯最後一則：</b>超過 20,000 字跳提示，不送出，輸入內容保留。</li>
+      <li><b>改標題：</b>輸入框加 <code>maxLength={200}</code>，打不進第 201 個字。</li>
+      <li><b>建立分支、relink：</b><code>anchor_text</code> 只是標題和顯示用的快照，送出前截到 5,000 字。高亮位置用的是 offset，不受影響。</li>
+      <li><b>這三個端點被限流（429）：</b>跳提示「操作太頻繁，請稍後再試」。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>怎麼驗收</h2>
+    <ul>
+      <li>harness：20,000 字的訊息成功，20,001 字回 422，DB 沒有新增訊息，額度沒有被扣。</li>
+      <li>harness：標題 201 字、<code>anchor_text</code> 5,001 字都回 422。</li>
+      <li>harness：同一人一分鐘內建立分支第 31 次回 429；另一個用戶同時不受影響。</li>
+      <li>既有 harness 全部 <code>ALL PASS</code>。</li>
+      <li>瀏覽器：貼一段超過 20,000 字的文字送出，看到提示且輸入框還在；改標題打不進第 201 個字；正常聊天、建立分支不受影響。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+        <tr><td>1</td><td>訊息與編輯內容上限</td><td>20,000 字</td><td>2026-11-08 確認</td></tr>
+        <tr><td>2</td><td>標題上限</td><td>200 字</td><td>2026-11-08 確認</td></tr>
+        <tr><td>3</td><td>錨點文字上限</td><td>5,000 字，前端送出前截斷</td><td>2026-11-08 確認</td></tr>
+        <tr><td>4</td><td>寫入端點限流</td><td>建立分支、改標題、relink 每人每分鐘 30 次</td><td>2026-11-08 確認</td></tr>
+        <tr><td>5</td><td>超過上限時</td><td>後端回 422；前端跳「內容太長」提示</td><td>2026-11-08 確認</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>B13-1</td><td>後端：schema 上限、寫入端點限流、harness</td><td>未開始</td></tr>
+        <tr><td>B13-2</td><td>前端：送出前檢查、標題 maxLength、截斷 anchor_text、429 提示</td><td>未開始</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>練習</h2>
+    <ol>
+      <li>為什麼只在前端加 <code>maxLength</code> 不夠？</li>
+      <li>太長的訊息被擋下時，為什麼不會扣到每日額度？（提示：422 在哪一步發生）</li>
+      <li>如果限流的 key 用 IP，宿舍或公司同一個網路的用戶會遇到什麼問題？</li>
+      <li><code>anchor_text</code> 截斷之後，為什麼高亮的位置還是正確的？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-08</p>
+
+</div>
+</body>
+</html>
