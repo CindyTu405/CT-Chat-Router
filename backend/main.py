@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from sqlmodel import Session, select, text
 from sqlalchemy import delete as sa_delete, update as sa_update, func as sa_func
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import hashlib
@@ -764,15 +764,17 @@ def get_chat_history(
 
 # ★★★ 功能 1: 修改對話標題 ★★★
 @app.patch("/chats/{root_id}/title")
+@limiter.limit("30/minute", key_func=rate_limit_key)  # (B13)
 def update_chat_title(
+    request: Request,
     root_id: uuid.UUID,
-    request: UpdateTitleRequest,
+    payload: UpdateTitleRequest,
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     msg = get_owned_message(session, root_id, user, detail="Chat not found")
 
-    msg.title = request.title
+    msg.title = payload.title
     session.add(msg)
     session.commit()
     session.refresh(msg)
@@ -1021,7 +1023,7 @@ class RelinkBranchRequest(BaseModel):
     anchor_message_id: uuid.UUID
     anchor_start: int | None = None
     anchor_end: int | None = None
-    anchor_text: str | None = None
+    anchor_text: str | None = Field(default=None, max_length=5000)  # (B13)
 
 
 def _branch_response(branch: Branch, reused: bool, demoted_ids: list[str]) -> dict:
@@ -1041,7 +1043,9 @@ def _branch_response(branch: Branch, reused: bool, demoted_ids: list[str]) -> di
 
 
 @app.post("/chats/{root_id}/branches")
+@limiter.limit("30/minute", key_func=rate_limit_key)  # (B13)
 def create_branch(
+    request: Request,
     root_id: uuid.UUID,
     payload: CreateBranchRequest,
     session: Session = Depends(get_session),
@@ -1243,7 +1247,9 @@ def list_orphaned_branches(
 
 
 @app.post("/branches/{branch_id}/relink")
+@limiter.limit("30/minute", key_func=rate_limit_key)  # (B13)
 def relink_branch(
+    request: Request,
     branch_id: uuid.UUID,
     payload: RelinkBranchRequest,
     session: Session = Depends(get_session),
