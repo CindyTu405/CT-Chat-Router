@@ -146,3 +146,43 @@
 - **原因**：串流請求全程佔著一條連線（連線池上限 15）；生成結束時 `run_generation` 在事件迴圈上同步取連線。取不到就擋住事件迴圈，其他串流無法結束，連線也放不掉，要等 30 秒逾時
 - **修正方向**：串流開始前 `session.close()`；`run_generation` 的 DB 寫入與退次數改用 `asyncio.to_thread`。連線池大小不變。規格見 PLAN_v2「B12 規格與驗收」，教學：`docs/20261106_(B12)db-connection-pool-guide.html`
 - **狀態**：已修（2bf164c），2026-11-08 `pool_harness` 通過（30 個同時生成時無關請求 2 秒內回應；修正前同一測試逾時），`quota_harness` 連跑 5 次通過；尚未部署
+
+## B13：輸入沒有長度上限，建立分支等寫入端點沒有限流
+
+- **發生於**：`backend/models.py` 的 `ChatRequest.message`、`RegenerateRequest.content`、`UpdateTitleRequest.title`、`CreateBranchRequest.anchor_text`、`RelinkBranchRequest.anchor_text`；`backend/main.py` 的 `POST /chats/{id}/branches`、`PATCH /chats/{id}/title`、`POST /branches/{id}/relink`
+- **發現於**：V1-4c 上線前安全審查（2026-11-08）
+- **重現**：登入後送一則接近 1 MB 的訊息（nginx 預設上限 1 MB），後端照收並寫入 DB；建立分支端點可以不限次數呼叫，每次寫入接近 1 MB 的 `anchor_text`
+- **預期**：每個文字欄位有合理上限，超過回 422；會寫入資料的端點都有限流
+- **影響**：任何登入者都能持續寫入大量資料塞滿 EBS 磁碟，整站停擺。生成失敗會退回額度，所以每日 20 次也擋不住 `/chat` 的寫入
+- **修正方向**：schema 加 `max_length`；建立分支、改標題、relink 加 slowapi 限流（依登入者）。上限數值待確認
+- **狀態**：未修
+
+## B14：後端與前端套件有已知漏洞
+
+- **發生於**：`backend/uv.lock`、`frontend/package-lock.json`
+- **發現於**：V1-4c 上線前安全審查（2026-11-08），`pip-audit` 與 `npm audit --omit=dev`
+- **重現**：`cd backend && uvx pip-audit -r <(uv export --frozen --no-dev --no-hashes)` → 11 個套件 66 筆，包含 starlette 0.50.0、python-multipart 0.0.21、cryptography 46.0.4、urllib3 2.6.3、anyio 4.12.0、requests、idna、certifi；`cd frontend && npm audit --omit=dev` → vite 7.3.1、source-map-js 2 筆 high
+- **預期**：上線時沒有已知的高風險漏洞
+- **影響**：後端是正式站實際執行的程式，影響較大；starlette 要升到 1.x，FastAPI 要跟著升。前端 vite 只在 build 和開發伺服器使用，正式站由 nginx 提供靜態檔，影響小
+- **修正方向**：升級鎖檔，重跑全部 harness 和瀏覽器驗收
+- **狀態**：未修
+
+## B15：可能可以繞過 Cloudflare 直接連到 EC2
+
+- **發生於**：EC2 security group、`frontend/nginx.prod.conf`
+- **發現於**：V1-4c 上線前安全審查（2026-11-08）
+- **重現**：待確認。如果 security group 的 443 對 `0.0.0.0/0` 開放，用 `curl --resolve fluentbranch.com:443:<EC2 IP> -k https://fluentbranch.com/` 就能不經 Cloudflare 連到網站
+- **預期**：80 和 443 只接受 Cloudflare 的 IP；SSH 只接受站長的 IP
+- **影響**：繞過 Cloudflare 的防護，在 V1-6 之前也會繞過 Cloudflare Access
+- **修正方向**：使用者在 AWS 確認並收緊 security group（不改程式）
+- **狀態**：待使用者確認
+
+## B16：async 端點裡有阻塞呼叫
+
+- **發生於**：`backend/main.py` 的 `/chat`、regenerate、`/messages/{id}/stream`（同步 DB 呼叫）；`is_model_allowed` 和 `_default_model` 呼叫 `scraper.get_free_models`，快取過期時會在事件迴圈上做最長 30 秒的同步 HTTP 請求
+- **發現於**：B12 之後的追查與 V1-4c 審查（2026-11-08）
+- **重現**：免費模型快取（24 小時）過期，且 OpenRouter 回應很慢時，那次 `/chat` 期間所有請求都會停住
+- **預期**：事件迴圈不被同步 I/O 擋住
+- **影響**：每天最多發生一次，平常的 DB 呼叫只有幾毫秒。屬於穩定性問題，不是資料外洩
+- **修正方向**：這些端點改成 `def`，或把同步呼叫包進 `asyncio.to_thread`。可以放到 V1 之後
+- **狀態**：未修
