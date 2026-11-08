@@ -41,7 +41,7 @@ function LoginPage() {
   return (
     <div className="h-screen supports-[height:100dvh]:h-dvh bg-[#E8F1F5] text-gray-800 font-sans flex items-center justify-center p-4">
       <div className="w-full max-w-[320px] flex flex-col items-center gap-4">
-        <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-[#7DB9DE] to-[#7B90D2] shadow-sm" aria-hidden="true" />
+        <img src="/favicon.svg" alt="" aria-hidden="true" className="w-12 h-12" />
         <h1 className="text-lg font-semibold text-gray-700">登入</h1>
         {errorMessage && (
           <p role="alert" className="w-full text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-center">
