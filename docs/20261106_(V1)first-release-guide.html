@@ -198,7 +198,7 @@ RETURNING count;   <span class="cm">-- 沒有回傳任何列 = 額度已滿</spa
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
         <tr><td>V1-2</td><td>每日額度、全站上限、依使用者限流、輸出上限；模型錯誤不再外洩給用戶；被拒絕時文字回到輸入框</td><td>完成，2026-11-06 使用者瀏覽器驗收通過，尚未部署。c157115、9c016f5</td></tr>
-        <tr><td>V1-3</td><td>模型選項端點、前端移除寫死的 Gemini</td><td>未開始</td></tr>
+        <tr><td>V1-3</td><td>模型選項端點、前端移除寫死的 Gemini；<code>ALLOWED_MODELS=none</code> 為真正的空白名單；沒有 <code>GOOGLE_API_KEY</code> 也能啟動</td><td>完成，2026-11-08 使用者瀏覽器驗收通過，尚未部署。5fe79e8、f41a7b9</td></tr>
         <tr><td>V1-4a</td><td>安全標頭、日誌上限</td><td>未開始</td></tr>
         <tr><td>V1-4b</td><td>備份、還原演練（使用者操作）</td><td>未開始</td></tr>
         <tr><td>V1-4c</td><td>上線前安全檢查</td><td>未開始</td></tr>
