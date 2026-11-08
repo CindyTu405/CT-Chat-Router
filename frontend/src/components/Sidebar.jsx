@@ -251,6 +251,7 @@ function ChatRenameRow({
         className="flex-1 bg-transparent text-sm text-gray-800 outline-none min-w-0"
         value={renameInput}
         onChange={(e) => setRenameInput(e.target.value)}
+        maxLength={200} // (B13) 與後端 MAX_TITLE_CHARS 一致
         autoFocus
         onKeyDown={(e) => {
           if (e.key === 'Enter') onSubmitRename(e);

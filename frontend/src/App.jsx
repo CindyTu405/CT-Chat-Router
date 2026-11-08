@@ -12,8 +12,21 @@ import { apiFetch } from './api';
 // (V1-2) 後端在送出前就拒絕（額度用完／太頻繁）時丟出；後端沒寫入 DB，畫面要還原到送出前的狀態
 class QuotaError extends Error {}
 
+// (B13) 與後端輸入上限一致
+const MAX_MESSAGE_CHARS = 20000;
+const MAX_TITLE_CHARS = 200;
+const MAX_ANCHOR_TEXT_CHARS = 5000;
+const TOO_LONG_MSG = "內容太長，上限 20,000 字";
+
 // 429 / 503 時依 detail.code 轉成 QuotaError；其他回應不做任何事
 async function throwIfQuotaError(response) {
+  // (B13) 安全網：後端 pydantic 驗證失敗（detail 為陣列，例如內容超長）→ 走同一條還原路徑
+  if (response.status === 422) {
+    let detail = null;
+    try { detail = (await response.json())?.detail; } catch { /* ignore */ }
+    if (Array.isArray(detail)) throw new QuotaError(TOO_LONG_MSG);
+    return;
+  }
   if (response.status !== 429 && response.status !== 503) return;
   let code = null;
   try {
@@ -285,6 +298,7 @@ function App({ user }) {
   const handleSend = async () => {
     if (!input.trim() || isLoading || !model) return;
 
+    if (input.length > MAX_MESSAGE_CHARS) { alert(TOO_LONG_MSG); return; } // (B13)
     const userMessageContent = input;
     setInput(""); // 馬上清空輸入框，提升體驗
     setIsLoading(true);
@@ -436,6 +450,7 @@ function App({ user }) {
   //        content 有值 → 先把 userMsg 改成新內容，body 帶 content；後端失敗（被拒或沒送出）→ userMsg 還原成舊內容
   const handleRetry = async (msg, { userMsg, content } = {}) => {
     if (isLoading || !msg?.id || !model) return;
+    if (content != null && content.length > MAX_MESSAGE_CHARS) { alert(TOO_LONG_MSG); return; } // (B13)
     const retryId = msg.id;
     const editing = content != null && !!userMsg;
     const oldUser = userMsg?.content; // (F9-2) 先記下舊內容（失敗還原用），必須在任何 setState 之前
@@ -620,12 +635,16 @@ function App({ user }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           anchor_message_id: anchorMessageId,
-          anchor_text: selectedText,
+          anchor_text: selectedText.slice(0, MAX_ANCHOR_TEXT_CHARS),
           anchor_start: anchorStart,
           anchor_end: anchorEnd,
         }),
       });
 
+      if (res.status === 429) {
+        alert("操作太頻繁，請稍後再試");
+        return;
+      }
       if (!res.ok) throw new Error("API Error");
 
       const data = await res.json();
@@ -679,6 +698,7 @@ function App({ user }) {
     const branch = branches.find(b => b.id === branchId);
     if (!branch || !branch.input.trim() || branch.isLoading || !model) return;
 
+    if (branch.input.length > MAX_MESSAGE_CHARS) { alert(TOO_LONG_MSG); return; } // (B13)
     const content = branch.input;
     const parentId = branch.messages.length > 0
       ? branch.messages[branch.messages.length - 1].id
@@ -793,6 +813,7 @@ function App({ user }) {
   const retryBranchMessage = async (branchId, msg, { userMsg, content } = {}) => {
     const branch = branches.find(b => b.id === branchId);
     if (!branch || branch.isLoading || !msg?.id || !model) return;
+    if (content != null && content.length > MAX_MESSAGE_CHARS) { alert(TOO_LONG_MSG); return; } // (B13)
     const retryId = msg.id;
     const editing = content != null && !!userMsg;
     const oldUser = userMsg?.content; // (F9-2) 先記下舊內容，必須在任何 setState 之前
@@ -921,11 +942,15 @@ function App({ user }) {
     if (!renameInput.trim()) return;
 
     try {
-        await apiFetch(`/chats/${renamingId}/title`, {
+        const renameRes = await apiFetch(`/chats/${renamingId}/title`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: renameInput })
         });
+        if (renameRes.status === 429) { // (B13)
+          alert("操作太頻繁，請稍後再試");
+          return;
+        }
         
         // ★★★ 新增這段：如果改名的剛好是當前正在看的對話，同步更新畫面上方的標題 ★★★
         if (messages.length > 0 && messages[0].id === renamingId) {
