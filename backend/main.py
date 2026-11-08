@@ -186,12 +186,16 @@ async def run_generation(
             except Exception:
                 logger.exception("(V1-2) 退回額度失敗 user=%s day=%s", usage_user_id, usage_day)
     finally:
-        buf["done"] = True
-        # (B12) 寫回失敗只記 log，仍要往下做緩衝保留與清理
+        # (B17) 先寫回 DB 再標記 done：串流不能在 DB 還沒有回覆時就回報完成。
+        # done 放在內層 finally：寫回失敗或 task 被取消也一定會設，否則讀取端會一直等。
         try:
-            await asyncio.to_thread(_persist_generation, ai_msg_id, buf["text"])
-        except Exception:
-            logger.exception("(B12) 寫回生成結果失敗 ai_msg=%s", ai_msg_id)
+            # (B12) 寫回失敗只記 log，仍要往下做緩衝保留與清理
+            try:
+                await asyncio.to_thread(_persist_generation, ai_msg_id, buf["text"])
+            except Exception:
+                logger.exception("(B12) 寫回生成結果失敗 ai_msg=%s", ai_msg_id)
+        finally:
+            buf["done"] = True
         # 寫入完成後保留緩衝一小段時間，讓正在續讀的前端能讀到 done
         await asyncio.sleep(BUFFER_RETENTION_SECONDS)
         # (G6-1) 只清「自己放進去的那一份」：重傳時同一個 id 可能已經有新緩衝，不能誤清
