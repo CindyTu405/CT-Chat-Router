@@ -163,7 +163,7 @@ await asyncio.to_thread(退回次數)</code></pre>
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
         <tr><td>B12</td><td>串流前釋放連線；背景寫入移出事件迴圈</td><td>完成（2bf164c），2026-11-08 驗收通過：30 個同時生成時無關請求 2 秒內回應，修正前同一測試逾時；尚未部署</td></tr>
-        <tr><td>B17</td><td>先寫回資料庫，再設 done</td><td>未開始</td></tr>
+        <tr><td>B17</td><td>先寫回資料庫，再設 done</td><td>完成（10e63c1），2026-11-09 <code>quota_harness</code> 連跑 15 次通過（修正前 5 次失敗 1 次），<code>pool</code>、<code>regenerate</code>、<code>limits</code>、<code>branch_entries</code> 通過；尚未部署</td></tr>
       </table>
     </div>
   </section>
