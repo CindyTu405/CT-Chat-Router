@@ -152,6 +152,7 @@ await asyncio.to_thread(退回次數)</code></pre>
         <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
         <tr><td>1</td><td>什麼時候修</td><td>V1-4a 之前，併入這批一起部署</td><td>2026-11-08 確認</td></tr>
         <tr><td>2</td><td>連線池大小</td><td>維持 15 條，不調整</td><td>2026-11-08 確認</td></tr>
+        <tr><td>3</td><td>B17 要不要另寫教學</td><td>不另寫，補在本教學第 9 節</td><td>2026-11-09 確認</td></tr>
       </table>
     </div>
   </section>
@@ -162,16 +163,35 @@ await asyncio.to_thread(退回次數)</code></pre>
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
         <tr><td>B12</td><td>串流前釋放連線；背景寫入移出事件迴圈</td><td>完成（2bf164c），2026-11-08 驗收通過：30 個同時生成時無關請求 2 秒內回應，修正前同一測試逾時；尚未部署</td></tr>
+        <tr><td>B17</td><td>先寫回資料庫，再設 done</td><td>未開始</td></tr>
       </table>
     </div>
   </section>
 
   <section class="card">
-    <h2><span class="num">9</span>練習</h2>
+    <h2><span class="num">9</span>後續問題 B17：先說「完成」，才寫回資料庫</h2>
+    <p>B12 把寫回資料庫改到別的執行緒之後，出現一個新的時序問題。現在 <code>run_generation</code> 結束時的順序是：</p>
+    <pre><code>buf["done"] = True                          <span class="cm"># 1. 告訴讀緩衝的串流：結束了</span>
+await asyncio.to_thread(寫回訊息)           <span class="cm"># 2. 在別的執行緒寫回資料庫</span></code></pre>
+    <p>B12 之前寫回是同步的：第 1 步之後事件迴圈被第 2 步擋住，串流要等寫完才有機會看到 <code>done</code>，所以順序剛好是對的。改成 <code>to_thread</code> 之後，事件迴圈在等待期間會去跑其他工作，串流看到 <code>done</code> 就結束了，寫入卻可能還沒完成。</p>
+    <p>這時前端如果馬上重新載入對話，AI 回覆會是空的。<code>quota_harness</code> 的 08e 測的就是這件事，連跑 5 次失敗 1 次。</p>
+    <div class="tip"><b>修法：</b>對調順序，先寫回，再設 <code>done</code>。寫回失敗只記 log，<code>done</code> 照樣要設，否則前端會一直等。串流會晚幾毫秒結束，使用者感覺不到。</div>
+    <pre><code><span class="cm"># 示意，實際程式由 implementer 撰寫</span>
+try:
+    await asyncio.to_thread(寫回訊息)
+except Exception:
+    記 log
+buf["done"] = True</code></pre>
+    <p><b>驗收：</b><code>quota_harness</code> 連跑 10 次都 <code>ALL PASS</code>；<code>pool_harness</code>、<code>regenerate_harness</code> 仍然通過。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>練習</h2>
     <ol>
       <li>為什麼 14 個同時生成完全正常，16 個卻整站卡住，而不是慢慢變慢？</li>
       <li>只做修法 2、不做修法 1，會發生什麼事？</li>
       <li>串流開始前呼叫 <code>session.close()</code> 之後，為什麼不能再讀 ORM 物件的欄位？</li>
+      <li>為什麼 B12 之前「先設 done 再寫回」不會出錯，改成 <code>to_thread</code> 之後才出錯？</li>
     </ol>
   </section>
 
