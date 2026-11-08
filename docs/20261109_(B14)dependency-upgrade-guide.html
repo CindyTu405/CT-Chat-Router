@@ -166,8 +166,8 @@ uv lock --upgrade-package starlette --upgrade-package fastapi \
     <div class="table-wrap">
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
-        <tr><td>B14-1</td><td>後端鎖檔升級、harness、pip-audit</td><td>未開始</td></tr>
-        <tr><td>B14-2</td><td>前端 npm audit fix、build</td><td>未開始</td></tr>
+        <tr><td>B14-1</td><td>後端鎖檔升級、harness、pip-audit</td><td>完成（d834095、8ab8317）：starlette 1.10.0、fastapi 0.162.2、python-multipart 0.0.33、cryptography 50.0.2；掃描後還有 pyasn1、httplib2、python-dotenv 三個小版本漏洞，一併升級。<code>pip-audit</code> 0 筆，7 個 harness 全部通過，程式碼不用改；待瀏覽器驗收</td></tr>
+        <tr><td>B14-2</td><td>前端 npm audit fix、build</td><td>完成（135dd28）：vite 7.3.7、source-map-js 1.2.2，<code>npm audit</code> 0 筆，build 通過</td></tr>
       </table>
     </div>
   </section>
