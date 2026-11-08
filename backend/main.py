@@ -146,6 +146,17 @@ def refund_daily_quota(user_id: uuid.UUID, day: date) -> None:
         db_session.commit()
 
 
+def _persist_generation(ai_msg_id: str, text: str) -> None:
+    """(B12) 同步寫回生成結果。由 run_generation 用 asyncio.to_thread 呼叫，不在事件迴圈上取連線。
+    用獨立 session，避免依賴請求的 session 生命週期。"""
+    with Session(engine) as db_session:
+        msg = db_session.get(Message, uuid.UUID(ai_msg_id))
+        if msg:
+            msg.content = text
+            db_session.add(msg)
+            db_session.commit()
+
+
 async def run_generation(
     ai_msg_id: str,
     message: str,
@@ -155,7 +166,8 @@ async def run_generation(
     usage_day: date | None = None,
 ):
     """背景執行一次 AI 生成：邊收 chunk 邊寫入緩衝，完成後寫回 DB。
-    (V1-2) 失敗時：不記錄訊息內容、只給固定提示；若一個字都還沒產出，退回扣款的 1 次。"""
+    (V1-2) 失敗時：不記錄訊息內容、只給固定提示；若一個字都還沒產出，退回扣款的 1 次。
+    (B12) 退次數與寫回都是阻塞的 DB 呼叫，改用 asyncio.to_thread，避免卡住事件迴圈。"""
     buf = GENERATIONS[ai_msg_id]
     try:
         if model.startswith("gemini"):
@@ -170,18 +182,16 @@ async def run_generation(
         buf["text"] += GENERATION_FAILED_TEXT
         if not had_output and usage_user_id is not None and usage_day is not None:
             try:
-                refund_daily_quota(usage_user_id, usage_day)
+                await asyncio.to_thread(refund_daily_quota, usage_user_id, usage_day)
             except Exception:
                 logger.exception("(V1-2) 退回額度失敗 user=%s day=%s", usage_user_id, usage_day)
     finally:
         buf["done"] = True
-        # 用獨立 session 寫回，避免依賴請求的 session 生命週期
-        with Session(engine) as db_session:
-            msg = db_session.get(Message, uuid.UUID(ai_msg_id))
-            if msg:
-                msg.content = buf["text"]
-                db_session.add(msg)
-                db_session.commit()
+        # (B12) 寫回失敗只記 log，仍要往下做緩衝保留與清理
+        try:
+            await asyncio.to_thread(_persist_generation, ai_msg_id, buf["text"])
+        except Exception:
+            logger.exception("(B12) 寫回生成結果失敗 ai_msg=%s", ai_msg_id)
         # 寫入完成後保留緩衝一小段時間，讓正在續讀的前端能讀到 done
         await asyncio.sleep(BUFFER_RETENTION_SECONDS)
         # (G6-1) 只清「自己放進去的那一份」：重傳時同一個 id 可能已經有新緩衝，不能誤清
@@ -456,6 +466,7 @@ async def chat_endpoint(
 
     # (P3b-A1) 生成交給背景 task；連線只負責讀緩衝。
     ai_id = str(ai_msg.id)
+    user_msg_id = str(user_msg.id)
     GENERATIONS[ai_id] = {"text": "", "done": False}
     # 背景 task 不能拿請求 session 的 ORM 物件（commit 後會過期），先轉成純資料
     history_plain = [SimpleNamespace(role=m.role, content=m.content) for m in history]
@@ -463,6 +474,8 @@ async def chat_endpoint(
         ai_id, payload.message, history_plain, payload.model,
         usage_user_id=user_id, usage_day=usage_day,
     ))
+    # (B12) 串流可能持續數十秒；這裡先還回連線。之後的回應只用上面的純值，不碰 ORM 物件。
+    session.close()
 
     async def stream_generator():
         # 用續讀端點的同一套邏輯：從 0 開始讀到 done
@@ -474,7 +487,7 @@ async def chat_endpoint(
         stream_generator(),
         media_type="text/plain",
         headers={"X-Message-Id": ai_id,
-                "X-User-Message-Id": str(user_msg.id),  # 讓前端把樂觀顯示的 user 訊息補上真 id
+                "X-User-Message-Id": user_msg_id,  # 讓前端把樂觀顯示的 user 訊息補上真 id
                 "X-Accel-Buffering": "no",      # ★ 叫 Nginx 絕對不要緩衝
                 "Cache-Control": "no-cache",    # ★ 不要快取
                 "Connection": "keep-alive"      # ★ 保持連線開啟
@@ -519,12 +532,16 @@ async def stream_message(
     if msg.role != "assistant":
         raise HTTPException(status_code=404, detail="not found")
 
+    # (B12) 先取出需要的值再關 session：串流期間不能佔著連線，之後也不能再碰 ORM 物件
     buf_key = str(msg.id)
+    saved_content = msg.content
+    session.close()
+
     if buf_key in GENERATIONS:
         return StreamingResponse(_read_buffer(buf_key, max(offset, 0)), media_type="text/plain",
                                  headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    return StreamingResponse(iter([msg.content[max(offset, 0):]]), media_type="text/plain",
+    return StreamingResponse(iter([saved_content[max(offset, 0):]]), media_type="text/plain",
                              headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 @app.post("/messages/{message_id}/regenerate")
@@ -630,6 +647,8 @@ async def regenerate_message(
     ))
 
     # h. 串流：與 /chat 相同，讀緩衝直到 done
+    # (B12) 回傳前先還連線；下面只用上面的純值（ai_id、orphaned_ids）
+    session.close()
     return StreamingResponse(
         _read_buffer(ai_id, 0),
         media_type="text/plain",
