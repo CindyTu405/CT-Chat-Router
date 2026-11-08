@@ -5,16 +5,10 @@ import { ChevronDown, Sparkles } from 'lucide-react';
 // P4：原生 <select> 改為自訂下拉選單，面板以觸發按鈕右下角為錨點（top:100%; right:0）展開，
 // 下方空間不足時自動向上翻轉；保留原本 optgroup 分群組、自訂輸入模式與 onChange 行為。
 // 狀態 model / isCustomModel 由 App 管理，本元件只負責渲染與切換。
+// (V1-3) presets / defaultModel 由後端 GET /api/model-options 提供（見 App）：
+//   presets 以 value 開頭為 gemini 者放「Google (原生 API)」，其餘放「預設」；空群組不顯示。
 
-const DEFAULT_MODEL_VALUE = 'gemini-2.5-flash-lite';
-
-// 固定分群組（對應原本原生 <select> 的 optgroup）
-const presetGroups = () => [
-  {
-    label: 'Google (原生 API)',
-    options: [{ value: DEFAULT_MODEL_VALUE, label: 'Gemini 2.5 Flash Lite' }],
-  },
-];
+const NO_PRESETS = []; // 固定參考，避免預設值每次 render 都變動
 
 function ModelSelector({
   model,
@@ -23,6 +17,8 @@ function ModelSelector({
   setIsCustomModel,
   freeModels,
   freeModelsLoading,
+  presets = NO_PRESETS,
+  defaultModel = null,
 }) {
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false); // 下方空間不足時向上展開
@@ -40,8 +36,13 @@ function ModelSelector({
         ? [{ value: '__empty', label: '暫無免費模型', disabled: true }]
         : freeModels.map((m) => ({ value: m.id, label: m.name }));
 
+    const toOption = (p) => ({ value: p.value, label: p.label });
+    const googlePresets = presets.filter((p) => p.value.startsWith('gemini')).map(toOption);
+    const otherPresets = presets.filter((p) => !p.value.startsWith('gemini')).map(toOption);
+
     const groups = [
-      ...presetGroups(),
+      ...(googlePresets.length ? [{ label: 'Google (原生 API)', options: googlePresets }] : []),
+      ...(otherPresets.length ? [{ label: '預設', options: otherPresets }] : []),
       { label: 'OpenRouter (需儲值/免費)', options: openRouterOptions },
       { label: '進階功能', options: [{ value: 'custom', label: '✨ 自訂輸入 (貼上模型 ID)...' }] },
     ];
@@ -52,7 +53,7 @@ function ModelSelector({
       g.options.forEach((o) => list.push({ kind: 'option', ...o }));
     });
     return list;
-  }, [freeModels, freeModelsLoading]);
+  }, [presets, freeModels, freeModelsLoading]);
 
   // 只有可選中的項目參與鍵盤導航（跳過群組標題與 disabled 佔位項）
   const selectableIndexes = useMemo(
@@ -260,7 +261,7 @@ function ModelSelector({
             <button
               onClick={() => {
                 setIsCustomModel(false);
-                setModel(DEFAULT_MODEL_VALUE); // 取消時切回預設模型
+                setModel(defaultModel || ''); // 取消時切回預設模型（後端沒有可用預設時清空）
               }}
               className="text-gray-500 hover:text-gray-800 text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded transition cursor-pointer"
             >

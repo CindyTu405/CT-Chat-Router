@@ -42,7 +42,11 @@ function App({ user }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [historyList, setHistoryList] = useState([]); // 側邊欄列表
-  const [model, setModel] = useState("gemini-2.5-flash-lite");
+  // (V1-3) 模型初始值由後端 /api/model-options 決定（見下方 effect）；載入前為空，送出會被停用
+  const [model, setModel] = useState("");
+  const [presets, setPresets] = useState([]); // 後端 ALLOWED_MODELS 可直接選的項目
+  const [defaultModel, setDefaultModel] = useState(null); // 後端決定的預設模型，null = 沒有可用模型
+  const [optionsLoading, setOptionsLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [freeModels, setFreeModels] = useState([]);
   const [freeModelsLoading, setFreeModelsLoading] = useState(true);
@@ -106,6 +110,28 @@ function App({ user }) {
       .then(data => setFreeModels(data.models || []))
       .catch(err => console.error("無法載入免費模型:", err))
       .finally(() => setFreeModelsLoading(false));
+  }, []);
+
+  // (V1-3) 載入模型選項：presets、預設模型都由後端決定；失敗時視為沒有 presets 且沒有預設
+  useEffect(() => {
+    apiFetch(`/api/model-options`)
+      .then(res => {
+        if (!res.ok) throw new Error(`model-options ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        const nextPresets = data.presets || [];
+        const nextDefault = data.default_model || null;
+        setPresets(nextPresets);
+        setDefaultModel(nextDefault);
+        setModel(prev => prev || nextDefault || "");
+      })
+      .catch(err => {
+        console.error("無法載入模型選項:", err);
+        setPresets([]);
+        setDefaultModel(null);
+      })
+      .finally(() => setOptionsLoading(false));
   }, []);
   // 2. 載入特定對話 (點擊側邊欄觸發)
 
@@ -257,7 +283,7 @@ function App({ user }) {
 
   // 4. 發送訊息 (核心邏輯)
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !model) return;
 
     const userMessageContent = input;
     setInput(""); // 馬上清空輸入框，提升體驗
@@ -409,7 +435,7 @@ function App({ user }) {
   // (F9-2) 第二參數 { userMsg, content }：編輯最後一則 user 訊息後重新生成（同一個函式，不另寫串流）
   //        content 有值 → 先把 userMsg 改成新內容，body 帶 content；後端失敗（被拒或沒送出）→ userMsg 還原成舊內容
   const handleRetry = async (msg, { userMsg, content } = {}) => {
-    if (isLoading || !msg?.id) return;
+    if (isLoading || !msg?.id || !model) return;
     const retryId = msg.id;
     const editing = content != null && !!userMsg;
     const oldUser = userMsg?.content; // (F9-2) 先記下舊內容（失敗還原用），必須在任何 setState 之前
@@ -651,7 +677,7 @@ function App({ user }) {
   // (P2-10) 分支還沒有任何訊息時，第一則要是 anchor 的子節點
   const sendBranchMessage = async (branchId) => {
     const branch = branches.find(b => b.id === branchId);
-    if (!branch || !branch.input.trim() || branch.isLoading) return;
+    if (!branch || !branch.input.trim() || branch.isLoading || !model) return;
 
     const content = branch.input;
     const parentId = branch.messages.length > 0
@@ -766,7 +792,7 @@ function App({ user }) {
   // (F9-2) 第三參數 { userMsg, content }：同 handleRetry，編輯分支最後一則 user（樂觀更新、被拒時還原）
   const retryBranchMessage = async (branchId, msg, { userMsg, content } = {}) => {
     const branch = branches.find(b => b.id === branchId);
-    if (!branch || branch.isLoading || !msg?.id) return;
+    if (!branch || branch.isLoading || !msg?.id || !model) return;
     const retryId = msg.id;
     const editing = content != null && !!userMsg;
     const oldUser = userMsg?.content; // (F9-2) 先記下舊內容，必須在任何 setState 之前
@@ -981,6 +1007,9 @@ function App({ user }) {
           setIsCustomModel={setIsCustomModel}
           freeModels={freeModels}
           freeModelsLoading={freeModelsLoading}
+          presets={presets}
+          defaultModel={defaultModel}
+          optionsLoading={optionsLoading}
         />
 
       </div>
@@ -996,6 +1025,9 @@ function App({ user }) {
           setIsCustomModel={setIsCustomModel}
           freeModels={freeModels}
           freeModelsLoading={freeModelsLoading}
+          presets={presets}
+          defaultModel={defaultModel}
+          optionsLoading={optionsLoading}
           // (E4) 分支列表：目前對話的分支、主對話訊息（排序用）、捲動容器、開啟分支
           branchList={branchList}
           messages={messages}

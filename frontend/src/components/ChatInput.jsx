@@ -11,13 +11,19 @@ const CHAT_INPUT_VARIANTS = {
 
 // 底部輸入區塊：自動高度的輸入框、送出按鈕、Enter 行為處理、下方的模型選單
 // (G3) variant：'main'（預設）或 'branch'，決定下方提示文字；placeholder 可自訂輸入框提示。
+// (V1-3) model 為空（沒有可用模型）時停用送出；Enter 也會經過 onSend，由父層 handler 提早 return。
+// 選項載入完成、沒有預設模型且不在自訂模式時，輸入框顯示「暫無可用模型」。
 function ChatInput({
   input, setInput, isLoading, onSend,
   model, setModel, isCustomModel, setIsCustomModel, freeModels, freeModelsLoading,
+  presets, defaultModel, optionsLoading,
   variant = 'main', placeholder = '輸入訊息...',
 }) {
   const v = CHAT_INPUT_VARIANTS[variant] || CHAT_INPUT_VARIANTS.main;
   const textareaRef = useRef(null);
+  const noModel = !model;
+  const showNoModelPlaceholder = !optionsLoading && !defaultModel && !isCustomModel;
+  const effectivePlaceholder = showNoModelPlaceholder ? '暫無可用模型' : placeholder;
 
   // 監聽 input 內容，自動調整輸入框高度
   useEffect(() => {
@@ -50,14 +56,14 @@ function ChatInput({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={effectivePlaceholder}
           rows="1"
           className="w-full bg-white text-gray-800 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-[#51A8DD]/40 border border-gray-200 group-hover:border-[#7DB9DE] transition resize-none shadow-sm max-h-[224px] overflow-y-auto"
           style={{ minHeight: '56px' }}
         />
         <button 
           onClick={onSend}
-          disabled={isLoading || !input.trim()}
+          disabled={isLoading || !input.trim() || noModel}
           className="absolute right-2 bottom-[15px] p-2.5 bg-[#51A8DD] hover:bg-[#3D9AD1] rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md shadow-[#51A8DD]/25"
         >
           <Send className="w-5 h-5 text-white" />
@@ -71,6 +77,8 @@ function ChatInput({
           setIsCustomModel={setIsCustomModel}
           freeModels={freeModels}
           freeModelsLoading={freeModelsLoading}
+          presets={presets}
+          defaultModel={defaultModel}
         />
         <span className="text-xs text-gray-400 font-medium">
           {v.hint}
