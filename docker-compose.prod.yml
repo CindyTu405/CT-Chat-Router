@@ -16,6 +16,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   api:
     build: ./backend
@@ -43,6 +48,11 @@ services:
       db:
         condition: service_healthy
     # 不開 ports,由 nginx 代理
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   web:
     build: ./frontend
@@ -56,6 +66,11 @@ services:
       - /etc/fluentbranch/tls:/etc/nginx/tls:ro
     depends_on:
       - api
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
   postgres_data:
