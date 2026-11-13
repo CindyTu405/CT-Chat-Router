@@ -881,7 +881,7 @@ H3／H4 驗收：教學第 6 節「驗收指令」。
 
 ## G2 第二段：訪客模式（S-U3）＋ OpenRouter 授權連線（BYOK）— 決定紀錄
 
-狀態：需求討論中。下表「已確認」的項目是使用者 2026-11-14 逐項回答的；「提案」還沒確認。規格、任務拆分、教學文件都還沒寫，**尚未同意開始實作**。分支 `feat/landing-guest`。
+狀態：規格與教學文件已寫（2026-11-14），**等使用者讀完教學說「開始」才動工**。下表「已確認」的項目是使用者 2026-11-14 逐項回答的；「提案」的項目使用者回覆「ok 請繼續」、未提出修改。分支 `feat/landing-guest`。
 
 **現況事實（使用者 2026-11-14 說明）**：正式站 VM 的環境變數設定為 OpenRouter 免費模型，VM 上已經沒有 Google 金鑰；本機的 Google 金鑰只用來測試串流。設計額度與模型清單時，正式站視為只有 OpenRouter。
 
@@ -899,10 +899,129 @@ H3／H4 驗收：教學第 6 節「驗收指令」。
 | 10 | 已連結者的限制 | 不限則數、可用任何模型 ID；仍保留每分鐘速率限制 | 已確認 |
 | 11 | 全站每日上限 | 平台金鑰只服務訪客與未連結者，兩者共用全站上限（現為 900），不另外切一塊給訪客 | 提案（由 #7、#8 推得） |
 | 12 | 訪客身分 | 伺服器建立訪客使用者＋httpOnly cookie，沿用 `user_id` 擁有者檢查；IP 只用於限流，以雜湊保存 | 提案（BACKLOG S-U3 的方向） |
-| 13 | 使用者金鑰保存 | OAuth 換到的金鑰用 Fernet 加密存資料庫，加密金鑰放 VM `.env`；不回傳前端、不寫 log | 提案（PLAN_v2 既有原則） |
+| 13 | 使用者金鑰保存 | OAuth 換到的金鑰用 Fernet 加密存資料庫，加密金鑰放 VM `.env`；不回傳前端、不寫 log | 已確認（2026-11-14 討論安全性後） |
 | 14 | 使用者金鑰失效 | 顯示錯誤並請使用者重新連結；不悄悄改用平台金鑰 | 提案 |
 | 15 | 機器人驗證 | 初版不做（靠額度與 IP 上限），之後視濫用情況再加 | 提案 |
 | 16 | 隱私權說明 | 補上訪客資料保留 7 天、IP 雜湊用途、OpenRouter 連線時金鑰的保存方式 | 提案 |
 | 17 | 直連 Gemini | 正式站不提供；程式中的直連路徑只留給本機測試 | 提案（依上面的現況事實） |
 
 注意：正式站在 V1-6 之前仍在 Cloudflare Access 後面，訪客模式要等拿掉它才對外有效。
+
+### G2 規格與驗收（2026-11-14 擬定，等使用者讀完教學說「開始」才動工）
+
+教學與決策表：`docs/20261114_(G2)guest-mode-openrouter-connect-guide.html`。提案項目（#11、#12、#14–#17）使用者 2026-11-14 回覆「ok 請繼續」，未提出修改；#13 經討論後確認（加密存資料庫、加密金鑰放 `.env`）。
+
+OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cases/oauth-pkce`（2026-11-14 讀取）：授權頁 `https://openrouter.ai/auth`，參數 `callback_url`、`code_challenge`、`code_challenge_method=S256`、`state`（原樣帶回）、`key_label`；換金鑰 `POST https://openrouter.ai/api/v1/auth/keys`，body `code`、`code_verifier`、`code_challenge_method`，回應 `key`；授權碼 10 分鐘內有效、只能用一次；不需要 client id／secret；`callback_url` 可用任何 port 的 localhost。文件沒有說金鑰是否過期、有沒有 refresh token。
+
+**名詞**
+- 訪客：`user.oauth_provider == "guest"` 的使用者列（`oauth_sub` 為隨機值、`email` 為空）。沿用現有 `User`、`AuthSession`、`session` cookie 與 `get_current_user`，所有擁有者檢查不用改。
+- 試用者：訪客，或已登入但沒有 `openrouter_credential` 列的使用者。用平台金鑰、受每日額度與全站上限限制、只能用白名單與免費模型。
+- 已連結者：已登入且有 `openrouter_credential` 列。用自己的金鑰、不扣每日額度、不計入全站上限、可用任何模型 ID、一律走 OpenRouter（不走直連 Gemini）。
+
+**資料表（Alembic，一支 migration）**
+- `user.last_active_at`（timestamp，nullable）：每次成功扣額度或已連結者送出訊息時更新。
+- `guest_ip_usage`：主鍵 `(ip_hash, day)`；`guests_created int default 0`、`messages int default 0`。`ip_hash = HMAC-SHA256(key=IP_HASH_SECRET, msg=IP)` 的 hex；不存原始 IP。
+- `openrouter_credential`：`user_id` 主鍵＋外鍵 `ON DELETE CASCADE`；`key_encrypted text`；`created_at`。
+
+**環境變數**（`docker-compose.prod.yml` 與 `.env` 範例同步）
+- `DAILY_MESSAGE_LIMIT`：預設由 20 改為 10（試用者每日則數）。
+- `GUEST_IP_DAILY_GUESTS`（預設 10）、`GUEST_IP_DAILY_MESSAGES`（預設 100）、`GUEST_RETENTION_DAYS`（預設 7）。
+- `IP_HASH_SECRET`：未設定時退回 `SESSION_SECRET_KEY`。
+- `CREDENTIAL_ENCRYPTION_KEY`：Fernet 金鑰。未設定時 `/auth/openrouter/connect` 回 `openrouter_error=unavailable`，不得用預設值或明碼儲存。
+- `SITE_DAILY_MESSAGE_LIMIT` 不變（900），試用者共用。
+
+**後端行為**
+1. `POST /auth/guest`（限流：每 IP 每分鐘 5 次）
+   - 已帶有效 `session` cookie → 200，不建立新身分。
+   - `Origin` 標頭存在且不在 `CORS_ORIGINS` → 403。
+   - 該 IP 今日 `guests_created >= GUEST_IP_DAILY_GUESTS` → 429 `{"code":"guest_ip_limit"}`，不建立任何列。計數用單一 `INSERT ... ON CONFLICT DO UPDATE ... WHERE guests_created < :limit RETURNING`（同 `charge_daily_quota` 的寫法，避免併發超發）。
+   - 否則建立訪客 `User`＋`AuthSession`，設定 `session` cookie（同現有屬性），回 200。
+2. `GET /auth/me` 回 `{email, provider, is_guest, openrouter_connected, guest_claim}`；`guest_claim` 為 `null` 或 `{"chat_count": n}`（見第 5 點）。不回 id、不回金鑰任何片段。
+3. 額度（`charge_daily_quota` 擴充，`/chat` 與 `regenerate` 共用）
+   - 已連結者：不檢查全站上限、不寫 `daily_usage`，只更新 `last_active_at`。
+   - 試用者：先全站上限（不變）→ 訪客另外扣 `guest_ip_usage.messages`（超過 `GUEST_IP_DAILY_MESSAGES` → 429 `guest_ip_limit`）→ 個人每日額度（不變）。任何一步失敗都不留下前面步驟的扣款（同一交易，失敗時 rollback）。
+   - 生成一個字都沒產出就失敗時，退個人額度也要退 IP 計數。
+4. 模型：試用者維持 `is_model_allowed`（白名單＋免費清單）。已連結者跳過白名單，只檢查長度（現有 `max_length=200`）；`run_generation` 對已連結者一律呼叫 OpenRouter，並帶入該使用者的金鑰。`GET /api/model-options` 多回 `allow_custom: bool`（已連結者為 true）。
+5. 登入時的訪客處理（`/auth/{provider}/callback`）
+   - 請求帶有有效的訪客 `session` cookie 時：把訪客今日 `daily_usage.count` 加到登入帳號今日的列上（`LEAST(合計, DAILY_MESSAGE_LIMIT)`），避免「試用 10 則再登入又 10 則」；把訪客的原始 token 改放到 httpOnly cookie `guest_session`（`max_age` 1 天，其餘屬性同 `session`），再發登入帳號的 `session` cookie。
+   - `guest_claim`：`guest_session` cookie 有效、指向訪客、目前登入者不是訪客、且該訪客至少有一個對話 root 時，`/auth/me` 回 `{"chat_count": n}`；訪客沒有對話時後端直接刪除該訪客並清掉 cookie。
+   - `POST /auth/guest-claim`，body `{"action": "merge" | "discard"}`：必須同時有登入帳號的 `session` 與有效的 `guest_session`（兩個 cookie 都由伺服器查表，不接受前端傳任何使用者或對話 id）；登入者是訪客 → 403。`merge`：把訪客的 `message.user_id`、`branch.user_id` 全部改成登入帳號（單一交易）。兩種動作最後都刪除訪客的 `auth_session`、`daily_usage`、`user` 列並清掉 `guest_session` cookie。重複呼叫 → 409 `no_pending_claim`。
+6. 保留期限：`lifespan` 啟動一個背景 task，每小時執行一次清理（阻塞的 DB 呼叫用 `asyncio.to_thread`）：`oauth_provider == "guest"` 且 `COALESCE(last_active_at, created_at) < now - GUEST_RETENTION_DAYS` 的訪客，連同其訊息、分支、`auth_session`、`daily_usage` 一併刪除；`guest_ip_usage` 刪除 2 天前的列。清理函式可單獨呼叫（harness 用）。
+7. OpenRouter 連結（新檔 `backend/openrouter_connect.py`，router 掛在 `/auth/openrouter`）
+   - `GET /auth/openrouter/connect`：訪客 → 導回 `/?openrouter_error=login_required`；未設定 `CREDENTIAL_ENCRYPTION_KEY` → `openrouter_error=unavailable`。產生 `code_verifier`（`secrets.token_urlsafe(64)`）與 `state`（`secrets.token_urlsafe(32)`），連同目前 `user.id` 存進 Starlette session（`SessionMiddleware` 已存在），303 導向 `https://openrouter.ai/auth?callback_url=<本站 callback>&code_challenge=<S256>&code_challenge_method=S256&state=<state>&key_label=FluentBranch`。
+   - `GET /auth/openrouter/callback`：必須已登入且非訪客；session 中的 `state` 與查詢參數用 `hmac.compare_digest` 比對，且 session 中的 user id 等於目前登入者；不符 → `openrouter_error=state_mismatch`。session 中的 `state`／`code_verifier` 讀出後立即移除（一次性）。用 `httpx.AsyncClient(timeout=10)` 呼叫換金鑰端點；非 200 或沒有 `key` → `openrouter_error=exchange_failed`。成功 → Fernet 加密後 upsert `openrouter_credential`，303 導回 `/?openrouter=connected`。
+   - `DELETE /auth/openrouter`：刪除自己的 `openrouter_credential` 列，回 200；沒有列也回 200。
+   - log 規則：任何路徑都不得記錄 `code`、`code_verifier`、`state`、金鑰、OpenRouter 的回應內容；失敗只記例外型別或狀態碼。
+8. 使用自己的金鑰生成：`/chat`、`regenerate` 在請求的 DB session 內解密金鑰，以參數傳給背景 task（只存在記憶體）。`openrouter_chat_stream(..., api_key=None)`：有 `api_key` 時用該金鑰建立 client，沒有時用平台 client。
+   - `openai.AuthenticationError`（401）→ 刪除該使用者的 `openrouter_credential`，回覆內容為固定文字「⚠️ 你的 OpenRouter 連結已失效，請重新連結」。
+   - HTTP 402 → 固定文字「⚠️ 你的 OpenRouter 帳號額度不足」，不刪除連結。
+   - 其餘錯誤 → 現有的固定文字。任何情況都不得改用平台金鑰重試。
+   - 解密失敗（加密金鑰被更換）→ 視同連結失效：刪除該列、回 409 `{"code":"openrouter_reconnect_required"}`，不建立訊息。
+
+**前端行為**
+1. 首頁「開始使用」（三處）→ `POST /auth/guest` → 成功後重新取得 `/auth/me` 進入聊天；429 `guest_ip_limit` → 顯示登入頁並提示「這個網路今天的試用名額已滿，請登入後使用」。首頁頂列「登入」仍進登入頁。
+2. `AuthGate`：訪客在聊天中按「登入」→ 顯示登入頁（「← 返回」回到聊天）。`App` 收 `onRequestLogin`。
+3. 側欄底部帳號區：訪客顯示「試用中」與「登入」按鈕（不顯示登出）；已登入顯示原本的帳號列，下方多一列 OpenRouter 狀態：未連結 →「連結 OpenRouter」（連到 `${API_URL}/auth/openrouter/connect`）與一行說明「連結後不限則數，可用任何模型，費用由你的 OpenRouter 帳號支付」；已連結 →「已連結 OpenRouter」與「中斷連結」（確認後 `DELETE /auth/openrouter`）。
+4. 訪客對話搬移：`user.guest_claim` 非空時顯示一次對話框「要把試用時的 N 個對話移到這個帳號嗎？」，按鈕「移到帳號」／「刪除」（刪除需再確認一次）；完成後重新載入對話列表與 `/auth/me`。對話框不能用點背景關閉。
+5. 網址參數 `openrouter=connected` 與 `openrouter_error=<code>`：顯示固定文案後從網址移除（寫法同現有 `auth_error`；不認得的代碼用通用訊息，絕不顯示原始參數）。
+6. 模型選單：`allow_custom` 為 false 時不顯示自訂模型輸入。
+7. 額度訊息：訪客「今日試用額度已用完。登入並連結 OpenRouter 就能繼續使用」；已登入未連結「今日試用額度已用完。連結 OpenRouter 就能不限則數」；`guest_ip_limit`「這個網路今天的試用額度已滿，請登入後使用」；`openrouter_reconnect_required`「OpenRouter 連結已失效，請重新連結」。
+8. `frontend/public/privacy.html`：補上訪客（未登入）資料保留 7 天後自動刪除、IP 只以不可還原的雜湊值保存 2 天用於限制試用次數、連結 OpenRouter 時金鑰加密保存且可隨時中斷連結刪除、訪客用的 cookie；更新日期。
+
+**安全要求（每個任務的驗收都要涵蓋對應項目）**
+- 隔離：訪客 A 讀寫不到訪客 B 或任何登入帳號的對話（沿用 `get_owned_*`，harness 要有跨身分案例）。
+- 搬移只能把「自己瀏覽器持有 token 的那個訪客」搬到「目前登入的帳號」；沒有 `guest_session` 或 token 不對一律不動任何資料。
+- 金鑰：不出現在任何 API 回應、log、例外訊息；資料庫中只有密文（harness 直接查表比對）。金鑰只依 `get_current_user` 的 `user.id` 讀取。
+- 連結流程：`state` 一次性、綁定登入者；callback 換到的金鑰只會存到發起連結的那個帳號。
+- 訪客不能連結 OpenRouter、不能輸入自訂模型（後端白名單擋，不只前端隱藏）。
+- 首頁除 `GET /auth/me` 外仍不發請求；`POST /auth/guest` 只在使用者按下「開始使用」時發。
+- CSP 不變（OpenRouter 授權是整頁導向，不是 `connect-src`）。
+
+**任務**（每個任務各自 commit；harness 用臨時資料庫與假 LLM、假 OpenRouter，絕不呼叫真模型或真的 OpenRouter）
+
+| 任務 | 內容 | 檔案 | 驗收 |
+|---|---|---|---|
+| G2-1 | migration 與 model：`user.last_active_at`、`guest_ip_usage`、`openrouter_credential` | `backend/models.py`、`backend/alembic/versions/*` | `docker compose ps` 確認 chat_db；`cd backend && POSTGRES_DB=g2_tmp uv run alembic upgrade head` 成功；`uv run alembic downgrade -1 && uv run alembic upgrade head` 成功 |
+| G2-2 | 訪客身分：`POST /auth/guest`、`/auth/me` 新欄位、IP 雜湊、每 IP 每日訪客數上限 | `backend/auth_routes.py`、`backend/dev/guest_harness.py`（新） | `cd backend && POSTGRES_DB=g2_tmp SQL_ECHO=false uv run python dev/guest_harness.py 2>&1 \| grep -v sqlalchemy \| tail -5` → `ALL PASS`；涵蓋：建立訪客並可送訊息、已有 cookie 不重建、第 11 個訪客 429 且沒有新列、併發 20 個請求只成功剩餘名額、不同 IP 互不影響、資料庫沒有原始 IP、錯誤 `Origin` 403、訪客 A 讀不到訪客 B 與登入帳號的對話 |
+| G2-3 | 額度：預設 10、訪客 IP 則數上限、退款含 IP 計數、`last_active_at` | `backend/main.py`、`docker-compose*.yml`、`backend/dev/guest_harness.py`、`backend/dev/quota_harness.py` | `guest_harness` → `ALL PASS`（新增：第 11 則 429、IP 第 101 則 429 `guest_ip_limit` 且個人額度未被扣、生成失敗兩個計數都退、白名單外模型 403 且不扣）；`quota_harness`、`regenerate_harness`、`auth_harness`、`model_options_harness`、`branch_entries_harness` → 都 `ALL PASS` |
+| G2-4 | 登入時的訪客處理：額度併入、`guest_session` cookie、`guest_claim`、`POST /auth/guest-claim` | `backend/auth_routes.py`、`backend/dev/guest_harness.py` | `guest_harness` → `ALL PASS`（新增：merge 後對話與分支都屬於登入帳號且訪客列消失、discard 後訪客資料全部消失、訪客用了 7 則後登入當日只剩 3 則、沒有 `guest_session` 或 token 錯誤 → 409 且資料不變、訪客呼叫 → 403、重複呼叫 → 409、登入帳號 B 沒有訪客 A 的 `guest_session` 時搬不走 A 的資料） |
+| G2-5 | 保留期限清理（背景 task＋可單獨呼叫的函式） | `backend/main.py`、`backend/dev/guest_harness.py` | `guest_harness` → `ALL PASS`（新增：8 天沒活動的訪客與其訊息、分支被刪；6 天的保留；登入帳號不受影響；`guest_ip_usage` 3 天前的列被刪） |
+| G2-6 | 前端訪客模式：開始使用進訪客、側欄「登入」、登入頁返回、額度訊息、`allow_custom` | `frontend/src/components/AuthGate.jsx`、`LandingPage.jsx`、`Sidebar.jsx`、`ModelSelector.jsx`、`frontend/src/App.jsx` | `cd frontend && npm run build` 成功；改到的檔案 `npx eslint <檔案>` 沒有新增錯誤；瀏覽器清單 A |
+| G2-7 | 前端搬移對話框 | `frontend/src/App.jsx`（或新元件 `GuestClaimDialog.jsx`） | build／eslint；瀏覽器清單 A |
+| G2-8 | OpenRouter 連結：加密模組、connect／callback／disconnect | `backend/openrouter_connect.py`（新）、`backend/crypto_utils.py`（新）、`backend/main.py`、`backend/pyproject.toml`（加 `cryptography`）、`backend/dev/openrouter_connect_harness.py`（新） | `POSTGRES_DB=g2_tmp SQL_ECHO=false uv run python dev/openrouter_connect_harness.py 2>&1 \| grep -v sqlalchemy \| tail -5` → `ALL PASS`；涵蓋（換金鑰端點以假伺服器或 mock 取代）：成功後資料庫只有密文且可解回、`/auth/me` 為已連結且回應不含金鑰、`state` 不符／重放／換了登入者 → `state_mismatch` 且不存、訪客 → `login_required`、未設加密金鑰 → `unavailable`、換金鑰失敗 → `exchange_failed`、disconnect 後列消失、A 的 callback 不會寫到 B、擷取整段 log 輸出不含金鑰與 `code` |
+| G2-9 | 用自己的金鑰生成：略過額度與白名單、一律走 OpenRouter、失效處理 | `backend/main.py`、`backend/openrouter_llm.py`、`backend/dev/openrouter_connect_harness.py` | 同一 harness → `ALL PASS`（新增：已連結者送 30 則都成功且 `daily_usage` 沒有列、假 LLM 收到的是該使用者的金鑰而未連結者收到平台金鑰、已連結者用 `gemini-x` 也走 OpenRouter、401 → 連結被刪且回覆為固定文字且沒有改用平台金鑰、402 → 連結保留、解密失敗 → 409 且沒有新訊息、`allow_custom` 正確）；G2-3 列出的其他 harness 仍 `ALL PASS` |
+| G2-10 | 前端 OpenRouter 連結介面與提示 | `frontend/src/components/Sidebar.jsx`、`frontend/src/App.jsx`、`AuthGate.jsx` | build／eslint；瀏覽器清單 B |
+| G2-11 | 隱私權說明、compose 環境變數、部署說明 | `frontend/public/privacy.html`、`docker-compose.prod.yml`、`CLAUDE.md`（Production deploy 補一行新環境變數與 migration） | `grep -n "CREDENTIAL_ENCRYPTION_KEY\|GUEST_IP_DAILY" docker-compose.prod.yml` 有輸出；build 成功；瀏覽器看隱私權頁 |
+
+**波次**
+- 波次 1（後端，G2-1 到 G2-5）：沒有可看的畫面，做完回報後直接進波次 2。
+- 波次 2（前端，G2-6、G2-7）：停下來等使用者跑瀏覽器清單 A。
+- 波次 3（後端，G2-8、G2-9）：做完回報後直接進波次 4。
+- 波次 4（G2-10、G2-11）：停下來等使用者跑瀏覽器清單 B。真的 OpenRouter 授權只能由使用者本人操作。
+
+**瀏覽器清單 A（訪客模式；桌面 ≥ 768 與手機 < 768 各做一次）**
+1. 未登入打開網站 → 首頁；按「開始使用」→ 進入聊天畫面，側欄左下是「試用中」與「登入」，沒有登出。
+2. 送一則訊息 → 正常回覆；開一條分支 → 正常。模型選單可選免費模型，沒有自訂模型輸入。
+3. 重新整理 → 還在聊天畫面，對話還在。
+4. 把 `DAILY_MESSAGE_LIMIT` 設成 2 重啟後端，送第 3 則 → 看到「今日試用額度已用完。登入並連結 OpenRouter 就能繼續使用」。
+5. 按側欄「登入」→ 登入頁；按「← 返回」→ 回到聊天。
+6. 登入 → 出現「要把試用時的 N 個對話移到這個帳號嗎？」；選「移到帳號」→ 對話出現在側欄，分支與高亮都在。
+7. 登出 → 回首頁。再用訪客建立對話、登入、選「刪除」→ 試用對話沒有出現，帳號原有對話不受影響。
+8. 已登入狀態重新整理 → 直接進聊天，不出現首頁，也不再出現搬移對話框。
+9. 無痕視窗打開網站 → 看不到其他視窗的訪客對話。
+
+**瀏覽器清單 B（OpenRouter 連結）**
+1. 登入後側欄底部顯示「連結 OpenRouter」與說明；訪客看不到這一列。
+2. 按「連結 OpenRouter」→ 跳到 openrouter.ai 的同意頁 → 同意 → 回到本站並顯示已連結。
+3. 模型選單出現自訂模型輸入；輸入一個付費模型 ID 送出 → 正常回覆（費用在你的 OpenRouter 帳號）。
+4. 連續送超過 10 則 → 不會被每日額度擋下。
+5. 到 OpenRouter 的金鑰頁撤銷那把金鑰，回來送一則 → 回覆顯示「你的 OpenRouter 連結已失效，請重新連結」，側欄回到未連結。
+6. 重新連結 → 按「中斷連結」→ 回到未連結，自訂模型輸入消失，額度回到每日 10 則。
+7. 在資料庫看 `openrouter_credential.key_encrypted` → 不是 `sk-or-` 開頭；`docker compose logs api | grep -c "sk-or-"` → 0。
+8. 手機寬度：側欄底部的連結列不被瀏覽器工具列蓋住、文字不被截斷。
+
+**部署注意**
+- 新 migration：VM 上 `git pull` 後要 `sudo docker compose up -d --build` 再 `sudo docker compose exec api alembic upgrade head`。
+- VM 的 `.env` 要新增 `CREDENTIAL_ENCRYPTION_KEY`（產生方式寫進教學文件）；遺失或更換會讓所有連結失效（使用者重新連結即可，對話不受影響）。
+- 現有登入用戶的每日額度會從 20 變 10。
+- 正式站在 V1-6 之前仍在 Cloudflare Access 後面。
