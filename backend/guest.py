@@ -76,3 +76,42 @@ def try_count_guest_creation(session: Session, ip_hash: str, day: date) -> bool:
         session.rollback()
         return False
     return True
+
+
+def guest_ip_daily_messages() -> int:
+    """(G2-3) 同一 IP 每個台灣日期、所有訪客合計的訊息則數上限（GUEST_IP_DAILY_MESSAGES，預設 100）。每次呼叫都重讀環境變數。"""
+    return _int_env("GUEST_IP_DAILY_MESSAGES", 100)
+
+
+def try_count_guest_message(session: Session, ip_hash: str, day: date) -> bool:
+    """(G2-3) 嘗試把該 IP 當日的訊息數加一。成功回 True，已達上限回 False。
+
+    寫法同 try_count_guest_creation（一句 INSERT ... ON CONFLICT ... WHERE ... RETURNING），
+    只是欄位換成 messages。不 commit：由 charge_daily_quota 的同一交易提交或 rollback。
+    沒有回傳列時立刻 rollback，釋放該列的鎖。
+    """
+    limit = guest_ip_daily_messages()
+    if limit < 1:
+        return False
+
+    row = session.execute(
+        text("""
+        INSERT INTO guest_ip_usage (ip_hash, day, guests_created, messages) VALUES (:h, :d, 0, 1)
+        ON CONFLICT (ip_hash, day) DO UPDATE SET messages = guest_ip_usage.messages + 1
+        WHERE guest_ip_usage.messages < :limit
+        RETURNING messages
+        """),
+        {"h": ip_hash, "d": day, "limit": limit},
+    ).first()
+    if row is None:
+        session.rollback()
+        return False
+    return True
+
+
+def refund_guest_message(session: Session, ip_hash: str, day: date) -> None:
+    """(G2-3) 退一則 IP 訊息計數（不低於 0）。不 commit：由呼叫端的 commit 一併提交。"""
+    session.execute(
+        text("UPDATE guest_ip_usage SET messages = GREATEST(messages - 1, 0) WHERE ip_hash = :h AND day = :d"),
+        {"h": ip_hash, "d": day},
+    )

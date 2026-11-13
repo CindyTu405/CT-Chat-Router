@@ -29,8 +29,10 @@ os.environ["ALLOWED_MODELS"] = "gemini*"
 os.environ["DAILY_MESSAGE_LIMIT"] = "100000"
 os.environ["SITE_DAILY_MESSAGE_LIMIT"] = "1000000"
 os.environ["GUEST_IP_DAILY_GUESTS"] = "10"
+os.environ["GUEST_IP_DAILY_MESSAGES"] = "100000"
 os.environ["CORS_ORIGINS"] = "http://localhost:5173"
 
+import contextlib  # noqa: E402
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
 from sqlalchemy import delete as sa_delete, func as sa_func  # noqa: E402
@@ -65,9 +67,15 @@ LLM_CALLS = {"n": 0}
 
 
 async def fake_stream(*args, **kwargs):
-    """假的 LLM 串流：只計數、固定輸出，不連任何外部服務。"""
+    """假的 LLM 串流：只計數、固定輸出，不連任何外部服務。
+    (G2-3) 訊息以 FAIL0 開頭：還沒吐出任何字就丟例外；以 FAIL1 開頭：吐一段後丟例外。"""
     LLM_CALLS["n"] += 1
+    msg = args[0] if args else kwargs.get("message", "")
+    if msg.startswith("FAIL0"):
+        raise RuntimeError("fake failure before any output")
     yield "GUEST-"
+    if msg.startswith("FAIL1"):
+        raise RuntimeError("fake failure after one chunk")
     yield "REPLY"
 
 
@@ -76,7 +84,7 @@ main.openrouter_chat_stream = fake_stream
 
 # 每次執行一個隨機前綴；A..F 各代表一個來源 IP
 PREFIX = f"10.{random.randint(0, 255)}.{random.randint(0, 255)}"
-IP = {label: f"{PREFIX}.{n}" for n, label in enumerate("ABCDEF", start=1)}
+IP = {label: f"{PREFIX}.{n}" for n, label in enumerate("ABCDEFGHIJKLMNO", start=1)}
 
 RESULTS: list[tuple[str, bool, str]] = []
 CREATED_UIDS: list[uuid.UUID] = []   # 本腳本建立的 user（清理用）
@@ -106,9 +114,64 @@ def xff(ip: str) -> dict:
     return {"X-Forwarded-For": ip}
 
 
-def new_client(token: str | None = None) -> httpx.Client:
+def new_client(token: str | None = None, ip: str | None = None) -> httpx.Client:
+    """ip 有值時，這個 client 的每個請求都帶同一個 X-Forwarded-For（訪客的來源 IP 要一致）。"""
     cookies = {"session": token} if token else None
-    return httpx.Client(base_url=BASE, timeout=60, cookies=cookies)
+    headers = xff(ip) if ip else None
+    return httpx.Client(base_url=BASE, timeout=60, cookies=cookies, headers=headers)
+
+
+@contextlib.contextmanager
+def env(**kv):
+    """暫時設定（值為 None 則移除）環境變數，結束後還原。讀取是每次呼叫才讀，所以即時生效。"""
+    old = {k: os.environ.get(k) for k in kv}
+    for k, v in kv.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def daily_count(uid: uuid.UUID) -> int:
+    with Session(engine) as s:
+        row = s.exec(select(DailyUsage.count).where(
+            DailyUsage.user_id == uid, DailyUsage.day == guest.taiwan_today())).first()
+        return row or 0
+
+
+def ip_messages(ip: str) -> int:
+    with Session(engine) as s:
+        row = s.get(GuestIpUsage, (guest.hash_ip(ip), guest.taiwan_today()))
+        return row.messages if row else 0
+
+
+def last_active(uid: uuid.UUID):
+    with Session(engine) as s:
+        u = s.get(User, uid)
+        return u.last_active_at if u else None
+
+
+def ai_content(ai_id: str) -> str:
+    with Session(engine) as s:
+        m = s.get(Message, uuid.UUID(ai_id))
+        return m.content if m else ""
+
+
+def wait_for(pred, timeout: float = 10.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pred():
+            return True
+        time.sleep(0.05)
+    return pred()
 
 
 def uid_of_token(token: str | None) -> uuid.UUID | None:
@@ -173,7 +236,7 @@ def chat(c: httpx.Client, text_msg: str, parent_id: str | None = None) -> httpx.
 # ---------- 案例 ----------
 
 def c01_create_guest():
-    c = new_client()
+    c = new_client(ip=IP["A"])
     S["cA"] = c
     r = create_guest(c, IP["A"])
     check("G2-2-1a POST /auth/guest IP A → 200 created true",
@@ -314,7 +377,7 @@ def c10_isolation():
     uidA = S["uidA"]
 
     # 訪客 G2（自己的對話）
-    cG2 = new_client()
+    cG2 = new_client(ip=IP["F"])
     r = create_guest(cG2, IP["F"])
     check("G2-2-10a create second guest G2 → 200", r.status_code == 200, f"status={r.status_code}")
     uidG2 = uid_of_token(cG2.cookies.get("session"))
@@ -372,9 +435,221 @@ def c11_no_cookie():
     check("G2-2-11 GET /auth/me without cookie → 401", r.status_code == 401, str(r.status_code))
 
 
+def c12_default_limit():
+    with env(DAILY_MESSAGE_LIMIT=None):
+        v = main.daily_message_limit()
+    check("G2-3-1 DAILY_MESSAGE_LIMIT unset → daily_message_limit() == 10", v == 10, str(v))
+
+
+def c13_daily_limit_ten():
+    with env(DAILY_MESSAGE_LIMIT="10"):
+        c = new_client(ip=IP["G"])
+        r = create_guest(c, IP["G"])
+        uid = uid_of_token(c.cookies.get("session"))
+        statuses = [chat(c, f"msg {i}").status_code for i in range(10)]
+        check("G2-3-2a fresh guest: 10 chats all 200", statuses == [200] * 10, str(statuses))
+        n_msgs = len(messages_of(uid))
+        calls = LLM_CALLS["n"]
+        r = chat(c, "eleventh")
+        check("G2-3-2b 11th chat → 429 daily_quota_exceeded",
+              r.status_code == 429 and r.json().get("detail", {}).get("code") == "daily_quota_exceeded",
+              f"status={r.status_code} body={r.text[:200]}")
+        check("G2-3-2c 11th: message count and LLM call count unchanged",
+              len(messages_of(uid)) == n_msgs and LLM_CALLS["n"] == calls,
+              f"msgs={len(messages_of(uid))}/{n_msgs} llm_delta={LLM_CALLS['n'] - calls}")
+    c.close()
+
+
+def c14_ip_cap_shared():
+    with env(DAILY_MESSAGE_LIMIT="100000", GUEST_IP_DAILY_MESSAGES="5"):
+        cP = new_client(ip=IP["H"])
+        create_guest(cP, IP["H"])
+        cQ = new_client(ip=IP["H"])
+        create_guest(cQ, IP["H"])
+        uidQ = uid_of_token(cQ.cookies.get("session"))
+        S["cP"], S["cQ"], S["uidQ"] = cP, cQ, uidQ
+        p_st = [chat(cP, f"p {i}").status_code for i in range(3)]
+        q_st = [chat(cQ, f"q {i}").status_code for i in range(2)]
+        check("G2-3-3a guests P (3) and Q (2) on IP H → all 200", p_st + q_st == [200] * 5,
+              str(p_st + q_st))
+        calls = LLM_CALLS["n"]
+        msgs_q = len(messages_of(uidQ))
+        r = chat(cQ, "over cap")
+        d = r.json().get("detail", {}) if r.status_code == 429 else {}
+        check("G2-3-3b Q's next → 429 guest_ip_limit with reset_at",
+              r.status_code == 429 and d.get("code") == "guest_ip_limit" and "reset_at" in d,
+              f"status={r.status_code} body={r.text[:200]}")
+        check("G2-3-3c Q's daily_usage.count still 2", daily_count(uidQ) == 2, str(daily_count(uidQ)))
+        check("G2-3-3d no new message, LLM not called",
+              len(messages_of(uidQ)) == msgs_q and LLM_CALLS["n"] == calls,
+              f"msgs={len(messages_of(uidQ))}/{msgs_q} llm_delta={LLM_CALLS['n'] - calls}")
+        check("G2-3-3e guest_ip_usage.messages == 5", ip_messages(IP["H"]) == 5, str(ip_messages(IP["H"])))
+
+
+def c15_ip_cap_isolation():
+    with env(DAILY_MESSAGE_LIMIT="100000", GUEST_IP_DAILY_MESSAGES="5"):
+        cOther = new_client(ip=IP["I"])
+        create_guest(cOther, IP["I"])
+        r = chat(cOther, "other ip")
+        check("G2-3-4a guest on a different IP still → 200", r.status_code == 200, str(r.status_code))
+
+        with Session(engine) as s:
+            u = auth_routes.upsert_user(s, "github", f"g2-3-harness-{uuid.uuid4()}", None)
+            uidL = u.id
+            tokenL = auth_routes.create_session_token(s, u)
+        CREATED_UIDS.append(uidL)
+        cL = new_client(tokenL, ip=IP["H"])
+        r = chat(cL, "logged in from full IP")
+        check("G2-3-4b logged-in user from full IP H → 200", r.status_code == 200, str(r.status_code))
+        check("G2-3-4c IP H messages still 5 (logged-in user not counted)",
+              ip_messages(IP["H"]) == 5, str(ip_messages(IP["H"])))
+        cL.close()
+    S["cP"].close()
+    S["cQ"].close()
+
+
+def c16_personal_limit_rolls_back_ip():
+    with env(DAILY_MESSAGE_LIMIT="2", GUEST_IP_DAILY_MESSAGES="100000"):
+        c = new_client(ip=IP["J"])
+        create_guest(c, IP["J"])
+        uid = uid_of_token(c.cookies.get("session"))
+        st = [chat(c, f"t {i}").status_code for i in range(2)]
+        check("G2-3-5a guest sends 2 → both 200", st == [200, 200], str(st))
+        ip_before = ip_messages(IP["J"])
+        r = chat(c, "third")
+        check("G2-3-5b 3rd → 429 daily_quota_exceeded",
+              r.status_code == 429 and r.json().get("detail", {}).get("code") == "daily_quota_exceeded",
+              f"status={r.status_code} body={r.text[:200]}")
+        check("G2-3-5c IP messages == 2 (IP increment rolled back)",
+              ip_messages(IP["J"]) == 2 and ip_before == 2, f"ip={ip_messages(IP['J'])} before={ip_before}")
+        check("G2-3-5d daily_usage.count == 2", daily_count(uid) == 2, str(daily_count(uid)))
+    c.close()
+
+
+def _ai_id_of(r: httpx.Response) -> str:
+    return r.headers.get("X-Message-Id", "")
+
+
+def c17_generation_failed_before_output():
+    with env(DAILY_MESSAGE_LIMIT="100000", GUEST_IP_DAILY_MESSAGES="100000"):
+        c = new_client(ip=IP["K"])
+        create_guest(c, IP["K"])
+        uid = uid_of_token(c.cookies.get("session"))
+        d0, i0 = daily_count(uid), ip_messages(IP["K"])
+        r = chat(c, "FAIL0 please")
+        ai_id = _ai_id_of(r)
+        ok = wait_for(lambda: guest_failed_text(ai_id))
+        check("G2-3-6a FAIL0 generation: AI message holds failure text", r.status_code == 200 and ok,
+              f"status={r.status_code} content={ai_content(ai_id)[:80]!r}")
+        check("G2-3-6b FAIL0: daily_usage.count and IP messages refunded to before values",
+              daily_count(uid) == d0 and ip_messages(IP["K"]) == i0,
+              f"daily={daily_count(uid)}/{d0} ip={ip_messages(IP['K'])}/{i0}")
+    c.close()
+
+
+def guest_failed_text(ai_id: str) -> bool:
+    return main.GENERATION_FAILED_TEXT in ai_content(ai_id)
+
+
+def c18_generation_failed_after_output():
+    with env(DAILY_MESSAGE_LIMIT="100000", GUEST_IP_DAILY_MESSAGES="100000"):
+        c = new_client(ip=IP["L"])
+        create_guest(c, IP["L"])
+        uid = uid_of_token(c.cookies.get("session"))
+        d0, i0 = daily_count(uid), ip_messages(IP["L"])
+        r = chat(c, "FAIL1 please")
+        ai_id = _ai_id_of(r)
+        ok = wait_for(lambda: guest_failed_text(ai_id))
+        check("G2-3-7a FAIL1 generation: AI message holds failure text", r.status_code == 200 and ok,
+              f"status={r.status_code} content={ai_content(ai_id)[:80]!r}")
+        check("G2-3-7b FAIL1 (output already produced): neither counter refunded (+1 each)",
+              daily_count(uid) == d0 + 1 and ip_messages(IP["L"]) == i0 + 1,
+              f"daily={daily_count(uid)}/{d0 + 1} ip={ip_messages(IP['L'])}/{i0 + 1}")
+    c.close()
+
+
+def c19_model_not_allowed():
+    with env(DAILY_MESSAGE_LIMIT="100000", GUEST_IP_DAILY_MESSAGES="100000"):
+        c = new_client(ip=IP["M"])
+        create_guest(c, IP["M"])
+        uid = uid_of_token(c.cookies.get("session"))
+        d0, i0, m0 = daily_count(uid), ip_messages(IP["M"]), len(messages_of(uid))
+        calls = LLM_CALLS["n"]
+        r = c.post("/chat", json={"message": "hi", "model": "not/allowed-model"})
+        check("G2-3-8a guest POST /chat with not/allowed-model → 403", r.status_code == 403, str(r.status_code))
+        check("G2-3-8b neither counter changed, no new message, LLM not called",
+              daily_count(uid) == d0 and ip_messages(IP["M"]) == i0
+              and len(messages_of(uid)) == m0 and LLM_CALLS["n"] == calls,
+              f"daily={daily_count(uid)}/{d0} ip={ip_messages(IP['M'])}/{i0} msgs={len(messages_of(uid))}/{m0}")
+    c.close()
+
+
+def c20_last_active():
+    with env(DAILY_MESSAGE_LIMIT="1", GUEST_IP_DAILY_MESSAGES="100000"):
+        c = new_client(ip=IP["N"])
+        create_guest(c, IP["N"])
+        uid = uid_of_token(c.cookies.get("session"))
+        check("G2-3-9a last_active_at is None right after guest creation", last_active(uid) is None,
+              str(last_active(uid)))
+        r = chat(c, "first")
+        check("G2-3-9b one successful chat → last_active_at set", r.status_code == 200 and last_active(uid) is not None,
+              f"status={r.status_code} value={last_active(uid)}")
+        before = last_active(uid)
+        r = chat(c, "second")
+        check("G2-3-9c 429 leaves last_active_at unchanged",
+              r.status_code == 429 and last_active(uid) == before,
+              f"status={r.status_code} before={before} after={last_active(uid)}")
+    c.close()
+
+
+def c21_guest_regenerate():
+    with env(DAILY_MESSAGE_LIMIT="100000", GUEST_IP_DAILY_MESSAGES="100000"):
+        c = new_client(ip=IP["M"])
+        create_guest(c, IP["M"])
+        uid = uid_of_token(c.cookies.get("session"))
+        r = chat(c, "regen base")
+        ai_id = _ai_id_of(r)  # 第一次生成的串流已讀到 done，所以這裡不會與背景生成競爭
+        d0, i0 = daily_count(uid), ip_messages(IP["M"])
+        r = c.post(f"/messages/{ai_id}/regenerate", json={"model": MODEL})
+        check("G2-3-10a guest regenerate on last AI message → 200", r.status_code == 200, f"status={r.status_code}")
+        check("G2-3-10b regenerate: daily_usage.count and IP messages both +1",
+              daily_count(uid) == d0 + 1 and ip_messages(IP["M"]) == i0 + 1,
+              f"daily={daily_count(uid)}/{d0 + 1} ip={ip_messages(IP['M'])}/{i0 + 1}")
+    c.close()
+
+
+def c22_ip_cap_concurrent():
+    with env(DAILY_MESSAGE_LIMIT="100000", GUEST_IP_DAILY_MESSAGES="7"):
+        tokens = []
+        for _ in range(4):
+            c = new_client(ip=IP["O"])
+            create_guest(c, IP["O"])
+            tokens.append(c.cookies.get("session"))
+            c.close()
+        uids = [uid_of_token(t) for t in tokens]
+
+        def fire(i: int) -> int:
+            with httpx.Client(base_url=BASE, timeout=60, cookies={"session": tokens[i % 4]},
+                              headers=xff(IP["O"])) as cc:
+                return chat(cc, f"burst {i}").status_code
+
+        with ThreadPoolExecutor(max_workers=20) as ex:
+            statuses = list(ex.map(fire, range(20)))
+        check("G2-3-11a 20 concurrent chats on one IP with cap 7: exactly 7 → 200",
+              statuses.count(200) == 7, f"200={statuses.count(200)} 429={statuses.count(429)} other={[s for s in statuses if s not in (200, 429)]}")
+        check("G2-3-11b exactly 13 → 429", statuses.count(429) == 13, f"429={statuses.count(429)}")
+        check("G2-3-11c guest_ip_usage.messages == 7", ip_messages(IP["O"]) == 7, str(ip_messages(IP["O"])))
+        total = sum(daily_count(u) for u in uids)
+        check("G2-3-11d sum of the 4 guests' daily_usage.count == 7", total == 7, str(total))
+
+
 CASES = [c01_create_guest, c02_me_for_guest, c03_same_client_again, c04_guest_chats,
          c05_ip_b_cap, c06_ip_c_concurrent, c07_ip_d_fresh, c08_no_raw_ip_in_db,
-         c09_origin, c10_isolation, c11_no_cookie]
+         c09_origin, c10_isolation, c11_no_cookie,
+         c12_default_limit, c13_daily_limit_ten, c14_ip_cap_shared, c15_ip_cap_isolation,
+         c16_personal_limit_rolls_back_ip, c17_generation_failed_before_output,
+         c18_generation_failed_after_output, c19_model_not_allowed, c20_last_active,
+         c21_guest_regenerate, c22_ip_cap_concurrent]
 
 
 # ---------- 伺服器與清理 ----------

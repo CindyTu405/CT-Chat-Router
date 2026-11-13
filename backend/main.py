@@ -21,6 +21,7 @@ from slowapi.errors import RateLimitExceeded
 from database import get_session, engine
 from auth_routes import cookie_secure, get_current_user, router as auth_router, SESSION_COOKIE_NAME
 from rate_limit import limiter  # (G2-2) 單一實例，auth_routes 也會用
+import guest  # (G2-3) 訪客 IP 雜湊與每 IP 訊息上限
 from models import (
     User,
     Message,
@@ -85,8 +86,8 @@ def _int_env(name: str, default: int) -> int:
 
 
 def daily_message_limit() -> int:
-    """(V1-2) 每位使用者每個台灣日期的次數上限（DAILY_MESSAGE_LIMIT，預設 20）。"""
-    return _int_env("DAILY_MESSAGE_LIMIT", 20)
+    """(V1-2)(G2-3) 試用者（訪客與未連結 OpenRouter 的登入用戶）每個台灣日期的次數上限（DAILY_MESSAGE_LIMIT，預設 10）。"""
+    return _int_env("DAILY_MESSAGE_LIMIT", 10)
 
 
 def site_daily_message_limit() -> int:
@@ -101,12 +102,17 @@ def _daily_quota_exceeded(day: date) -> HTTPException:
     )
 
 
-def charge_daily_quota(session: Session, user_id: uuid.UUID) -> date:
-    """(V1-2) 扣一次當日額度。不 commit：由呼叫端之後的 commit 與訊息寫入同一交易，
-    之後的檢查失敗或交易失敗都不會留下扣款。回傳扣款的台灣日期（退額度時要用同一天）。
+def charge_daily_quota(session: Session, user_id: uuid.UUID, guest_ip_hash: str | None = None) -> date:
+    """(V1-2)(G2-3) 扣一次當日額度。不 commit：由呼叫端之後的 commit 與訊息寫入同一交易，
+    回傳扣款的台灣日期（退額度時要用同一天）。
 
+    三層檢查依序進行，任何一層失敗都在同一交易內 rollback，因此不會留下任何扣款：
     1. 全站當日總和 >= SITE_DAILY_MESSAGE_LIMIT → 503 site_quota_exceeded
-    2. 使用者額度：單一 INSERT ... ON CONFLICT DO UPDATE ... WHERE count < limit；沒有回傳列 → 429
+    2. 試用上限 DAILY_MESSAGE_LIMIT < 1 → 429 daily_quota_exceeded
+    3. 訪客（guest_ip_hash 不為 None）：該 IP 當日訊息數 +1，超過 GUEST_IP_DAILY_MESSAGES → 429 guest_ip_limit
+       （try_count_guest_message 失敗時已自行 rollback）
+    4. 個人每日額度：單一 INSERT ... ON CONFLICT DO UPDATE ... WHERE count < limit；沒有回傳列 → rollback（連第 3 層的 IP 加一一起丟掉）→ 429 daily_quota_exceeded
+    5. 通過後更新 user.last_active_at（UTC，naive）
     """
     day = taiwan_today()
 
@@ -120,6 +126,13 @@ def charge_daily_quota(session: Session, user_id: uuid.UUID) -> date:
     if user_limit < 1:
         raise _daily_quota_exceeded(day)
 
+    if guest_ip_hash is not None:
+        if not guest.try_count_guest_message(session, guest_ip_hash, day):
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "guest_ip_limit", "reset_at": next_reset_at_utc(day)},
+            )
+
     row = session.execute(
         text("""
         INSERT INTO daily_usage (user_id, day, count) VALUES (:u, :d, 1)
@@ -131,19 +144,28 @@ def charge_daily_quota(session: Session, user_id: uuid.UUID) -> date:
     ).first()
     if row is None:
         # 被拒絕時立刻結束交易：ON CONFLICT 已對該列取得鎖，若留到 session 關閉才釋放，
-        # 同一個事件迴圈裡的其他 DB 呼叫會卡住（實測造成死結）。此時尚無其他待寫入的變更。
+        # 同一個事件迴圈裡的其他 DB 呼叫會卡住（實測造成死結）。
+        # rollback 同時丟掉第 3 層剛加的 IP 計數（同一交易）。
         session.rollback()
         raise _daily_quota_exceeded(day)
+
+    session.execute(
+        text('UPDATE "user" SET last_active_at = :now WHERE id = :u'),
+        {"now": datetime.now(timezone.utc).replace(tzinfo=None), "u": user_id},
+    )
     return day
 
 
-def refund_daily_quota(user_id: uuid.UUID, day: date) -> None:
-    """(V1-2) 退 1 次（不低於 0）。自己開 session，不依賴請求的 session 生命週期。"""
+def refund_daily_quota(user_id: uuid.UUID, day: date, guest_ip_hash: str | None = None) -> None:
+    """(V1-2)(G2-3) 退 1 次（不低於 0）。自己開 session，不依賴請求的 session 生命週期。
+    guest_ip_hash 有值時同一交易也退該 IP 當日的訊息計數。"""
     with Session(engine) as db_session:
         db_session.execute(
             text("UPDATE daily_usage SET count = GREATEST(count - 1, 0) WHERE user_id = :u AND day = :d"),
             {"u": user_id, "d": day},
         )
+        if guest_ip_hash is not None:
+            guest.refund_guest_message(db_session, guest_ip_hash, day)
         db_session.commit()
 
 
@@ -165,6 +187,7 @@ async def run_generation(
     model: str,
     usage_user_id: uuid.UUID | None = None,
     usage_day: date | None = None,
+    usage_ip_hash: str | None = None,
 ):
     """背景執行一次 AI 生成：邊收 chunk 邊寫入緩衝，完成後寫回 DB。
     (V1-2) 失敗時：不記錄訊息內容、只給固定提示；若一個字都還沒產出，退回扣款的 1 次。
@@ -183,7 +206,7 @@ async def run_generation(
         buf["text"] += GENERATION_FAILED_TEXT
         if not had_output and usage_user_id is not None and usage_day is not None:
             try:
-                await asyncio.to_thread(refund_daily_quota, usage_user_id, usage_day)
+                await asyncio.to_thread(refund_daily_quota, usage_user_id, usage_day, usage_ip_hash)
             except Exception:
                 logger.exception("(V1-2) 退回額度失敗 user=%s day=%s", usage_user_id, usage_day)
     finally:
@@ -420,7 +443,8 @@ async def chat_endpoint(
 
     # (V1-2) 扣每日額度：在任何寫入之前；不 commit，下面第一個 commit 與訊息寫入同一交易
     user_id = user.id  # 先取出，commit 之後 ORM 物件會過期
-    usage_day = charge_daily_quota(session, user_id)
+    guest_ip_hash = guest.hash_ip(guest.client_ip(request)) if user.is_guest else None  # (G2-3) 訪客才計 IP
+    usage_day = charge_daily_quota(session, user_id, guest_ip_hash)
 
     # 1. 先存使用者的訊息 (User Message)
     user_msg = Message(role="user", content=payload.message, parent_id=payload.parent_id,
@@ -476,7 +500,7 @@ async def chat_endpoint(
     history_plain = [SimpleNamespace(role=m.role, content=m.content) for m in history]
     asyncio.create_task(run_generation(
         ai_id, payload.message, history_plain, payload.model,
-        usage_user_id=user_id, usage_day=usage_day,
+        usage_user_id=user_id, usage_day=usage_day, usage_ip_hash=guest_ip_hash,
     ))
     # (B12) 串流可能持續數十秒；這裡先還回連線。之後的回應只用上面的純值，不碰 ORM 物件。
     session.close()
@@ -604,7 +628,8 @@ async def regenerate_message(
 
     # (V1-2) 扣每日額度：通過所有 4xx 檢查之後、任何改寫之前；不 commit，f 的 commit 一併提交
     usage_user_id = user.id  # 先取出，commit 之後 ORM 物件會過期
-    usage_day = charge_daily_quota(session, usage_user_id)
+    guest_ip_hash = guest.hash_ip(guest.client_ip(request)) if user.is_guest else None  # (G2-3) 訪客才計 IP
+    usage_day = charge_daily_quota(session, usage_user_id, guest_ip_hash)
 
     # (F9-1) 編輯 user 訊息：與下面的幽靈化、AI 清空同一個 commit，不能分開寫
     if payload.content is not None:
@@ -647,7 +672,7 @@ async def regenerate_message(
     GENERATIONS[ai_id] = {"text": "", "done": False}
     asyncio.create_task(run_generation(
         ai_id, user_content, history_plain, payload.model,
-        usage_user_id=usage_user_id, usage_day=usage_day,
+        usage_user_id=usage_user_id, usage_day=usage_day, usage_ip_hash=guest_ip_hash,
     ))
 
     # h. 串流：與 /chat 相同，讀緩衝直到 done
