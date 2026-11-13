@@ -998,6 +998,8 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 | G2-10 | 前端 OpenRouter 連結介面與提示 | `frontend/src/components/Sidebar.jsx`、`frontend/src/App.jsx`、`AuthGate.jsx` | build／eslint；瀏覽器清單 B |
 | G2-11 | 隱私權說明、compose 環境變數、部署說明 | `frontend/public/privacy.html`、`docker-compose.prod.yml`、`CLAUDE.md`（Production deploy 補一行新環境變數與 migration） | `grep -n "CREDENTIAL_ENCRYPTION_KEY\|GUEST_IP_DAILY" docker-compose.prod.yml` 有輸出；build 成功；瀏覽器看隱私權頁 |
 
+**狀態（2026-11-14）**：波次 1 完成，未 push。G2-1 `2d868ee`、G2-2 `d004ab3`、G2-3 `54a2151`、G2-4 `e902726`、G2-5 `19f68e3`。主代理在臨時資料庫 `g2_tmp` 重跑：`guest_harness` `ALL PASS (141)`；`auth`、`quota`、`regenerate`、`branch_entries`、`model_options`、`pool`、`limits` 七支 harness 都 `ALL PASS`。臨時資料庫的建法：`createdb g2_tmp` → `pg_dump -s chat_db | psql g2_tmp` → `POSTGRES_DB=g2_tmp uv run alembic stamp f1a2b3c4d5e6`（baseline migration 無法從空資料庫建表）。本機 `chat_db` 尚未執行這支 migration（仍在 `f1a2b3c4d5e6`）。實作時新增而規格沒寫的：`backend/rate_limit.py`（limiter 單一實例）、`backend/guest.py`（訪客相關純函式）；`GUEST_RETENTION_DAYS < 1` 時不刪任何訪客；`POST /auth/guest-claim` 無待處理訪客時回 409 並清掉 `guest_session` cookie。
+
 **波次**
 - 波次 1（後端，G2-1 到 G2-5）：沒有可看的畫面，做完回報後直接進波次 2。
 - 波次 2（前端，G2-6、G2-7）：停下來等使用者跑瀏覽器清單 A。
