@@ -169,9 +169,10 @@ function BranchPanel({
   return (
     // P3b-F5：手機（< 768px）滿版覆蓋（fixed）；桌面（md 以上）維持並排的百分比寬度。
     // 桌面寬度用 inline style；手機不設 inline 寬度，由 w-full 決定。
+    // (L1-8) 掛載時由右往左滑入（animate-panel-slide-in，定義在 index.css）。
     <aside
       style={isDesktop ? { width: `${panelPercent}%` } : undefined}
-      className="isolate fixed inset-0 z-40 w-full md:z-auto md:inset-auto md:h-full md:w-auto md:relative flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)]"
+      className="isolate fixed inset-0 z-40 w-full md:z-auto md:inset-auto md:h-full md:w-auto md:relative flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)] animate-panel-slide-in"
     >
       {/* --- 左側拖曳把手：調整面板寬度（僅桌面） --- */}
       <div
