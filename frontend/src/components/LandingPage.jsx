@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { MousePointer2, RefreshCw } from 'lucide-react';
 import MessageList from './MessageList';
 import BranchPanel from './BranchPanel';
 import { DEMO_ARTICLES, DEMO_GENERIC_ANSWER } from '../demo/demoArticles';
+// (L1-4) 自動播放（假游標）
+import useDemoAutoplay from '../demo/useDemoAutoplay';
 
 // (L1-3) 未登入的首頁：標語、一篇示範對話，以及真的 MessageList／BranchPanel 吃假資料。
 // 不呼叫任何 API、不呼叫模型；所有計時器都收進 timersRef，換一篇／卸載時一次清掉。
@@ -103,6 +105,9 @@ export default function LandingPage({ onStart }) {
     sel.removeAllRanges();
     sel.addRange(range);
   };
+
+  // (L1-4) 自動播放：游標位置與是否顯示由 hook 決定；使用者互動即永久停止
+  const cursor = useDemoAutoplay({ scrollContainerRef, selectHint });
 
   const openBranch = (branch) => {
     setActiveBranchId(branch.id);
@@ -346,6 +351,22 @@ export default function LandingPage({ onStart }) {
           />
         )}
       </div>
+
+      {/* (L1-4) 假游標：只在自動播放期間渲染；pointer-events-none 不擋使用者操作 */}
+      {cursor.visible && (
+        <div
+          aria-hidden="true"
+          className="fixed z-[60] pointer-events-none"
+          style={{
+            left: cursor.left,
+            top: cursor.top,
+            opacity: 1,
+            transition: 'left 800ms ease, top 800ms ease, opacity 300ms ease',
+          }}
+        >
+          <MousePointer2 className="w-6 h-6 text-gray-800 fill-white drop-shadow" />
+        </div>
+      )}
     </div>
   );
 }
