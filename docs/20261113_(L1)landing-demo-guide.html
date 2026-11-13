@@ -161,8 +161,10 @@ sel.addRange(range);               <span class="cm">// → 觸發 selectionchang
       <div class="box">移到「建立分支」<br>按下</div>
       <div class="arrow">→</div>
       <div class="box">分支逐字回答</div>
+      <div class="arrow">→</div>
+      <div class="box">播完停 1.5 秒<br>回到下一個片語</div>
     </div>
-    <p>假游標只是一個絕對定位的圖示，用 CSS <code>transition</code> 移動。每一步之間用計時器銜接。使用者只要按下滑鼠、鍵盤、滾輪或觸控，就把「已取消」的旗標設起來並清掉計時器，之後不再自動操作。</p>
+    <p>假游標只是一個絕對定位的圖示，用 CSS <code>transition</code> 移動。每一步之間用計時器銜接。使用者只要按下滑鼠、鍵盤、滾輪或觸控，就把「已取消」的旗標設起來並清掉計時器，這一輪就不再自動操作。按「換一篇」會從頭再播一輪：hook 收一個 <code>restartKey</code>，放進 <code>useEffect</code> 的相依陣列，數字一變，舊的一輪被清掉、新的一輪開始。「分支還在逐字回答嗎」用 <code>isBusy</code> 傳進去，hook 每 0.1 秒看一次，播完才去點下一個片語。</p>
     <div class="tip"><b>無障礙：</b>系統設定了「減少動態效果」（<code>prefers-reduced-motion</code>）的人不播放，直接顯示可以操作的畫面。</div>
     <div class="warn"><b>手機不一樣：</b>手機的分支面板是滿版覆蓋。自動打開會蓋住整個首頁，所以手機只播到「建立分支」按鈕出現，由使用者自己按。</div>
   </section>
@@ -183,11 +185,15 @@ sel.addRange(range);               <span class="cm">// → 觸發 selectionchang
         <tr><td>3</td><td>標語</td><td>「追問細節，不打斷主線」；副標「選取 AI 回答裡的任何一段，開一條分支繼續問。」</td><td>2026-11-13 確認</td></tr>
         <tr><td>4</td><td>「開始使用」</td><td>第一段先導向登入頁；第二段改進訪客模式</td><td>2026-11-13 確認</td></tr>
         <tr><td>5</td><td>已登入的人</td><td>跳過首頁，直接進聊天</td><td>2026-11-13 確認</td></tr>
-        <tr><td>6</td><td>片語的呈現</td><td>先是虛線底線；點一下＝幫忙選取並出現「建立分支」；建立後變正式高亮</td><td>Claude 提案，待你看過</td></tr>
-        <tr><td>7</td><td>選到片語以外的文字</td><td>建立示範分支，回答固定為「這是示範，回答是預先寫好的…」</td><td>Claude 提案，待你看過</td></tr>
-        <tr><td>8</td><td>手機自動播放</td><td>只播到「建立分支」按鈕出現，不自動開滿版面板</td><td>Claude 提案，待你看過</td></tr>
-        <tr><td>9</td><td>輸入框位置</td><td>展示中不放輸入框，改放說明列與「開始使用」</td><td>Claude 提案，待你看過</td></tr>
-        <tr><td>10</td><td>側邊欄與左下登入按鈕</td><td>第一段首頁不放側邊欄；第二段訪客模式才有</td><td>Claude 提案，待你看過</td></tr>
+        <tr><td>6</td><td>片語的呈現</td><td>先是虛線底線；點一下＝幫忙選取並出現「建立分支」；建立後變正式高亮</td><td>已實作，使用者看過未提出修改</td></tr>
+        <tr><td>7</td><td>選到片語以外的文字</td><td>建立示範分支，回答固定為「這是示範，回答是預先寫好的…」</td><td>已實作，使用者看過未提出修改</td></tr>
+        <tr><td>8</td><td>手機自動播放</td><td>只播到「建立分支」按鈕出現，不自動開滿版面板</td><td>已實作，使用者看過未提出修改</td></tr>
+        <tr><td>9</td><td>輸入框位置</td><td>展示中不放輸入框，改放說明列與「開始使用」</td><td>已實作，使用者看過未提出修改</td></tr>
+        <tr><td>10</td><td>側邊欄與左下登入按鈕</td><td>第一段首頁不放側邊欄；第二段訪客模式才有</td><td>已實作，使用者看過未提出修改</td></tr>
+        <tr><td>11</td><td>標語區位置</td><td>桌面：左側白底欄，視窗寬 34%（上限 600px），標語兩行大字；手機：在上方、疊在格線背景上。（先試過「融進對話區上方」，使用者改選左側欄）</td><td>2026-11-14 確認</td></tr>
+        <tr><td>12</td><td>首頁的分支面板寬度</td><td>預設視窗寬 28%，不讀也不寫正式介面記住的寬度</td><td>2026-11-14 確認</td></tr>
+        <tr><td>13</td><td>自動播放範圍</td><td>三個片語依序點完；「換一篇」從頭再播；使用者一互動就停這一輪</td><td>2026-11-14 確認</td></tr>
+        <tr><td>14</td><td>分支面板開啟動畫</td><td>由右往左滑入 0.28 秒；正式介面也套用；關閉沒有動畫</td><td>2026-11-14 確認</td></tr>
       </table>
     </div>
   </section>
@@ -197,13 +203,17 @@ sel.addRange(range);               <span class="cm">// → 觸發 selectionchang
     <div class="table-wrap">
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
-        <tr><td>L1-1</td><td>範例文章資料與 offset 解析</td><td>未開始</td></tr>
-        <tr><td>L1-2</td><td>MessageList／BranchPanel 可選 props</td><td>未開始</td></tr>
-        <tr><td>L1-3</td><td>首頁、展示狀態、模擬串流、AuthGate 切換</td><td>未開始</td></tr>
-        <tr><td>L1-4</td><td>自動播放與停止條件</td><td>未開始</td></tr>
+        <tr><td>L1-1</td><td>範例文章資料與 offset 解析</td><td>完成，<code>5cd50e9</code></td></tr>
+        <tr><td>L1-2</td><td>MessageList／BranchPanel 可選 props</td><td>完成，<code>f1bab28</code></td></tr>
+        <tr><td>L1-3</td><td>首頁、展示狀態、模擬串流、AuthGate 切換</td><td>完成，<code>c41ca25</code></td></tr>
+        <tr><td>L1-4</td><td>自動播放與停止條件</td><td>完成，<code>5fa71f6</code></td></tr>
+        <tr><td>L1-5</td><td>標語區融進格線背景</td><td>完成，<code>6e66bd4</code>（之後被 L1-6 的桌面版面取代，手機仍是這個樣子）</td></tr>
+        <tr><td>L1-6</td><td>桌面三欄比例；BranchPanel 加 <code>defaultWidthPercent</code>／<code>persistWidth</code></td><td>完成，<code>4ccd82f</code>。踩到的坑：面板寬度是「父層的百分比」，拖曳卻用視窗寬度換算，所以面板必須是整列的直接子元素</td></tr>
+        <tr><td>L1-7</td><td>自動播放點完三個片語、換一篇重播</td><td>完成，<code>23dbe12</code></td></tr>
+        <tr><td>L1-8</td><td>分支面板由右往左滑入</td><td>完成，<code>d19604b</code>。動畫不加 <code>forwards</code>，結束後不留 <code>transform</code></td></tr>
       </table>
     </div>
-    <p class="muted">規格與驗收指令：<code>PLAN_v2.md</code>「L1 規格與驗收」。分支 <code>feat/landing-guest</code>。</p>
+    <p class="muted">規格與驗收指令：<code>PLAN_v2.md</code>「L1 規格與驗收」。分支 <code>feat/landing-guest</code>，未 push、未合併。瀏覽器驗收清單尚未逐項跑完。</p>
   </section>
 
   <section class="card">
