@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>首頁互動展示教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · L1</span>
+    <h1>首頁互動展示</h1>
+    <p>第一次來的人看不出這個網站在做什麼。這份教學說明怎麼用「假資料」驅動真的聊天元件，做出不花模型額度的互動展示。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>問題</h2>
+    <ul>
+      <li>未登入只看到「登入」兩個字和兩顆按鈕，沒有任何產品說明。</li>
+      <li>產品的重點是「選取回答裡的一段文字，開分支追問」。這個動作用文字很難講清楚，讓人自己做一次最快。</li>
+      <li>展示不能呼叫模型：OpenRouter 免費額度全帳號每天只有 50 次，不能被路過的人用掉。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：元件只管顯示，資料從外面給</h2>
+    <p><code>MessageList</code> 和 <code>BranchPanel</code> 自己不呼叫後端。訊息、分支清單、按下按鈕後要做什麼，全部由父層用 props 傳進去。正式介面的父層是 <code>App.jsx</code>，它負責向後端要資料。</p>
+    <p>所以首頁只要換一個父層（<code>LandingPage</code>），傳入寫死的資料和假的處理函式，同一套元件就會畫出一模一樣的畫面。</p>
+    <div class="flow">
+      <div class="box">App.jsx<br>向後端要資料</div>
+      <div class="arrow">→</div>
+      <div class="box">MessageList<br>BranchPanel</div>
+      <div class="arrow">←</div>
+      <div class="box">LandingPage<br>寫死的範例文章</div>
+    </div>
+    <div class="tip"><b>好處：</b>之後聊天介面改版，首頁展示會自動跟著變，不需要重錄影片或重畫一套假介面。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：用「可選的 prop」擴充共用元件</h2>
+    <p>展示需要兩個正式介面沒有的東西：片語的虛線提示、分支面板底部用說明文字取代輸入框。做法是幫共用元件加上有預設值的 prop，沒傳就和以前完全一樣。</p>
+    <pre><code><span class="cm">// 示意，實際程式由 implementer 撰寫</span>
+function MessageList({ anchorHints = [], onHintClick, ...其他 }) { ... }
+function BranchPanel({ footer, ...其他 }) {
+  <span class="cm">// 有傳 footer 就顯示它，沒傳就顯示原本的輸入框</span>
+  {footer ?? &lt;ChatInput ... /&gt;}
+}</code></pre>
+    <div class="warn"><b>注意：</b><code>App.jsx</code> 一行都不改。驗收時要回頭檢查正式介面的高亮、建立分支、面板拖曳都沒有變。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>概念：用程式選取文字</h2>
+    <p>正式介面是監聽瀏覽器的 <code>selectionchange</code> 事件，看到使用者選了 AI 回答裡的文字，就顯示「建立分支」按鈕。展示沿用這條路：點虛線片語時，由程式建立一個選取範圍，瀏覽器會發出同一個事件，真的按鈕就會出現。</p>
+    <pre><code><span class="cm">// 示意</span>
+const range = document.createRange();
+range.setStartBefore(firstMark);   <span class="cm">// 片語的第一段</span>
+range.setEndAfter(lastMark);       <span class="cm">// 片語的最後一段</span>
+const sel = window.getSelection();
+sel.removeAllRanges();
+sel.addRange(range);               <span class="cm">// → 觸發 selectionchange → 出現「建立分支」</span></code></pre>
+    <p>片語在文章裡的位置用「字元 offset」記錄（從第幾個字到第幾個字），和正式分支的高亮是同一套機制（見 B1-F8 教學）。資料檔裡用 <code>[[片語]]</code> 標記，載入時去掉標記並算出 offset。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>概念：模擬串流與計時器的清理</h2>
+    <p>預寫的回答用計時器每隔幾十毫秒多顯示幾個字，看起來就像模型在打字。計時器有一個常見的錯誤：元件已經消失或使用者按了「換一篇」，舊的計時器還在跑，把字寫進新的文章裡。</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>情況</th><th>要做的事</th></tr>
+        <tr><td>按「換一篇」</td><td>先停掉所有計時器，再換資料</td></tr>
+        <tr><td>離開首頁（按開始使用）</td><td><code>useEffect</code> 的清理函式停掉計時器</td></tr>
+        <tr><td>同一個片語連點兩次</td><td>已有分支就直接開啟，不再建立第二條</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>概念：自動播放是一串可以取消的步驟</h2>
+    <div class="flow">
+      <div class="box">等 1.2 秒</div>
+      <div class="arrow">→</div>
+      <div class="box">假游標移到片語</div>
+      <div class="arrow">→</div>
+      <div class="box">選取片語</div>
+      <div class="arrow">→</div>
+      <div class="box">移到「建立分支」<br>按下</div>
+      <div class="arrow">→</div>
+      <div class="box">分支逐字回答</div>
+    </div>
+    <p>假游標只是一個絕對定位的圖示，用 CSS <code>transition</code> 移動。每一步之間用計時器銜接。使用者只要按下滑鼠、鍵盤、滾輪或觸控，就把「已取消」的旗標設起來並清掉計時器，之後不再自動操作。</p>
+    <div class="tip"><b>無障礙：</b>系統設定了「減少動態效果」（<code>prefers-reduced-motion</code>）的人不播放，直接顯示可以操作的畫面。</div>
+    <div class="warn"><b>手機不一樣：</b>手機的分支面板是滿版覆蓋。自動打開會蓋住整個首頁，所以手機只播到「建立分支」按鈕出現，由使用者自己按。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>概念：未登入時在首頁與登入頁之間切換</h2>
+    <p><code>AuthGate</code> 原本是：檢查中 → 空白、未登入 → 登入頁、已登入 → 聊天。現在未登入時多一個狀態 <code>view</code>，值是 <code>landing</code> 或 <code>login</code>。不用路由套件，也不改網址。</p>
+    <p>例外：登入失敗被後端導回時網址帶有 <code>auth_error</code>，這時要直接顯示登入頁，使用者才看得到錯誤訊息。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+        <tr><td>1</td><td>展示形式</td><td>互動模擬＋自動播放，共用真的元件，不呼叫模型</td><td>2026-11-13 確認</td></tr>
+        <tr><td>2</td><td>範例文章</td><td>使用者提供五篇（洋蔥、客機、補眠、金字塔、複利），隨機一篇＋「換一篇」按鈕</td><td>2026-11-13 確認</td></tr>
+        <tr><td>3</td><td>標語</td><td>「追問細節，不打斷主線」；副標「選取 AI 回答裡的任何一段，開一條分支繼續問。」</td><td>2026-11-13 確認</td></tr>
+        <tr><td>4</td><td>「開始使用」</td><td>第一段先導向登入頁；第二段改進訪客模式</td><td>2026-11-13 確認</td></tr>
+        <tr><td>5</td><td>已登入的人</td><td>跳過首頁，直接進聊天</td><td>2026-11-13 確認</td></tr>
+        <tr><td>6</td><td>片語的呈現</td><td>先是虛線底線；點一下＝幫忙選取並出現「建立分支」；建立後變正式高亮</td><td>Claude 提案，待你看過</td></tr>
+        <tr><td>7</td><td>選到片語以外的文字</td><td>建立示範分支，回答固定為「這是示範，回答是預先寫好的…」</td><td>Claude 提案，待你看過</td></tr>
+        <tr><td>8</td><td>手機自動播放</td><td>只播到「建立分支」按鈕出現，不自動開滿版面板</td><td>Claude 提案，待你看過</td></tr>
+        <tr><td>9</td><td>輸入框位置</td><td>展示中不放輸入框，改放說明列與「開始使用」</td><td>Claude 提案，待你看過</td></tr>
+        <tr><td>10</td><td>側邊欄與左下登入按鈕</td><td>第一段首頁不放側邊欄；第二段訪客模式才有</td><td>Claude 提案，待你看過</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>L1-1</td><td>範例文章資料與 offset 解析</td><td>未開始</td></tr>
+        <tr><td>L1-2</td><td>MessageList／BranchPanel 可選 props</td><td>未開始</td></tr>
+        <tr><td>L1-3</td><td>首頁、展示狀態、模擬串流、AuthGate 切換</td><td>未開始</td></tr>
+        <tr><td>L1-4</td><td>自動播放與停止條件</td><td>未開始</td></tr>
+      </table>
+    </div>
+    <p class="muted">規格與驗收指令：<code>PLAN_v2.md</code>「L1 規格與驗收」。分支 <code>feat/landing-guest</code>。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>練習</h2>
+    <ol>
+      <li>為什麼首頁可以直接重用 <code>MessageList</code>，不用複製一份？</li>
+      <li>幫共用元件加新 prop 時，怎麼確保正式介面不受影響？</li>
+      <li>點虛線片語後，「建立分支」按鈕是誰叫出來的？</li>
+      <li>按「換一篇」時如果沒有先停計時器，畫面上會看到什麼？</li>
+      <li>為什麼帶有 <code>auth_error</code> 的網址不能先顯示首頁？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-13</p>
+
+</div>
+</body>
+</html>
