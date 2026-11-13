@@ -277,11 +277,11 @@ f = Fernet(CREDENTIAL_ENCRYPTION_KEY)      <span class="cm"># 加密金鑰只放
     <div class="table-wrap">
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
-        <tr><td>G2-1</td><td>migration：last_active_at、guest_ip_usage、openrouter_credential</td><td>未開始</td></tr>
-        <tr><td>G2-2</td><td>訪客身分與每 IP 訪客數上限</td><td>未開始</td></tr>
-        <tr><td>G2-3</td><td>額度：每日 10 則、IP 則數上限、退款</td><td>未開始</td></tr>
-        <tr><td>G2-4</td><td>登入時的額度併入與對話搬移</td><td>未開始</td></tr>
-        <tr><td>G2-5</td><td>保留期限清理</td><td>未開始</td></tr>
+        <tr><td>G2-1</td><td>migration：last_active_at、guest_ip_usage、openrouter_credential</td><td>完成，<code>2d868ee</code></td></tr>
+        <tr><td>G2-2</td><td>訪客身分與每 IP 訪客數上限</td><td>完成，<code>d004ab3</code>。limiter 搬到 <code>rate_limit.py</code>，訪客工具放 <code>guest.py</code>，避免 <code>auth_routes</code> 和 <code>main</code> 互相匯入</td></tr>
+        <tr><td>G2-3</td><td>額度：每日 10 則、IP 則數上限、退款</td><td>完成，<code>54a2151</code>。個人額度失敗時 rollback，會連同一交易裡剛加的 IP 計數一起丟掉</td></tr>
+        <tr><td>G2-4</td><td>登入時的額度併入與對話搬移</td><td>完成，<code>e902726</code>。刪除訪客的 SQL 多加 <code>oauth_provider = 'guest'</code> 條件，保證不會刪到真實帳號</td></tr>
+        <tr><td>G2-5</td><td>保留期限清理</td><td>完成，<code>19f68e3</code>。每位訪客各自 commit；保留天數設成 0 以下時不刪任何訪客</td></tr>
         <tr><td>G2-6</td><td>前端訪客模式</td><td>未開始</td></tr>
         <tr><td>G2-7</td><td>前端搬移對話框</td><td>未開始</td></tr>
         <tr><td>G2-8</td><td>OpenRouter 連結與加密保存</td><td>未開始</td></tr>
