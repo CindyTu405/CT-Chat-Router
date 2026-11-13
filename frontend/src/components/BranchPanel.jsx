@@ -26,6 +26,7 @@ import BranchListOverlay from './BranchListOverlay';
 //   onSend(id)
 //   onRetry(branchId, msg)  (G6-2) 重新生成分支裡的最後一則 AI 回覆；只有最後一則 AI 回覆會觸發（見 MessageList）
 //   onEdit(branchId, userMsg, aiMsg, text)  (F9-2) 編輯分支裡最後一則 user 訊息並重新生成其後的 AI 回覆（見 MessageList）；未傳則分支內不能編輯
+//   footer            (L1-2) 傳入（非 undefined）時，分支底部改顯示此節點，取代 ChatInput（例如落地頁示範的固定提示列）；未傳則照常顯示 ChatInput
 //   onToggle()        收起整個面板
 function BranchPanel({
   branches,
@@ -47,6 +48,7 @@ function BranchPanel({
   onSend,
   onRetry,
   onEdit,
+  footer,
   onToggle,
 }) {
   // (G3-2) 自己送出訊息時強制捲到底（比照主對話 forceScrollToken）
@@ -194,7 +196,8 @@ function BranchPanel({
             <p className="text-sm font-semibold text-gray-700 leading-tight truncate">
               {activeBranch ? activeBranch.title || '未命名分支' : '分支對話'}
             </p>
-            <p className="text-[11px] text-gray-400 font-mono truncate">{model}</p>
+            {/* (L1-2) 沒有模型名稱時不佔位 */}
+            {model && <p className="text-[11px] text-gray-400 font-mono truncate">{model}</p>}
           </div>
         </div>
         {onToggle && (
@@ -247,7 +250,9 @@ function BranchPanel({
       />
 
       {/* --- 底部輸入框（只在有分支時出現，與主對話共用 ChatInput） --- */}
-      {activeBranch && (
+      {/* (L1-2) 傳入 footer 時以它取代 ChatInput（未傳則行為不變） */}
+      {footer !== undefined && activeBranch && footer}
+      {footer === undefined && activeBranch && (
         <ChatInput
           variant="branch"
           placeholder={activeBranch.isLoading ? '等待回覆中...' : '在這個分支繼續對話...'}

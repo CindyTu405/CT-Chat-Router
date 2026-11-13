@@ -22,6 +22,9 @@ const ANCHOR_MARK_CLASS =
   'bg-amber-200/80 text-inherit underline decoration-amber-500/70 decoration-2 underline-offset-2 cursor-pointer transition-colors data-[first]:rounded-l-sm data-[first]:pl-0.5 data-[last]:rounded-r-sm data-[last]:pr-0.5 data-[hover]:bg-amber-300';
 const ANCHOR_MARK_PLAIN_CLASS =
   'bg-amber-200/80 text-inherit data-[first]:rounded-l-sm data-[first]:pl-0.5 data-[last]:rounded-r-sm data-[last]:pr-0.5';
+// (L1-2) 提示段落（尚未建立分支）的樣式：虛線底線，點一下可選取這段文字。調整：decoration-[#7B90D2] 是線色，hover:bg-[#7B90D2]/15 是 hover 底色。
+const ANCHOR_HINT_CLASS =
+  'bg-transparent text-inherit underline decoration-dashed decoration-[#7B90D2] decoration-2 underline-offset-4 cursor-pointer rounded-sm transition-colors hover:bg-[#7B90D2]/15';
 
 // (B7) 整條分支一起 hover 的屬性名（事件委派直接寫 DOM，不經 React state）
 const BRANCH_HOVER_ATTR = 'data-hover';
@@ -94,7 +97,8 @@ const clearBranchHover = (e) => {
 //      onOpenBranchRef：點擊高亮時開啟該分支的 ref。
 // (G5-B3) 這兩個都改用 ref 讀「最新值」，讓回傳的 components 物件只需建立一次（見 MessageList 內的 markdownComponents），
 //      元件身分固定，React 重新渲染時就不會把整段 DOM 拆掉重建（那會讓選取反白消失）。
-const buildMarkdownComponents = (role, branchByIdRef, onOpenBranchRef) => ({
+// (L1-2) hintByIdRef：String(hint.id) → hint 的 ref；onHintClickRef：點擊提示段落時呼叫 onHintClick(hint, e) 的 ref（同樣用 ref 讀最新值）。
+const buildMarkdownComponents = (role, branchByIdRef, onOpenBranchRef, hintByIdRef, onHintClickRef) => ({
   // 處理多行程式碼區塊 (Code Blocks)
   code({ inline, className, children, ...props }) {
     const match = /language-(\w+)/.exec(className || '');
@@ -161,6 +165,21 @@ const buildMarkdownComponents = (role, branchByIdRef, onOpenBranchRef) => ({
     const branchId = props['data-branch'];
     const branch = branchId != null ? branchByIdRef?.current?.get(String(branchId)) : null;
     if (!branch) {
+      // (L1-2) 不是分支就看是不是提示段落（虛線底線，點擊交給 onHintClick）
+      const hint = branchId != null ? hintByIdRef?.current?.get(String(branchId)) : null;
+      if (hint) {
+        return (
+          <mark
+            {...dataAttrs}
+            data-hint=""
+            onClick={(e) => onHintClickRef?.current?.(hint, e)}
+            title="點一下選取這段文字"
+            className={ANCHOR_HINT_CLASS}
+          >
+            {children}
+          </mark>
+        );
+      }
       return <mark {...dataAttrs} className={ANCHOR_MARK_PLAIN_CLASS}>{children}</mark>;
     }
     return (
@@ -196,6 +215,9 @@ function MessageList({
   onRetry,
   // (F9-2) 編輯最後一則 user 訊息：傳入時才可能出現編輯入口（見 canEdit）；送出時呼叫 onEdit(userMsg, aiMsg, text)
   onEdit,
+  // (L1-2) 提示段落：{ id, message_id, start, end }（尚未建立分支的可選段落，虛線底線）；點擊呼叫 onHintClick(hint, e)
+  anchorHints = [],
+  onHintClick,
 }) {
   const v = MESSAGE_LIST_VARIANTS[variant] || MESSAGE_LIST_VARIANTS.main;
   const messagesEndRef = useRef(null);
@@ -378,12 +400,18 @@ function MessageList({
   branchByIdRef.current = branchById;
   const onOpenBranchRef = useRef(onOpenBranch);
   onOpenBranchRef.current = onOpenBranch;
+  // (L1-2) 提示段落同樣用 ref 讀最新值：hintById（String(hint.id) → hint）與 onHintClick
+  const hintById = new Map(anchorHints.map((hint) => [String(hint.id), hint]));
+  const hintByIdRef = useRef(hintById);
+  hintByIdRef.current = hintById;
+  const onHintClickRef = useRef(onHintClick);
+  onHintClickRef.current = onHintClick;
 
   // (G5-B3) Markdown components 只建立一次（依 role 各一份）；每次渲染都用同一組函式身分，React 才不會重建 DOM
   const markdownComponents = useMemo(
     () => ({
-      user: buildMarkdownComponents('user', branchByIdRef, onOpenBranchRef),
-      assistant: buildMarkdownComponents('assistant', branchByIdRef, onOpenBranchRef),
+      user: buildMarkdownComponents('user', branchByIdRef, onOpenBranchRef, hintByIdRef, onHintClickRef),
+      assistant: buildMarkdownComponents('assistant', branchByIdRef, onOpenBranchRef, hintByIdRef, onHintClickRef),
     }),
     []
   );
@@ -454,11 +482,24 @@ function MessageList({
       )
       .map((a) => ({ id: a.id, start: a.anchor_start, end: a.anchor_end }));
 
-    if (precise.length > 0) {
+    // (L1-2) 提示段落：跳過與真正錨點重疊的範圍，其餘併入同一條 rehypeHighlight 清單
+    const hints = anchorHints
+      .filter(
+        (h) =>
+          h?.message_id === msg.id &&
+          Number.isInteger(h?.start) &&
+          Number.isInteger(h?.end) &&
+          h.start < h.end &&
+          !precise.some((a) => h.start < a.end && h.end > a.start)
+      )
+      .map((h) => ({ id: h.id, start: h.start, end: h.end }));
+    const combined = [...precise, ...hints];
+
+    if (combined.length > 0) {
       return (
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
-          rehypePlugins={[[rehypeHighlight, precise]]}
+          rehypePlugins={[[rehypeHighlight, combined]]}
           components={markdownComponents[msg.role === 'user' ? 'user' : 'assistant']}
         >
           {msg.content}
@@ -715,6 +756,7 @@ function MessageList({
         {branchSel && (
           <button
             ref={branchBtnRef}
+            data-branch-create=""
             onClick={createBranchFromSelection}
             onMouseDown={(e) => e.preventDefault()}
             style={{ left: branchSel.x, top: branchSel.y }}
