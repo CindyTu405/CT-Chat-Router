@@ -27,6 +27,8 @@ import BranchListOverlay from './BranchListOverlay';
 //   onRetry(branchId, msg)  (G6-2) 重新生成分支裡的最後一則 AI 回覆；只有最後一則 AI 回覆會觸發（見 MessageList）
 //   onEdit(branchId, userMsg, aiMsg, text)  (F9-2) 編輯分支裡最後一則 user 訊息並重新生成其後的 AI 回覆（見 MessageList）；未傳則分支內不能編輯
 //   footer            (L1-2) 傳入（非 undefined）時，分支底部改顯示此節點，取代 ChatInput（例如落地頁示範的固定提示列）；未傳則照常顯示 ChatInput
+//   defaultWidthPercent (L1-6) 沒有儲存值時的預設寬度（視窗寬度的百分比，預設 25）
+//   persistWidth      (L1-6) false 時不讀也不寫 localStorage（首頁示範用，預設 true）
 //   onToggle()        收起整個面板
 function BranchPanel({
   branches,
@@ -49,6 +51,8 @@ function BranchPanel({
   onRetry,
   onEdit,
   footer,
+  defaultWidthPercent = 25,
+  persistWidth = true,
   onToggle,
 }) {
   // (G3-2) 自己送出訊息時強制捲到底（比照主對話 forceScrollToken）
@@ -59,21 +63,23 @@ function BranchPanel({
   // 面板寬度（可拖曳調整）：佔視窗寬度 20% ~ 50%，以百分比儲存並持久化
   const MIN_PANEL_PERCENT = 20;
   const MAX_PANEL_PERCENT = 50;
-  const DEFAULT_PANEL_PERCENT = 25;
   const PANEL_WIDTH_STORAGE_KEY = 'ct-chat:branchPanelWidthPercent';
 
   const clampPanelPercent = (percent) =>
     Math.min(MAX_PANEL_PERCENT, Math.max(MIN_PANEL_PERCENT, percent));
 
+  // (L1-6) defaultWidthPercent：沒有儲存值時的預設寬度（視窗寬度的百分比）；persistWidth=false 時不讀也不寫 localStorage（首頁示範用，避免動到使用者在正式介面調過的寬度）
   // 從 localStorage 還原（掛載時讀取一次），無效值則回退預設
   const [panelPercent, setPanelPercent] = useState(() => {
-    try {
-      const stored = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
-      if (Number.isFinite(stored) && stored > 0) return clampPanelPercent(stored);
-    } catch {
-      // localStorage 不可用時忽略
+    if (persistWidth) {
+      try {
+        const stored = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
+        if (Number.isFinite(stored) && stored > 0) return clampPanelPercent(stored);
+      } catch {
+        // localStorage 不可用時忽略
+      }
     }
-    return DEFAULT_PANEL_PERCENT;
+    return clampPanelPercent(defaultWidthPercent);
   });
   const [isResizing, setIsResizing] = useState(false);
   // P3b-F5：手機（< 768px）不套用 inline 百分比寬度
@@ -87,12 +93,13 @@ function BranchPanel({
 
   // 寬度變動時寫回 localStorage
   useEffect(() => {
+    if (!persistWidth) return;
     try {
       window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(panelPercent));
     } catch {
       // localStorage 不可用時忽略
     }
-  }, [panelPercent]);
+  }, [panelPercent, persistWidth]);
 
   const activeBranch = branches.find((b) => b.id === activeBranchId) || null;
 
