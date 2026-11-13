@@ -825,3 +825,47 @@ H3／H4 驗收：教學第 6 節「驗收指令」。
 - 主對話：每條分支一個開關（**預設關**），可對話級「全選／清空」。
 - 分支：預設只含**當前分支**；可加開「主對話」或其他分支。
 - token 上限警示（UI 先留位置）。
+
+---
+
+## L1 規格與驗收：首頁互動展示（2026-11-13 確認，分支 `feat/landing-guest`）
+
+分兩段：第一段 L1（本節，純前端，使用者驗收後才做第二段）；第二段 S-U3 訪客模式＋BYOK／OpenRouter 授權連線（細節另行確認）。
+教學與決策表：`docs/20261113_(L1)landing-demo-guide.html`。使用者讀完說「開始」才動工。
+
+**已確認的決定**
+- 未登入的人先看到首頁；已登入直接進聊天（不變）。
+- 標語「追問細節，不打斷主線」；副標「選取 AI 回答裡的任何一段，開一條分支繼續問。」
+- 「開始使用」第一段先導向現有登入頁；第二段改成進訪客模式。
+- 五篇範例文章（使用者提供），每次打開隨機一篇，另有「換一篇」按鈕。
+- 展示用真的 `MessageList`／`BranchPanel` 吃假資料，不呼叫任何 API、不呼叫模型；有自動播放，使用者一動手就停。
+
+**行為規格**
+- `AuthGate`：`user === null` 時依 `view` 顯示 `LandingPage` 或 `LoginPage`；網址帶 `auth_error` 時直接顯示登入頁；登入頁加「回首頁」連結。
+- 首頁版面（整頁高度，不捲動整頁）：頂列（logo、FluentBranch、右側「登入」）→ 標語區（標語、副標、「開始使用」）→ 展示區（主對話＋右側分支面板，與正式介面相同的元件與樣式）。主對話下方原本輸入框的位置改放說明列：「這是示範。按『開始使用』就能輸入自己的問題。」分支面板底部同理。
+- 文章中三個片語先以「虛線底線」提示（還不是分支）。點片語＝程式幫忙選取該片語 → 出現真的「建立分支」按鈕 → 按下後片語變成正式高亮、開啟分支面板、顯示預寫的問題、回答以模擬串流逐字出現。已開過的片語再點＝開啟該分支。
+- 自己拖曳選取：選取範圍與某片語重疊 → 視同該片語；不重疊 → 建立一條示範分支，回答固定為「這是示範，回答是預先寫好的。按『開始使用』就能針對任何段落真的追問。」
+- 自動播放：載入 1.2 秒後開始，假游標移到第一個片語 → 選取 → 移到「建立分支」→ 按下 → 分支播放。手機（< 768）只做到「選取並顯示按鈕」，不自動開滿版分支面板。使用者有任何 pointerdown／keydown／wheel／touchstart 就永久停止；`prefers-reduced-motion` 時不播放。
+- 「換一篇」：換到下一篇，清掉示範分支、關面板、停止所有計時器。
+- 安全：首頁除了既有的 `GET /auth/me` 不發任何請求；不讀寫使用者資料；不新增外部來源（CSP 不變）。
+
+**任務**（同一個 implementer 依序做，各自 commit；全部留在分支上不 push，使用者驗收後才合併）
+
+| 任務 | 內容 | 檔案 | 驗收 |
+|---|---|---|---|
+| L1-1 | 範例文章資料與解析（去掉片語標記、算出 offset） | `frontend/src/demo/demoArticles.js` | `cd frontend && node --input-type=module -e "import('./src/demo/demoArticles.js').then(m=>{let n=0;for(const a of m.DEMO_ARTICLES)for(const p of a.phrases){if(a.answer.slice(p.start,p.end)!==p.text)throw new Error(p.text);n++}console.log('articles='+m.DEMO_ARTICLES.length+' phrases='+n+' ok')})"` → `articles=5 phrases=15 ok` |
+| L1-2 | 共用元件的可選擴充：`MessageList` 加 `anchorHints`／`onHintClick`（虛線提示）；`BranchPanel` 加 `footer`（取代輸入框）；未傳時行為完全不變 | `frontend/src/components/MessageList.jsx`、`BranchPanel.jsx` | `npm run build` 與 `npm run lint` 通過；`git diff` 確認新 props 皆有預設值、既有呼叫端（`App.jsx`）未改 |
+| L1-3 | 首頁、展示狀態、模擬串流、換一篇、`AuthGate` 切換、登入頁「回首頁」 | `frontend/src/components/LandingPage.jsx`、`AuthGate.jsx` | build／lint 通過；`grep -n "apiFetch\|fetch(" frontend/src/components/LandingPage.jsx frontend/src/demo/*` 無輸出；瀏覽器清單 |
+| L1-4 | 自動播放（假游標）與停止條件 | `frontend/src/components/LandingPage.jsx`（或 `frontend/src/demo/`） | build／lint 通過；瀏覽器清單 |
+
+**瀏覽器驗收清單**（桌面 ≥ 768 與手機 < 768 各做一次）
+1. 未登入打開網站 → 看到首頁（標語、開始使用、一篇範例），不是登入頁。
+2. 不動滑鼠等約 1 秒 → 自動播放：桌面會自動開出第一條分支並逐字出現回答；手機停在「建立分支」按鈕出現。
+3. 播放途中點一下畫面 → 假游標消失，不再自動操作。
+4. 點另一個虛線片語 → 出現「建立分支」→ 按下 → 片語變高亮、分支面板顯示預寫問答。
+5. 再點已高亮的片語 → 開啟同一條分支，不重複建立。
+6. 拖曳選取片語以外的文字 → 建立分支 → 看到固定說明文字。
+7. 「換一篇」→ 文章更換、分支清空、面板關閉。
+8. 「開始使用」與頂列「登入」→ 登入頁；「回首頁」→ 回到首頁。
+9. 登入後 → 直接進聊天；正式介面回歸：點高亮開分支、選取文字建立分支、分支面板輸入框與模型選單、桌面拖曳面板寬度，都與之前相同。
+10. 手機：分支面板滿版、右上 X 可關閉，關閉後回到首頁展示。
