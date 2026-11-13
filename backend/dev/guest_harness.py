@@ -14,6 +14,8 @@
 - (G2-4) 登入時的訪客處理（G2-4-1 起）：假 GitHub provider（patch authorize_access_token /
   _fetch_github_user，不打網路）、merge / discard、額度併入與上限、guest_session cookie、跨身分隔離、
   交易原子性（注入失敗 → 500 且資料不動）。
+- (G2-5) 保留期限清理（G2-5-1 起）：直接回填 last_active_at / created_at / guest_ip_usage.day 後呼叫
+  guest.purge_expired_guests；背景 task 的啟動次數用計數包裝確認。
 """
 import os
 import sys
@@ -23,6 +25,7 @@ import uuid
 import random
 import re
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
@@ -38,7 +41,7 @@ os.environ["CORS_ORIGINS"] = "http://localhost:5173"
 import contextlib  # noqa: E402
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
-from sqlalchemy import delete as sa_delete, func as sa_func  # noqa: E402
+from sqlalchemy import delete as sa_delete, func as sa_func, text as sa_text  # noqa: E402
 from sqlmodel import Session, select  # noqa: E402
 
 from database import engine  # noqa: E402
@@ -52,6 +55,18 @@ import main  # noqa: E402
 import auth_routes  # noqa: E402
 import guest  # noqa: E402
 from models import AuthSession, Branch, DailyUsage, GuestIpUsage, Message, User  # noqa: E402
+
+# (G2-5) 背景清理的啟動計數：在 uvicorn 啟動前包一層；main._guest_purge_loop 每次呼叫時才取 guest.run_purge_once
+PURGE_CALLS = {"n": 0}
+_real_run_purge_once = guest.run_purge_once
+
+
+def _counting_run_purge_once() -> int:
+    PURGE_CALLS["n"] += 1
+    return _real_run_purge_once()
+
+
+guest.run_purge_once = _counting_run_purge_once
 
 # database.py 的 echo 會印出所有 SQL；這個腳本只看測試結果，關掉它（只影響本腳本）。
 engine.echo = False
@@ -1096,6 +1111,197 @@ CASES = [c01_create_guest, c02_me_for_guest, c03_same_client_again, c04_guest_ch
          c21_guest_regenerate, c22_ip_cap_concurrent] + G24_CASES
 
 
+# ---------- (G2-5) 保留期限清理 ----------
+
+S5: dict = {}   # (G2-5) 案例之間共用的狀態
+
+
+def now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def set_times(uid, created: datetime, last_active: datetime | None) -> None:
+    """(G2-5) 直接回填 user.created_at / last_active_at（None 表示 NULL）。"""
+    with Session(engine) as s:
+        s.execute(sa_text('UPDATE "user" SET created_at = :c, last_active_at = :la WHERE id = :u'),
+                  {"c": created, "la": last_active, "u": uid})
+        s.commit()
+
+
+def make_guest_one_chat(ip: str) -> tuple[httpx.Client, uuid.UUID]:
+    """(G2-5) 訪客發一則訊息（有一個對話 root、一個 daily_usage 列）。"""
+    c = mk(ip)
+    r = create_guest(c, ip)
+    if r.status_code != 200 or r.json().get("created") is not True:
+        raise RuntimeError(f"create_guest failed: {r.status_code}")
+    uid = uid_of_token(tok(c))
+    r1 = chat(c, "g5 chat")
+    if r1.status_code != 200:
+        raise RuntimeError(f"g5 chat: {r1.status_code}")
+    return c, uid
+
+
+def g5_1_expired_guest_purged():
+    now = now_naive()
+    # 訪客 X：8 天沒活動，有兩個對話（含一條分支）
+    g = make_guest_two_chats(fresh_ip())
+    S5["X"] = g
+    uidX = g["uid"]
+    S5["tokX"] = tok(g["c"])
+    dX = owner_counts(uidX)
+    check("G2-5-1a setup: guest X has 6 messages, 1 branch, daily_usage and auth_session",
+          dX["messages"] == 6 and dX["branches"] == 1 and dX["daily"] >= 1 and dX["auth_sessions"] >= 1, str(dX))
+    set_times(uidX, now - timedelta(days=8), now - timedelta(days=8))
+
+    # 訪客 Y：6 天沒活動（應保留）
+    cy, uidY = make_guest_one_chat(fresh_ip())
+    set_times(uidY, now - timedelta(days=6), now - timedelta(days=6))
+    S5["Y"] = (cy, uidY)
+
+    # 訪客 Z：last_active NULL、created 8 天前（應刪）；訪客 W：created 8 天前但 last_active 1 天前（應留）
+    ip_z = fresh_ip()
+    cz = mk(ip_z)
+    create_guest(cz, ip_z)
+    uidZ = uid_of_token(tok(cz))
+    set_times(uidZ, now - timedelta(days=8), None)
+    S5["Z"] = uidZ
+    ip_w = fresh_ip()
+    cw = mk(ip_w)
+    create_guest(cw, ip_w)
+    uidW = uid_of_token(tok(cw))
+    set_times(uidW, now - timedelta(days=8), now - timedelta(days=1))
+    S5["W"] = (cw, uidW)
+
+    # 登入帳號 A：30 天前建立、30 天沒活動，有一個對話（不得被動到）
+    ca, acct, _ = new_account()
+    r = chat(ca, "g5 account chat")
+    check("G2-5-1b setup: account A creates a chat → 200", r.status_code == 200, str(r.status_code))
+    set_times(acct, now - timedelta(days=30), now - timedelta(days=30))
+    S5["A"] = (ca, acct, owner_counts(acct)["messages"])
+
+    # guest_ip_usage：兩個新 IP，一個 3 天前、一個 1 天前（台灣日期）
+    ip_old, ip_new = fresh_ip(), fresh_ip()
+    S5["ip_old"], S5["ip_new"] = ip_old, ip_new
+    with Session(engine) as s:
+        s.add(GuestIpUsage(ip_hash=guest.hash_ip(ip_old), day=guest.taiwan_today() - timedelta(days=3),
+                           guests_created=1, messages=1))
+        s.add(GuestIpUsage(ip_hash=guest.hash_ip(ip_new), day=guest.taiwan_today() - timedelta(days=1),
+                           guests_created=1, messages=1))
+        s.commit()
+
+    with Session(engine) as s:
+        S5["n"] = guest.purge_expired_guests(s)
+
+    check("G2-5-1c purge returns >= 1", S5["n"] >= 1, str(S5["n"]))
+    d = owner_counts(uidX)
+    check("G2-5-1d expired guest X: user, auth_session, daily_usage, messages and branches all gone",
+          d == {"messages": 0, "branches": 0, "daily": 0, "auth_sessions": 0, "user": False}, str(d))
+
+
+def g5_2_recent_guest_kept():
+    cy, uidY = S5["Y"]
+    d = owner_counts(uidY)
+    check("G2-5-2 guest Y (6 days inactive) kept with its chat after purge",
+          d["user"] and d["messages"] >= 2 and len(roots_of_uid(uidY)) == 1, str(d))
+
+
+def g5_3_null_last_active():
+    cw, uidW = S5["W"]
+    check("G2-5-3a guest Z (last_active NULL, created 8 days ago) deleted",
+          not owner_counts(S5["Z"])["user"], str(owner_counts(S5["Z"])))
+    check("G2-5-3b guest W (created 8 days ago, last_active 1 day ago) kept",
+          owner_counts(uidW)["user"], str(owner_counts(uidW)))
+
+
+def g5_4_account_untouched():
+    ca, acct, msgs = S5["A"]
+    d = owner_counts(acct)
+    check("G2-5-4 account (30 days inactive) untouched: user and chat still exist",
+          d["user"] and d["messages"] == msgs and msgs >= 2, f"{d} before={msgs}")
+
+
+def g5_5_ip_usage_pruned():
+    with Session(engine) as s:
+        old = s.get(GuestIpUsage, (guest.hash_ip(S5["ip_old"]), guest.taiwan_today() - timedelta(days=3)))
+        new = s.get(GuestIpUsage, (guest.hash_ip(S5["ip_new"]), guest.taiwan_today() - timedelta(days=1)))
+    check("G2-5-5a guest_ip_usage row from 3 days ago deleted", old is None, str(old))
+    check("G2-5-5b guest_ip_usage row from 1 day ago kept", new is not None, str(new))
+
+
+def g5_6_retention_zero_keeps_everything():
+    now = now_naive()
+    c, uid = make_guest_one_chat(fresh_ip())
+    set_times(uid, now - timedelta(days=30), now - timedelta(days=30))
+    S5["V"] = uid
+    with env(GUEST_RETENTION_DAYS="0"):
+        with Session(engine) as s:
+            n = guest.purge_expired_guests(s)
+    d = owner_counts(uid)
+    check("G2-5-6a GUEST_RETENTION_DAYS=0: 30-day-inactive guest NOT deleted",
+          d["user"] and d["messages"] >= 2, f"n={n} {d}")
+    with env(GUEST_RETENTION_DAYS=None):
+        with Session(engine) as s:
+            guest.purge_expired_guests(s)
+    check("G2-5-6b after restoring the env, the same guest is purged",
+          not owner_counts(uid)["user"], str(owner_counts(uid)))
+
+
+def g5_7_old_cookie_rejected():
+    c = new_client(token=S5["tokX"])
+    try:
+        r = c.get("/auth/me")
+    finally:
+        c.close()
+    check("G2-5-7 X's old session cookie after purge → GET /auth/me 401",
+          r.status_code == 401, str(r.status_code))
+
+
+def g5_8_failure_isolation():
+    now = now_naive()
+    cp, uidP = make_guest_one_chat(fresh_ip())
+    set_times(uidP, now - timedelta(days=8), now - timedelta(days=8))
+    msgs_p = owner_counts(uidP)["messages"]
+    ip_q = fresh_ip()
+    cq = mk(ip_q)
+    create_guest(cq, ip_q)
+    uidQ = uid_of_token(tok(cq))
+    set_times(uidQ, now - timedelta(days=8), now - timedelta(days=8))
+
+    original = guest.delete_guest_user
+
+    def boom_for_p(session, gid, *, keep_data):
+        if gid == uidP:
+            raise RuntimeError("injected failure for guest P")
+        return original(session, gid, keep_data=keep_data)
+
+    guest.delete_guest_user = boom_for_p
+    try:
+        with Session(engine) as s:
+            n = guest.purge_expired_guests(s)
+    finally:
+        guest.delete_guest_user = original
+
+    check("G2-5-8a purge with one failing guest does not raise and counts the successes",
+          n >= 1, f"n={n}")
+    check("G2-5-8b the other expired guest Q is deleted", not owner_counts(uidQ)["user"], str(owner_counts(uidQ)))
+    dp = owner_counts(uidP)
+    check("G2-5-8c failing guest P still exists with its chat intact",
+          dp["user"] and dp["messages"] == msgs_p and msgs_p >= 2, f"{dp} before={msgs_p}")
+
+
+def g5_9_background_wiring():
+    ok = wait_for(lambda: PURGE_CALLS["n"] >= 1)
+    check("G2-5-9a background purge loop ran at startup (run_purge_once called >= 1)",
+          ok, f"calls={PURGE_CALLS['n']}")
+    check("G2-5-9b main.GUEST_PURGE_INTERVAL_SECONDS == 3600",
+          main.GUEST_PURGE_INTERVAL_SECONDS == 3600, str(main.GUEST_PURGE_INTERVAL_SECONDS))
+
+
+G5_CASES = [g5_1_expired_guest_purged, g5_2_recent_guest_kept, g5_3_null_last_active,
+            g5_4_account_untouched, g5_5_ip_usage_pruned, g5_6_retention_zero_keeps_everything,
+            g5_7_old_cookie_rejected, g5_8_failure_isolation, g5_9_background_wiring]
+
+
 # ---------- 伺服器與清理 ----------
 
 def start_server() -> uvicorn.Server:
@@ -1177,7 +1383,7 @@ def main_entry() -> int:
     server = None
     try:
         server = start_server()
-        for fn in CASES:
+        for fn in CASES + G5_CASES:  # (G2-5) G5_CASES 定義在下方，這裡才組合
             run(fn)
     except Exception as e:  # noqa: BLE001
         check("harness setup", False, f"exception: {e!r}")

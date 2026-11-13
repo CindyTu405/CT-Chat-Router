@@ -227,11 +227,34 @@ async def run_generation(
             GENERATIONS.pop(ai_msg_id, None)
 
 
+# (G2-5) 保留期限清理的執行間隔（秒）
+GUEST_PURGE_INTERVAL_SECONDS = 3600
+
+
+async def _guest_purge_loop():
+    """(G2-5) 每小時清一次過期訪客。guest.run_purge_once 是阻塞的 DB 呼叫，丟到執行緒執行。"""
+    while True:
+        try:
+            n = await asyncio.to_thread(guest.run_purge_once)
+            if n:
+                logger.info("(G2-5) 清除過期訪客 %s 位", n)
+        except Exception:
+            logger.exception("(G2-5) 清除過期訪客失敗")
+        await asyncio.sleep(GUEST_PURGE_INTERVAL_SECONDS)
+
+
 # 1. Lifespan (生命週期管理器)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 資料表一律由 Alembic 管理（alembic upgrade head），啟動時不再自動 create_all。
+    # (G2-5) 每小時清一次 7 天沒活動的訪客；阻塞的 DB 呼叫丟到執行緒，不擋事件迴圈
+    purge_task = asyncio.create_task(_guest_purge_loop())
     yield
+    purge_task.cancel()
+    try:
+        await purge_task
+    except asyncio.CancelledError:
+        pass
     print("伺服器關閉中...")
 
 

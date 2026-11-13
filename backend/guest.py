@@ -11,6 +11,8 @@ from slowapi.util import get_remote_address
 from sqlalchemy import text
 from sqlmodel import Session
 
+from database import engine
+
 # (V1-2) 台灣時區固定 UTC+8（不用 zoneinfo：slim 映像可能缺 tzdata）
 TAIPEI_TZ = timezone(timedelta(hours=8))
 
@@ -211,3 +213,53 @@ def move_user_data(session: Session, guest_id, account_id) -> None:
     params = {"g": guest_id, "a": account_id}
     session.execute(text("UPDATE message SET user_id = :a WHERE user_id = :g"), params)
     session.execute(text("UPDATE branch SET user_id = :a WHERE user_id = :g"), params)
+
+
+# ===== (G2-5) 保留期限清理 =====
+
+IP_USAGE_KEEP_DAYS = 2  # guest_ip_usage 保留天數（台灣日期）
+
+
+def guest_retention_days() -> int:
+    """(G2-5) 訪客保留天數（GUEST_RETENTION_DAYS，預設 7）。每次呼叫都重讀環境變數。"""
+    return _int_env("GUEST_RETENTION_DAYS", 7)
+
+
+def purge_expired_guests(session: Session, now: datetime | None = None) -> int:
+    """(G2-5) 刪除超過保留期限沒有活動的訪客（連同訊息、分支），並清掉過期的 guest_ip_usage 列。回傳刪除的訪客數。
+
+    每位訪客各自 commit 一次，單一訪客失敗只 rollback 該筆、不影響其他訪客。
+    days < 1 時不刪任何訪客（設定錯誤時絕不一次刪光），但仍清 guest_ip_usage。
+    """
+    if now is None:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    deleted = 0
+    days = guest_retention_days()
+    if days >= 1:
+        cutoff = now - timedelta(days=days)
+        ids = session.execute(
+            text("""
+            SELECT id FROM "user"
+            WHERE oauth_provider = 'guest' AND COALESCE(last_active_at, created_at) < :cutoff
+            """),
+            {"cutoff": cutoff},
+        ).scalars().all()
+        for gid in ids:
+            try:
+                delete_guest_user(session, gid, keep_data=False)
+                session.commit()
+                deleted += 1
+            except Exception:
+                session.rollback()
+
+    d = taiwan_today() - timedelta(days=IP_USAGE_KEEP_DAYS)
+    session.execute(text("DELETE FROM guest_ip_usage WHERE day < :d"), {"d": d})
+    session.commit()
+    return deleted
+
+
+def run_purge_once() -> int:
+    """(G2-5) 自己開一條 session 執行一次清理。背景 task 用 asyncio.to_thread 呼叫這個函式。"""
+    with Session(engine) as session:
+        return purge_expired_guests(session)
