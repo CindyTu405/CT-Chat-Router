@@ -13,13 +13,14 @@ import hashlib
 import logging
 import os
 import uuid
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 # 自訂模組
 from database import get_session, engine
 from auth_routes import cookie_secure, get_current_user, router as auth_router, SESSION_COOKIE_NAME
+from rate_limit import limiter  # (G2-2) 單一實例，auth_routes 也會用
 from models import (
     User,
     Message,
@@ -231,7 +232,6 @@ app = FastAPI(
 
 # 2. Rate limit (slowapi)：預設 key 仍是來源 IP；/chat 與 regenerate 改用 rate_limit_key（依登入者）。
 # /chat 會觸發付費 LLM 呼叫，限制每分鐘 10 次，避免被刷。
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

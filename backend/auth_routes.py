@@ -3,7 +3,8 @@
 流程：
     GET /auth/{provider}/login      -> 轉去 provider 的授權頁 (authlib 會把 state 存進 session)
     GET /auth/{provider}/callback   -> 換 token、取 userinfo、upsert User、發 session cookie
-    GET /auth/me                    -> 目前登入者 (email / provider)
+    POST /auth/guest                -> 建立訪客身分（伺服器建 User＋session cookie；每 IP 每日上限）
+    GET /auth/me                    -> 目前登入者 (email / provider / is_guest / openrouter_connected)
     POST /auth/logout               -> 刪掉 DB 裡的 AuthSession、清 cookie
 
 安全設計：
@@ -22,9 +23,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlmodel import Session, select
 
+import guest
 from database import get_session
-from models import AuthSession, User
+from models import GUEST_PROVIDER, AuthSession, OpenRouterCredential, User
 from oauth import is_provider_configured, oauth
+from rate_limit import limiter  # (G2-2) 單一實例，main 也會用
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,17 @@ def frontend_url() -> str:
 def auth_error_redirect(code: str) -> RedirectResponse:
     """OAuth 失敗一律 303 導回前端，帶 auth_error 代碼（不洩漏細節）。"""
     return RedirectResponse(url=f"{frontend_url()}/?auth_error={code}", status_code=303)
+
+
+def allowed_origins() -> list[str]:
+    """允許的前端來源（CORS_ORIGINS，逗號分隔；解析方式同 main.py；每次呼叫都重讀環境變數）。"""
+    return [
+        o.strip()
+        for o in os.getenv(
+            "CORS_ORIGINS", "http://localhost:5173,http://localhost:8000"
+        ).split(",")
+        if o.strip()
+    ]
 
 
 def ensure_supported_provider(provider: str) -> str:
@@ -129,6 +143,18 @@ def create_session_token(session: Session, user: User) -> str:
 
 
 # ===== FastAPI 依賴：取得目前登入的使用者 =====
+
+def find_valid_session_user(session: Session, raw_token: Optional[str]) -> Optional[User]:
+    """同 get_current_user 的查詢，但無效時回 None 而不是丟 401；不刪除任何列。"""
+    if not raw_token:
+        return None
+    auth_session = session.exec(
+        select(AuthSession).where(AuthSession.token_hash == hash_token(raw_token))
+    ).first()
+    if auth_session is None or auth_session.expires_at <= utcnow_naive():
+        return None
+    return session.get(User, auth_session.user_id)
+
 
 def get_current_user(
     request: Request,
@@ -243,11 +269,56 @@ async def oauth_callback(
     return response
 
 
+@router.post("/guest")
+@limiter.limit("5/minute")
+def create_guest(request: Request, session: Session = Depends(get_session)):
+    """建立訪客身分（沒有有效登入 cookie 時才建立）。
+
+    順序：已有有效 session → 不建立；Origin 不在白名單 → 403；
+    該 IP 今日訪客數已滿 → 429 guest_ip_limit（不建立任何列）；否則建立訪客與 session cookie。
+    不記錄 IP 或其雜湊。
+    """
+    no_store = {"Cache-Control": "no-store"}
+
+    if find_valid_session_user(session, request.cookies.get(SESSION_COOKIE_NAME)) is not None:
+        return JSONResponse({"status": "ok", "created": False}, headers=no_store)
+
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in allowed_origins():
+        raise HTTPException(status_code=403, detail={"code": "bad_origin"})
+
+    day = guest.taiwan_today()
+    ip_hash = guest.hash_ip(guest.client_ip(request))
+    if not guest.try_count_guest_creation(session, ip_hash, day):
+        raise HTTPException(status_code=429, detail={"code": "guest_ip_limit"})
+
+    # 同一交易：這次 commit 也會寫入上面的 IP 計數
+    user = User(oauth_provider=GUEST_PROVIDER, oauth_sub=secrets.token_hex(16), email=None)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    raw_token = create_session_token(session, user)
+
+    response = JSONResponse({"status": "ok", "created": True}, headers=no_store)
+    set_session_cookie(response, raw_token)
+    return response
+
+
 @router.get("/me")
-def me(user: User = Depends(get_current_user)):
-    """目前登入者資訊（不回 id）。"""
+def me(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    """目前登入者資訊（不回 id、不回金鑰任何片段）。
+
+    guest_claim 目前固定為 None（G2-4 之後才會有值）。
+    """
+    openrouter_connected = session.get(OpenRouterCredential, user.id) is not None
     return JSONResponse(
-        {"email": user.email, "provider": user.oauth_provider},
+        {
+            "email": user.email,
+            "provider": user.oauth_provider,
+            "is_guest": user.is_guest,
+            "openrouter_connected": openrouter_connected,
+            "guest_claim": None,
+        },
         headers={"Cache-Control": "no-store"},
     )
 
