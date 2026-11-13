@@ -115,3 +115,99 @@ def refund_guest_message(session: Session, ip_hash: str, day: date) -> None:
         text("UPDATE guest_ip_usage SET messages = GREATEST(messages - 1, 0) WHERE ip_hash = :h AND day = :d"),
         {"h": ip_hash, "d": day},
     )
+
+
+# ===== (G2-4) 登入時的訪客處理 =====
+
+def trial_daily_limit() -> int:
+    """(G2-4) 試用者每日則數上限（DAILY_MESSAGE_LIMIT，預設 10）。每次呼叫都重讀環境變數。main.daily_message_limit() 轉呼叫這裡。"""
+    return _int_env("DAILY_MESSAGE_LIMIT", 10)
+
+
+def count_chat_roots(session: Session, user_id) -> int:
+    """(G2-4) 使用者的對話 root 數。
+
+    與 main.get_chat_roots（sort_by=updated 的 CTE）的根條件相同：
+    parent_id IS NULL、user_id 相符、branch_id IS NULL（只算主線根，幽靈分支的根不算）。
+    """
+    return session.execute(
+        text("""
+        SELECT count(*) FROM message
+        WHERE parent_id IS NULL AND user_id = :uid AND branch_id IS NULL
+        """),
+        {"uid": user_id},
+    ).scalar_one()
+
+
+def transfer_today_usage(session: Session, guest_id, account_id, day: date) -> None:
+    """(G2-4) 把訪客當日已用次數併入登入帳號當日的列，合計上限為 trial_daily_limit()。
+
+    訪客當日次數為 0（或沒有列）時不動帳號。不 commit：由呼叫端的 commit 提交。
+    """
+    count = session.execute(
+        text("SELECT count FROM daily_usage WHERE user_id = :g AND day = :d"),
+        {"g": guest_id, "d": day},
+    ).scalar()
+    if not count or count <= 0:
+        return
+    limit = trial_daily_limit()
+    session.execute(
+        text("""
+        INSERT INTO daily_usage (user_id, day, count) VALUES (:a, :d, LEAST(:c, :limit))
+        ON CONFLICT (user_id, day) DO UPDATE SET count = LEAST(daily_usage.count + :c, :limit)
+        """),
+        {"a": account_id, "d": day, "c": count, "limit": limit},
+    )
+
+
+def delete_user_data(session: Session, user_id) -> None:
+    """(G2-4) 刪除某使用者擁有的所有訊息與分支（FK 安全順序）。不 commit：由呼叫端的交易提交。
+
+    message 與 branch 之間的 FK 欄位（對照 models.py）：
+      branch.root_message_id、branch.anchor_message_id、branch.attach_root_id → message.id
+      branch.parent_branch_id → branch.id
+      message.parent_id、message.anchor_message_id → message.id
+      message.branch_id → branch.id
+    以上 7 欄都在下面的 UPDATE 清成 NULL，之後才能刪除兩張表的列。
+    """
+    params = {"u": user_id}
+    session.execute(
+        text("""
+        UPDATE branch SET root_message_id = NULL, anchor_message_id = NULL,
+                          attach_root_id = NULL, parent_branch_id = NULL
+        WHERE user_id = :u
+        """),
+        params,
+    )
+    session.execute(
+        text("""
+        UPDATE message SET parent_id = NULL, branch_id = NULL, anchor_message_id = NULL
+        WHERE user_id = :u
+        """),
+        params,
+    )
+    session.execute(text("DELETE FROM message WHERE user_id = :u"), params)
+    session.execute(text("DELETE FROM branch WHERE user_id = :u"), params)
+
+
+def delete_guest_user(session: Session, guest_id, *, keep_data: bool) -> None:
+    """(G2-4) 刪除訪客列。keep_data=False 時連同訊息與分支一起刪除。不 commit。
+
+    provider 條件是安全網：這個函式絕不刪除真實帳號。
+    """
+    if not keep_data:
+        delete_user_data(session, guest_id)
+    params = {"g": guest_id}
+    session.execute(text("DELETE FROM auth_session WHERE user_id = :g"), params)
+    session.execute(text("DELETE FROM daily_usage WHERE user_id = :g"), params)
+    session.execute(
+        text("DELETE FROM \"user\" WHERE id = :g AND oauth_provider = 'guest'"),
+        params,
+    )
+
+
+def move_user_data(session: Session, guest_id, account_id) -> None:
+    """(G2-4) 把訪客的訊息與分支的 user_id 改成登入帳號。不 commit：由呼叫端的交易提交。"""
+    params = {"g": guest_id, "a": account_id}
+    session.execute(text("UPDATE message SET user_id = :a WHERE user_id = :g"), params)
+    session.execute(text("UPDATE branch SET user_id = :a WHERE user_id = :g"), params)

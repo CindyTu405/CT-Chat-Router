@@ -11,6 +11,9 @@
 - 每個 IP 用隨機前綴（10.x.y.*），重跑同一天也不會撞到前一次的計數。
 - 結束時（即使失敗）只清掉本腳本建立的 user（訊息、分支、daily_usage、auth_session 一併）
   與本腳本用過的 IP 的 guest_ip_usage 列。
+- (G2-4) 登入時的訪客處理（G2-4-1 起）：假 GitHub provider（patch authorize_access_token /
+  _fetch_github_user，不打網路）、merge / discard、額度併入與上限、guest_session cookie、跨身分隔離、
+  交易原子性（注入失敗 → 500 且資料不動）。
 """
 import os
 import sys
@@ -81,6 +84,22 @@ async def fake_stream(*args, **kwargs):
 
 main.gemini_chat_stream = fake_stream
 main.openrouter_chat_stream = fake_stream
+
+# (G2-4) 假 GitHub provider：callback 會以 GH_NEXT["id"] 當作 GitHub 使用者 id，不打任何網路。
+GH_NEXT: dict = {"id": None}
+
+
+async def fake_authorize_access_token(request):
+    return {"access_token": "fake"}
+
+
+async def fake_fetch_github_user(token):
+    return {"id": GH_NEXT["id"], "email": None}
+
+
+auth_routes.is_provider_configured = lambda provider: True
+auth_routes.oauth.github.authorize_access_token = fake_authorize_access_token
+auth_routes._fetch_github_user = fake_fetch_github_user
 
 # 每次執行一個隨機前綴；A..F 各代表一個來源 IP
 PREFIX = f"10.{random.randint(0, 255)}.{random.randint(0, 255)}"
@@ -643,13 +662,438 @@ def c22_ip_cap_concurrent():
         check("G2-3-11d sum of the 4 guests' daily_usage.count == 7", total == 7, str(total))
 
 
+# ---------- (G2-4) 登入時的訪客處理 ----------
+
+G4_PREFIX = f"10.{random.randint(0, 255)}.{random.randint(0, 255)}"
+EXTRA_IPS: list[str] = []          # (G2-4) 本次新用的 IP（結束時清 guest_ip_usage）
+OPEN_CLIENTS: list[httpx.Client] = []
+S4: dict = {}                      # (G2-4) 案例之間共用的狀態
+
+
+def fresh_ip() -> str:
+    """(G2-4) 每個訪客用一個新 IP，避免每 IP 每日 10 個訪客的上限干擾。"""
+    ip = f"{G4_PREFIX}.{len(EXTRA_IPS) + 1}"
+    EXTRA_IPS.append(ip)
+    return ip
+
+
+def mk(ip: str | None = None) -> httpx.Client:
+    """沒有任何 cookie 的新 client。cookie 一律由伺服器回應或 set_cookie 寫入，同一 domain，避免同名 cookie 重複。"""
+    c = httpx.Client(base_url=BASE, timeout=60, headers=xff(ip) if ip else None)
+    OPEN_CLIENTS.append(c)
+    return c
+
+
+def set_cookie(c: httpx.Client, name: str, value: str) -> None:
+    c.cookies.set(name, value, domain="127.0.0.1", path="/")
+
+
+def tok(c: httpx.Client, name: str = "session") -> str | None:
+    for ck in c.cookies.jar:
+        if ck.name == name:
+            return ck.value
+    return None
+
+
+def raw_cookie(r: httpx.Response, name: str) -> str | None:
+    """回傳回應中第一條 name=... 的原始 Set-Cookie 標頭（大小寫不限）。"""
+    for h in r.headers.get_list("set-cookie"):
+        if h.split("=", 1)[0].strip() == name:
+            return h
+    return None
+
+
+def raw_value(header: str) -> str:
+    return header.split(";", 1)[0].split("=", 1)[1]
+
+
+def unique_gh() -> int:
+    return int(uuid.uuid4().hex[:15], 16)
+
+
+def acct_uid_of_gh(gh: int) -> uuid.UUID | None:
+    with Session(engine) as s:
+        u = s.exec(select(User).where(User.oauth_provider == "github", User.oauth_sub == str(gh))).first()
+        return u.id if u else None
+
+
+def login_as(c: httpx.Client, gh: int) -> httpx.Response:
+    """假 GitHub 登入：帶 c 目前的 cookie 打 callback，不跟隨轉址，回傳原始回應（看 set-cookie）。"""
+    GH_NEXT["id"] = gh
+    r = c.get("/auth/github/callback?code=fake&state=fake", follow_redirects=False)
+    if r.status_code == 303:
+        uid = acct_uid_of_gh(gh)
+        if uid is not None:
+            CREATED_UIDS.append(uid)
+    return r
+
+
+def new_account(ip: str | None = None) -> tuple[httpx.Client, uuid.UUID, int]:
+    """新的登入帳號（用 fresh client 登入）。回傳 (client, uid, gh)。"""
+    c = mk(ip or fresh_ip())
+    gh = unique_gh()
+    r = login_as(c, gh)
+    uid = acct_uid_of_gh(gh)
+    if r.status_code != 303 or uid is None:
+        raise RuntimeError(f"login_as failed: status={r.status_code}")
+    return c, uid, gh
+
+
+def make_guest_two_chats(ip: str) -> dict:
+    """訪客兩個對話；第一個對話有一條分支、分支內一則訊息。共 6 則訊息、1 條分支。"""
+    c = mk(ip)
+    r = create_guest(c, ip)
+    if r.status_code != 200 or r.json().get("created") is not True:
+        raise RuntimeError(f"create_guest failed: {r.status_code}")
+    uid = uid_of_token(tok(c))
+    r1 = chat(c, "g4 chat one")
+    if r1.status_code != 200:
+        raise RuntimeError(f"chat one: {r1.status_code}")
+    ai1 = _ai_id_of(r1)
+    root1 = next(iter(roots_of_uid(uid)))
+    rb = c.post(f"/chats/{root1}/branches", json={"anchor_message_id": ai1, "anchor_text": "g4 anchor"})
+    bid = rb.json().get("branch_id") if rb.status_code == 200 else None
+    if bid is None:
+        raise RuntimeError(f"create branch: {rb.status_code}")
+    rm = c.post("/chat", json={"message": "g4 in branch", "model": MODEL, "parent_id": ai1, "branch_id": bid})
+    if rm.status_code != 200:
+        raise RuntimeError(f"chat in branch: {rm.status_code}")
+    r2 = chat(c, "g4 chat two")
+    if r2.status_code != 200:
+        raise RuntimeError(f"chat two: {r2.status_code}")
+    root2 = next(iter(roots_of_uid(uid) - {root1}))
+    return {"c": c, "uid": uid, "root1": root1, "root2": root2, "bid": str(bid)}
+
+
+def roots_of_uid(uid) -> set[str]:
+    """(G2-4) 使用者的主線對話根（與 get_chat_roots 同條件）。"""
+    with Session(engine) as s:
+        rows = s.exec(select(Message.id).where(
+            Message.user_id == uid, Message.parent_id == None, Message.branch_id == None  # noqa: E711
+        )).all()
+    return {str(x) for x in rows}
+
+
+def owner_counts(uid) -> dict:
+    with Session(engine) as s:
+        return {
+            "messages": s.exec(select(sa_func.count()).select_from(Message).where(Message.user_id == uid)).one(),
+            "branches": s.exec(select(sa_func.count()).select_from(Branch).where(Branch.user_id == uid)).one(),
+            "daily": s.exec(select(sa_func.count()).select_from(DailyUsage).where(DailyUsage.user_id == uid)).one(),
+            "auth_sessions": s.exec(select(sa_func.count()).select_from(AuthSession).where(AuthSession.user_id == uid)).one(),
+            "user": s.get(User, uid) is not None,
+        }
+
+
+def global_counts() -> tuple[int, int, int]:
+    with Session(engine) as s:
+        return (
+            s.exec(select(sa_func.count()).select_from(User)).one(),
+            s.exec(select(sa_func.count()).select_from(Message)).one(),
+            s.exec(select(sa_func.count()).select_from(Branch)).one(),
+        )
+
+
+def msg_snapshot(uid) -> list[tuple[str, str]]:
+    return sorted((str(m.id), m.content) for m in messages_of(uid))
+
+
+def branch_owner(bid) -> uuid.UUID | None:
+    with Session(engine) as s:
+        b = s.get(Branch, uuid.UUID(str(bid)))
+        return b.user_id if b else None
+
+
+def claim(c: httpx.Client, action: str) -> httpx.Response:
+    return c.post("/auth/guest-claim", json={"action": action})
+
+
+def detail_code(r: httpx.Response) -> str | None:
+    d = r.json().get("detail") if r.status_code in (403, 409) else None
+    return d.get("code") if isinstance(d, dict) else None
+
+
+def g4_1_login_with_pending_chats():
+    g = make_guest_two_chats(fresh_ip())
+    S4["g1"] = g
+    c = g["c"]
+    gtok = tok(c)
+    gh = unique_gh()
+    S4["gh1"] = gh
+    r = login_as(c, gh)
+    S4["acct1"] = acct_uid_of_gh(gh)
+    check("G2-4-1a guest with 2 chats logs in → 303", r.status_code == 303, f"status={r.status_code}")
+    sess_h = raw_cookie(r, "session")
+    gs_h = raw_cookie(r, "guest_session")
+    low = (gs_h or "").lower()
+    check("G2-4-1b callback sets a NEW session cookie for the account",
+          sess_h is not None and raw_value(sess_h) != gtok and tok(c) == raw_value(sess_h), str(sess_h)[:80])
+    check("G2-4-1c guest_session = guest token, HttpOnly, SameSite=lax, Max-Age=86400",
+          gs_h is not None and raw_value(gs_h) == gtok and "httponly" in low
+          and "samesite=lax" in low and "max-age=86400" in low, str(gs_h)[:200])
+    me = c.get("/auth/me")
+    body = me.json() if me.status_code == 200 else {}
+    check("G2-4-1d /auth/me → is_guest false and guest_claim {chat_count: 2}",
+          body.get("is_guest") is False and body.get("guest_claim") == {"chat_count": 2}, str(body))
+
+
+def g4_2_merge():
+    g = S4["g1"]
+    c, gid, acct = g["c"], g["uid"], S4["acct1"]
+    n_msgs = owner_counts(gid)["messages"]
+    r = claim(c, "merge")
+    body = r.json() if r.status_code == 200 else {}
+    check("G2-4-2a merge → 200 with action merge and chat_count 2",
+          r.status_code == 200 and body.get("action") == "merge" and body.get("chat_count") == 2,
+          f"status={r.status_code} body={r.text[:200]}")
+    ga, aa = owner_counts(gid), owner_counts(acct)
+    check("G2-4-2b every guest message and branch now belongs to the account",
+          ga["messages"] == 0 and ga["branches"] == 0 and aa["messages"] == n_msgs
+          and aa["branches"] == 1 and branch_owner(g["bid"]) == acct,
+          f"guest={ga} acct={aa} n_msgs={n_msgs}")
+    check("G2-4-2c guest user, auth_session and daily_usage rows are gone",
+          not ga["user"] and ga["auth_sessions"] == 0 and ga["daily"] == 0, str(ga))
+    rr = c.get("/chats/roots")
+    ids = {row["id"] for row in rr.json()} if rr.status_code == 200 else None
+    check("G2-4-2d account GET /chats/roots lists both chats",
+          ids == {g["root1"], g["root2"]}, f"status={rr.status_code} ids={ids}")
+    h = c.get(f"/chats/{g['root1']}/history")
+    b = c.get(f"/chats/{g['root1']}/branches")
+    bids = {x.get("id") for x in b.json()} if b.status_code == 200 else set()
+    check("G2-4-2e history → 200 and branches → 200 with the branch present",
+          h.status_code == 200 and b.status_code == 200 and g["bid"] in bids,
+          f"history={h.status_code} branches={b.status_code} ids={bids}")
+    gs_clear = raw_cookie(r, "guest_session")
+    check("G2-4-2f response expires guest_session (Max-Age=0)",
+          gs_clear is not None and "max-age=0" in gs_clear.lower(), str(gs_clear)[:200])
+    claim_after = c.get("/auth/me").json().get("guest_claim")
+    check("G2-4-2g /auth/me → guest_claim None after merge", claim_after is None, str(claim_after))
+    S4["merged_root"] = g["root1"]
+
+
+def g4_3_repeat_merge():
+    c, acct = S4["g1"]["c"], S4["acct1"]
+    before = (owner_counts(acct), global_counts())
+    r = claim(c, "merge")
+    check("G2-4-3a repeat merge → 409 no_pending_claim",
+          r.status_code == 409 and detail_code(r) == "no_pending_claim", f"status={r.status_code} body={r.text[:200]}")
+    check("G2-4-3b data unchanged after the repeat",
+          (owner_counts(acct), global_counts()) == before, f"before={before}")
+
+
+def g4_4_discard():
+    ca, acct, gh = new_account()
+    r = chat(ca, "account own chat")
+    check("G2-4-4a account creates its own chat → 200", r.status_code == 200, str(r.status_code))
+    own_root = next(iter(roots_of_uid(acct)))
+    snap = msg_snapshot(acct)
+    g = make_guest_two_chats(fresh_ip())
+    gid, gc = g["uid"], g["c"]
+    r = login_as(gc, gh)
+    check("G2-4-4b guest with 2 chats logs in to the existing account → 303",
+          r.status_code == 303, f"status={r.status_code}")
+    r = claim(gc, "discard")
+    body = r.json() if r.status_code == 200 else {}
+    check("G2-4-4c discard → 200 with chat_count 2",
+          r.status_code == 200 and body.get("action") == "discard" and body.get("chat_count") == 2,
+          f"status={r.status_code} body={r.text[:200]}")
+    gg = owner_counts(gid)
+    check("G2-4-4d no message or branch with the guest id remains",
+          gg["messages"] == 0 and gg["branches"] == 0, str(gg))
+    check("G2-4-4e guest user row gone", not gg["user"] and gg["auth_sessions"] == 0 and gg["daily"] == 0, str(gg))
+    check("G2-4-4f account still has exactly its own chat with unchanged content",
+          roots_of_uid(acct) == {own_root} and msg_snapshot(acct) == snap and owner_counts(acct)["branches"] == 0,
+          f"roots={roots_of_uid(acct)} own={own_root}")
+
+
+def g4_5_usage_transfer():
+    with env(DAILY_MESSAGE_LIMIT="10"):
+        ip = fresh_ip()
+        c = mk(ip)
+        create_guest(c, ip)
+        st = [chat(c, f"u5 {i}").status_code for i in range(7)]
+        check("G2-4-5a guest sends 7 → all 200", st == [200] * 7, str(st))
+        gh = unique_gh()
+        r = login_as(c, gh)
+        acct = acct_uid_of_gh(gh)
+        check("G2-4-5b login → 303 and account daily_usage.count == 7 right after login",
+              r.status_code == 303 and daily_count(acct) == 7,
+              f"status={r.status_code} count={daily_count(acct)}")
+        st = [chat(c, f"acct {i}").status_code for i in range(3)]
+        check("G2-4-5c account sends 3 more → all 200", st == [200] * 3, str(st))
+        r = chat(c, "fourth")
+        check("G2-4-5d 4th → 429 daily_quota_exceeded",
+              r.status_code == 429 and r.json().get("detail", {}).get("code") == "daily_quota_exceeded",
+              f"status={r.status_code} body={r.text[:200]}")
+
+
+def g4_6_usage_cap():
+    with env(DAILY_MESSAGE_LIMIT="10"):
+        ca, acct, gh = new_account()
+        st = [chat(ca, f"a6 {i}").status_code for i in range(6)]
+        check("G2-4-6a account used 6 today", st == [200] * 6 and daily_count(acct) == 6,
+              f"st={st} count={daily_count(acct)}")
+        ip = fresh_ip()
+        cg = mk(ip)
+        create_guest(cg, ip)
+        st = [chat(cg, f"g6 {i}").status_code for i in range(7)]
+        check("G2-4-6b guest used 7 today", st == [200] * 7, str(st))
+        r = login_as(cg, gh)
+        check("G2-4-6c login → account count == 10 (capped, not 13)",
+              r.status_code == 303 and daily_count(acct) == 10, f"status={r.status_code} count={daily_count(acct)}")
+
+
+def g4_7_no_guest_cookie():
+    ca, acct, _ = new_account()
+    before = (owner_counts(acct), global_counts())
+    r = claim(ca, "merge")
+    check("G2-4-7a logged-in account without guest_session → 409 no_pending_claim",
+          r.status_code == 409 and detail_code(r) == "no_pending_claim", f"status={r.status_code}")
+    check("G2-4-7b row counts unchanged", (owner_counts(acct), global_counts()) == before, str(before))
+
+
+def g4_8_garbage_guest_cookie():
+    ca, acct, _ = new_account()
+    set_cookie(ca, "guest_session", uuid.uuid4().hex + uuid.uuid4().hex)
+    before = (owner_counts(acct), global_counts())
+    r = claim(ca, "merge")
+    check("G2-4-8a random guest_session → 409 no_pending_claim",
+          r.status_code == 409 and detail_code(r) == "no_pending_claim", f"status={r.status_code}")
+    check("G2-4-8b nothing changed", (owner_counts(acct), global_counts()) == before, str(before))
+
+
+def g4_9_account_session_as_guest_cookie():
+    ca_a, acct_a, _ = new_account()
+    r = chat(ca_a, "A chat")
+    check("G2-4-9a account A creates a chat → 200", r.status_code == 200, str(r.status_code))
+    roots_a = roots_of_uid(acct_a)
+    count_a = owner_counts(acct_a)
+    tok_a = tok(ca_a)
+    cb, acct_b, _ = new_account()
+    set_cookie(cb, "guest_session", tok_a)
+    before_b = owner_counts(acct_b)
+    r = claim(cb, "merge")
+    check("G2-4-9b account B with A's session token as guest_session → 409",
+          r.status_code == 409 and detail_code(r) == "no_pending_claim", f"status={r.status_code}")
+    check("G2-4-9c A's chats still belong to A and A's user row exists",
+          roots_of_uid(acct_a) == roots_a and owner_counts(acct_a) == count_a, str(owner_counts(acct_a)))
+    check("G2-4-9d B's data unchanged", owner_counts(acct_b) == before_b, str(owner_counts(acct_b)))
+
+
+def g4_10_guest_caller_with_other_guest_cookie():
+    ip1 = fresh_ip()
+    c1 = mk(ip1)
+    create_guest(c1, ip1)
+    g2 = make_guest_two_chats(fresh_ip())
+    set_cookie(c1, "guest_session", tok(g2["c"]))
+    before = (owner_counts(g2["uid"]), roots_of_uid(g2["uid"]))
+    r = claim(c1, "merge")
+    check("G2-4-10a guest caller → 403 guest_cannot_claim",
+          r.status_code == 403 and detail_code(r) == "guest_cannot_claim", f"status={r.status_code} body={r.text[:200]}")
+    check("G2-4-10b guest2's data unchanged", (owner_counts(g2["uid"]), roots_of_uid(g2["uid"])) == before,
+          str(before))
+
+
+def g4_11_zero_chats_login():
+    ip = fresh_ip()
+    c = mk(ip)
+    create_guest(c, ip)
+    gid = uid_of_token(tok(c))
+    gh = unique_gh()
+    r = login_as(c, gh)
+    check("G2-4-11a zero-chat guest logs in → 303 with no guest_session cookie",
+          r.status_code == 303 and raw_cookie(r, "guest_session") is None, f"status={r.status_code}")
+    gg = owner_counts(gid)
+    check("G2-4-11b guest user row deleted", not gg["user"] and gg["auth_sessions"] == 0 and gg["daily"] == 0, str(gg))
+    me = c.get("/auth/me").json()
+    check("G2-4-11c /auth/me → is_guest false, guest_claim None",
+          me.get("is_guest") is False and me.get("guest_claim") is None, str(me))
+
+
+def g4_12_bad_and_extra_fields():
+    ca, _, _ = new_account()
+    r = claim(ca, "steal")
+    check("G2-4-12a action 'steal' → 422", r.status_code == 422, f"status={r.status_code}")
+    decoy = make_guest_two_chats(fresh_ip())
+    cx = make_guest_two_chats(fresh_ip())
+    gh = unique_gh()
+    r = login_as(cx["c"], gh)
+    acct = acct_uid_of_gh(gh)
+    check("G2-4-12b guest X logs in → 303", r.status_code == 303, f"status={r.status_code}")
+    before_decoy = (owner_counts(decoy["uid"]), roots_of_uid(decoy["uid"]))
+    r = cx["c"].post("/auth/guest-claim", json={"action": "merge", "guest_user_id": str(decoy["uid"])})
+    body = r.json() if r.status_code == 200 else {}
+    check("G2-4-12c merge with extra guest_user_id → 200, chat_count 2 (the cookie guest)",
+          r.status_code == 200 and body.get("chat_count") == 2, f"status={r.status_code} body={r.text[:200]}")
+    check("G2-4-12d X's data moved to the account (the cookie-identified guest)",
+          owner_counts(cx["uid"])["messages"] == 0 and owner_counts(acct)["messages"] == 6,
+          f"x={owner_counts(cx['uid'])} acct={owner_counts(acct)}")
+    check("G2-4-12e the named decoy guest's data did NOT move",
+          (owner_counts(decoy["uid"]), roots_of_uid(decoy["uid"])) == before_decoy and owner_counts(decoy["uid"])["user"],
+          str(owner_counts(decoy["uid"])))
+
+
+def g4_13_fresh_client_login():
+    c = mk(fresh_ip())
+    gh = unique_gh()
+    r = login_as(c, gh)
+    check("G2-4-13a fresh client login → 303, session set, no guest_session cookie",
+          r.status_code == 303 and raw_cookie(r, "session") is not None and raw_cookie(r, "guest_session") is None,
+          f"status={r.status_code}")
+    me = c.get("/auth/me").json()
+    check("G2-4-13b /auth/me → is_guest false, guest_claim None",
+          me.get("is_guest") is False and me.get("guest_claim") is None, str(me))
+
+
+def g4_14_merged_chat_hidden_from_other_account():
+    cc, _, _ = new_account()
+    root = S4["merged_root"]
+    rh = cc.get(f"/chats/{root}/history")
+    rt = cc.get(f"/chats/{root}/tree")
+    check("G2-4-14 another account C: GET history and tree of the merged chat → 404",
+          rh.status_code == 404 and rt.status_code == 404, f"history={rh.status_code} tree={rt.status_code}")
+
+
+def g4_15_atomic_merge():
+    g = make_guest_two_chats(fresh_ip())
+    gid, c = g["uid"], g["c"]
+    gh = unique_gh()
+    r = login_as(c, gh)
+    check("G2-4-15a guest logs in to account → 303", r.status_code == 303, f"status={r.status_code}")
+    acct = acct_uid_of_gh(gh)
+    before_guest = owner_counts(gid)
+    original = guest.delete_guest_user
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("injected failure after move_user_data")
+
+    guest.delete_guest_user = boom
+    try:
+        r = claim(c, "merge")
+    finally:
+        guest.delete_guest_user = original
+    check("G2-4-15b injected failure during merge → 500", r.status_code == 500, f"status={r.status_code}")
+    after_guest, after_acct = owner_counts(gid), owner_counts(acct)
+    check("G2-4-15c the move was rolled back: guest still owns its messages and branch",
+          after_guest["messages"] == before_guest["messages"] == 6 and after_guest["branches"] == 1
+          and after_acct["messages"] == 0 and branch_owner(g["bid"]) == gid, f"guest={after_guest} acct={after_acct}")
+    check("G2-4-15d guest user row and auth_session still exist",
+          after_guest["user"] and after_guest["auth_sessions"] >= 1, str(after_guest))
+
+
+G24_CASES = [g4_1_login_with_pending_chats, g4_2_merge, g4_3_repeat_merge, g4_4_discard,
+             g4_5_usage_transfer, g4_6_usage_cap, g4_7_no_guest_cookie, g4_8_garbage_guest_cookie,
+             g4_9_account_session_as_guest_cookie, g4_10_guest_caller_with_other_guest_cookie,
+             g4_11_zero_chats_login, g4_12_bad_and_extra_fields, g4_13_fresh_client_login,
+             g4_14_merged_chat_hidden_from_other_account, g4_15_atomic_merge]
+
 CASES = [c01_create_guest, c02_me_for_guest, c03_same_client_again, c04_guest_chats,
          c05_ip_b_cap, c06_ip_c_concurrent, c07_ip_d_fresh, c08_no_raw_ip_in_db,
          c09_origin, c10_isolation, c11_no_cookie,
          c12_default_limit, c13_daily_limit_ten, c14_ip_cap_shared, c15_ip_cap_isolation,
          c16_personal_limit_rolls_back_ip, c17_generation_failed_before_output,
          c18_generation_failed_after_output, c19_model_not_allowed, c20_last_active,
-         c21_guest_regenerate, c22_ip_cap_concurrent]
+         c21_guest_regenerate, c22_ip_cap_concurrent] + G24_CASES
 
 
 # ---------- 伺服器與清理 ----------
@@ -720,7 +1164,7 @@ def cleanup_user(uid: uuid.UUID):
 
 def cleanup_ip_usage():
     """只刪本次執行用過的 IP 雜湊列。"""
-    hashes = [guest.hash_ip(ip) for ip in IP.values()]
+    hashes = [guest.hash_ip(ip) for ip in list(IP.values()) + EXTRA_IPS]
     try:
         with Session(engine) as s:
             s.execute(sa_delete(GuestIpUsage).where(GuestIpUsage.ip_hash.in_(hashes)))
@@ -738,7 +1182,7 @@ def main_entry() -> int:
     except Exception as e:  # noqa: BLE001
         check("harness setup", False, f"exception: {e!r}")
     finally:
-        for c in [S.get("cA"), S.get("cG2")]:
+        for c in [S.get("cA"), S.get("cG2")] + OPEN_CLIENTS:
             if c is not None:
                 c.close()
         if server is not None:

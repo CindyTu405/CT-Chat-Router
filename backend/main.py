@@ -87,7 +87,7 @@ def _int_env(name: str, default: int) -> int:
 
 def daily_message_limit() -> int:
     """(V1-2)(G2-3) 試用者（訪客與未連結 OpenRouter 的登入用戶）每個台灣日期的次數上限（DAILY_MESSAGE_LIMIT，預設 10）。"""
-    return _int_env("DAILY_MESSAGE_LIMIT", 10)
+    return guest.trial_daily_limit()
 
 
 def site_daily_message_limit() -> int:
