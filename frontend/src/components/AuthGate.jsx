@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { FcGoogle } from 'react-icons/fc';
 import { FaGithub } from 'react-icons/fa';
 import App from '../App';
+// (L1-3) 未登入的首頁
+import LandingPage from './LandingPage';
 import { API_URL, apiFetch } from '../api';
 
 // 後端導回時帶的 auth_error 代碼 → 固定文案；不認得的一律用通用訊息，絕不顯示原始參數
@@ -19,7 +21,7 @@ function readAuthError() {
     : AUTH_ERROR_FALLBACK;
 }
 
-function LoginPage() {
+function LoginPage({ onBack }) {
   // 只在掛載時讀一次，讀完立刻把參數從網址移除（重新整理不會再出現）
   const [errorMessage] = useState(readAuthError);
   useEffect(() => {
@@ -56,6 +58,14 @@ function LoginPage() {
           <FaGithub className="w-5 h-5" aria-hidden="true" />
           使用 GitHub 繼續
         </a>
+        {/* (L1-3) 回首頁：回到未登入的首頁展示 */}
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 cursor-pointer"
+        >
+          ← 回首頁
+        </button>
         <a
           href="/privacy.html"
           target="_blank"
@@ -72,6 +82,11 @@ function LoginPage() {
 // user：undefined = 檢查中、null = 未登入、object = 已登入
 function AuthGate() {
   const [user, setUser] = useState(undefined);
+  // (L1-3) 未登入時顯示首頁（landing）或登入頁（login）；網址帶 auth_error 時直接進登入頁。
+  // 用惰性初始化在 LoginPage 移除參數之前讀取
+  const [view, setView] = useState(() =>
+    new URLSearchParams(window.location.search).has('auth_error') ? 'login' : 'landing'
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -99,7 +114,13 @@ function AuthGate() {
   if (user === undefined) {
     return <div className="h-screen supports-[height:100dvh]:h-dvh bg-[#E8F1F5]" />;
   }
-  if (user === null) return <LoginPage />;
+  if (user === null) {
+    return view === 'login' ? (
+      <LoginPage onBack={() => setView('landing')} />
+    ) : (
+      <LandingPage onStart={() => setView('login')} />
+    );
+  }
   return <App user={user} />;
 }
 
