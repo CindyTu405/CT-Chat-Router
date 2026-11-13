@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>訪客模式與 OpenRouter 授權連線教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · G2</span>
+    <h1>訪客模式與 OpenRouter 授權連線</h1>
+    <p>讓沒登入的人先試用，登入後把試用對話帶走；登入的人接上自己的 OpenRouter 帳號，用自己的額度。這份教學說明背後的概念、為什麼這樣設計，以及安全上要守住什麼。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>要解決的問題</h2>
+    <ul>
+      <li>首頁看完示範，按「開始使用」卻要先登入，很多人會在這裡離開。</li>
+      <li>平台的 OpenRouter 免費額度是整個帳號共用的。使用者一多，大家一起被擋。</li>
+    </ul>
+    <p>做法分兩塊：<b>訪客模式</b>讓人不登入就能試 10 則；<b>OpenRouter 授權連線</b>讓登入的人改用自己的帳號，不再占用平台額度。</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>身分</th><th>用誰的金鑰</th><th>每日則數</th><th>可用模型</th><th>對話保存</th></tr>
+        <tr><td>訪客（沒登入）</td><td>平台</td><td>10</td><td>免費模型</td><td>7 天沒活動就刪除</td></tr>
+        <tr><td>已登入、未連結</td><td>平台</td><td>10</td><td>免費模型</td><td>到自己刪除為止</td></tr>
+        <tr><td>已登入、已連結</td><td>自己的</td><td>不限</td><td>任何模型 ID</td><td>到自己刪除為止</td></tr>
+      </table>
+    </div>
+    <p class="muted">前兩種在規格裡合稱「試用者」。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：訪客也是一個使用者</h2>
+    <p>現在每則訊息、每條分支都有 <code>user_id</code>，每個 API 都先用 <code>get_current_user</code> 從 cookie 找出使用者，再檢查資料是不是他的。</p>
+    <p>訪客模式不另外做一套。按下「開始使用」時，後端建立一列 <code>User</code>，<code>oauth_provider</code> 填 <code>"guest"</code>，再發一個跟登入一樣的 <code>session</code> cookie。之後這個瀏覽器送來的每個請求，後端看到的就是「一個使用者」，原本的擁有者檢查一行都不用改。</p>
+    <div class="flow">
+      <div class="box">按「開始使用」</div>
+      <div class="arrow">→</div>
+      <div class="box">POST /auth/guest</div>
+      <div class="arrow">→</div>
+      <div class="box">建立訪客 User<br>發 session cookie</div>
+      <div class="arrow">→</div>
+      <div class="box">進入聊天</div>
+    </div>
+    <div class="tip"><b>為什麼不用 IP 當身分：</b>同一個 IP 後面可能是整間公司或整個電信業者的用戶，用 IP 當身分會讓不相干的人看到彼此的對話。IP 只拿來限制次數，身分靠 cookie。</div>
+    <div class="tip"><b>為什麼不把訪客對話存在瀏覽器：</b>那樣後端要多一條「沒有使用者」的路徑，串流、分支、重新生成全部要寫兩份，登入時還要把瀏覽器的資料上傳合併。讓訪客成為使用者，登入時只要改 <code>user_id</code>。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：三層額度</h2>
+    <p>訪客清掉 cookie 就會變成一個新的訪客，所以只限制「每個訪客 10 則」不夠。額度有三層，任何一層滿了就擋：</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>層</th><th>上限</th><th>對象</th><th>擋下時</th></tr>
+        <tr><td>個人</td><td>每天 10 則</td><td>每個試用者</td><td>429 <code>daily_quota_exceeded</code></td></tr>
+        <tr><td>IP</td><td>每天 10 個訪客身分、100 則</td><td>只算訪客</td><td>429 <code>guest_ip_limit</code></td></tr>
+        <tr><td>全站</td><td>每天 900 則</td><td>所有試用者合計</td><td>503 <code>site_quota_exceeded</code></td></tr>
+      </table>
+    </div>
+    <h3>IP 不存原文，存雜湊</h3>
+    <p>要數「這個 IP 今天用了幾次」，不需要知道 IP 是多少，只要每次算出同一個代號。</p>
+<pre><code>ip_hash = HMAC-SHA256(key=IP_HASH_SECRET, msg="203.0.113.7")
+<span class="cm"># 同一個 IP 永遠得到同一串；沒有 IP_HASH_SECRET 的人無法從這串反推 IP</span></code></pre>
+    <div class="warn"><b>為什麼要加密鑰（HMAC）而不是直接 SHA-256：</b>IPv4 只有 43 億個，直接雜湊可以把全部 IP 算一遍做成對照表。加了只有伺服器知道的密鑰，資料庫外洩時別人也對不回去。</div>
+    <h3>不會超發的計數</h3>
+    <p>20 個請求同時到，如果「先讀次數、判斷、再加一」分三步做，可能 20 個都讀到 9 然後都通過。現有的每日額度已經用一句 SQL 解決，新的 IP 計數用同一個寫法：</p>
+<pre><code>INSERT INTO guest_ip_usage (ip_hash, day, messages) VALUES (:h, :d, 1)
+ON CONFLICT (ip_hash, day) DO UPDATE SET messages = guest_ip_usage.messages + 1
+WHERE guest_ip_usage.messages &lt; :limit
+RETURNING messages
+<span class="cm">-- 沒有回傳列 = 已經滿了。判斷和加一在資料庫裡是同一個動作。</span></code></pre>
+    <div class="tip"><b>防止換身分洗額度：</b>訪客用了 7 則再登入，登入帳號當天只剩 3 則。登入的那一刻，後端把訪客當天的次數加到帳號上。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>概念：登入時把試用對話帶走</h2>
+    <p>登入成功後，瀏覽器的 <code>session</code> cookie 換成登入帳號的。訪客原本的 token 不丟掉，改放到另一個 httpOnly cookie <code>guest_session</code>（有效 1 天）。</p>
+    <div class="flow">
+      <div class="box">訪客按登入</div>
+      <div class="arrow">→</div>
+      <div class="box">OAuth 回來<br>session = 帳號<br>guest_session = 訪客</div>
+      <div class="arrow">→</div>
+      <div class="box">詢問：移到帳號？</div>
+      <div class="arrow">→</div>
+      <div class="box">移入：改 user_id<br>刪除：整批刪掉</div>
+    </div>
+    <p>「移到帳號」在資料庫裡就是把訪客的訊息和分支的 <code>user_id</code> 改成登入帳號，再刪掉訪客那一列。</p>
+    <div class="warn"><b>安全重點：</b>搬移的請求不帶任何 id。後端只認兩個 cookie：<code>session</code> 說明「搬到誰」，<code>guest_session</code> 證明「你就是那個訪客」。攻擊者沒有受害者瀏覽器裡的訪客 token，就搬不走別人的對話。</div>
+    <div class="tip"><b>為什麼要問而不是自動搬：</b>共用電腦上，前一個人試用留下的對話，不應該自動併進下一個登入的人的帳號。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>概念：過期資料的清理</h2>
+    <p>訪客 7 天沒有活動，就連同對話一起刪除。<code>User</code> 多一個欄位 <code>last_active_at</code>，每次送訊息時更新。</p>
+    <p>後端啟動時開一個背景工作，每小時跑一次清理。清理是會卡住的資料庫操作，所以用 <code>asyncio.to_thread</code> 丟到別的執行緒做，不擋住正在串流的請求（現有的生成寫回也是這樣做的）。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>概念：OpenRouter 授權（OAuth PKCE）</h2>
+    <p>目的：讓使用者把「用我 OpenRouter 帳號的權限」交給我們，但不用把密碼或金鑰複製貼上。</p>
+    <div class="flow">
+      <div class="box">按「連結 OpenRouter」</div>
+      <div class="arrow">→</div>
+      <div class="box">後端產生<br>verifier 與 state<br>導向 openrouter.ai/auth</div>
+      <div class="arrow">→</div>
+      <div class="box">使用者在 OpenRouter<br>按同意</div>
+      <div class="arrow">→</div>
+      <div class="box">導回本站<br>帶 code 與 state</div>
+      <div class="arrow">→</div>
+      <div class="box">後端用 code + verifier<br>換到 API 金鑰</div>
+    </div>
+    <h3>PKCE 在防什麼</h3>
+    <p><code>code</code> 會出現在網址上，可能被瀏覽器紀錄、外掛、代理伺服器看到。PKCE 讓「只有 code」沒有用：</p>
+<pre><code>code_verifier  = 隨機字串（只留在我們的後端）
+code_challenge = BASE64URL(SHA256(code_verifier))   <span class="cm"># 這個才送給 OpenRouter</span>
+
+<span class="cm"># 換金鑰時要交出 code_verifier。OpenRouter 自己算一次 SHA256，
+# 和當初收到的 code_challenge 對得上才給金鑰。
+# 偷到 code 的人沒有 verifier，換不到。</span></code></pre>
+    <h3>state 在防什麼</h3>
+    <p>攻擊者可以先用自己的 OpenRouter 帳號走到「導回本站」那一步，把那個網址騙受害者點開。如果後端照單全收，受害者的帳號就接上了攻擊者的 OpenRouter，受害者之後的對話內容全都經過攻擊者的金鑰。</p>
+    <p><code>state</code> 是後端在發起時產生、存在自己 session 裡的隨機值。導回來時要帶同一個值，而且 session 裡記的發起人要等於目前登入的人。不是自己發起的回呼一律拒絕，用過一次就作廢。</p>
+    <div class="tip"><b>和 Google／GitHub 登入的差別：</b>那兩個是「確認你是誰」，換到的資料用完就丟。OpenRouter 這個是「拿到一把可以花錢的金鑰」，之後每次呼叫模型都要用，所以必須保存。文件沒有說這把金鑰會過期，也沒有 refresh token；使用者可以在 OpenRouter 的金鑰頁撤銷它。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>概念：金鑰的加密保存</h2>
+    <p>密碼可以只存雜湊，因為驗證時只要比對。金鑰不行：我們每次都要拿「原文」去呼叫 OpenRouter，所以要用<b>可以解回來</b>的加密。</p>
+<pre><code>from cryptography.fernet import Fernet
+
+f = Fernet(CREDENTIAL_ENCRYPTION_KEY)      <span class="cm"># 加密金鑰只放在 VM 的 .env</span>
+密文 = f.encrypt(b"sk-or-v1-...")           <span class="cm"># 存進資料庫的是這個</span>
+原文 = f.decrypt(密文)                       <span class="cm"># 要呼叫模型時才解開，只存在記憶體</span></code></pre>
+    <p>Fernet 除了加密，還會附上驗證碼：密文被改過或用錯加密金鑰，解密會直接失敗，不會解出一串亂碼。</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>情況</th><th>結果</th></tr>
+        <tr><td>只有資料庫外洩（備份外流、SQL injection）</td><td>拿到的是密文，解不開</td></tr>
+        <tr><td>VM 整台被入侵</td><td>密文和加密金鑰都在，擋不住。靠使用者在 OpenRouter 設的花費上限限制損失</td></tr>
+        <tr><td>加密金鑰遺失或更換</td><td>所有連結失效，使用者重新連結即可，對話不受影響</td></tr>
+      </table>
+    </div>
+    <div class="warn"><b>金鑰不能出現的地方：</b>API 回應、log、錯誤訊息、前端。<code>/auth/me</code> 只回「有沒有連結」。<code>SQL_ECHO</code> 開著時會把 SQL 參數印出來，正式站必須關閉。</div>
+    <h3>產生加密金鑰（部署時做一次）</h3>
+<pre><code>python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+<span class="cm"># 把輸出放進 VM 的 .env：CREDENTIAL_ENCRYPTION_KEY=...</span></code></pre>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>概念：用自己的金鑰生成，以及失效時怎麼辦</h2>
+    <p>現在後端只有一個 OpenRouter client，用平台金鑰。改成：已連結的人每次生成時，用他的金鑰建立 client。</p>
+<pre><code>async def openrouter_chat_stream(message, history, model_name, api_key=None):
+    c = AsyncOpenAI(base_url=..., api_key=api_key) if api_key else client
+    ...</code></pre>
+    <div class="table-wrap">
+      <table>
+        <tr><th>OpenRouter 回應</th><th>意思</th><th>我們怎麼做</th></tr>
+        <tr><td>401</td><td>金鑰被撤銷</td><td>刪除連結，回覆顯示「你的 OpenRouter 連結已失效，請重新連結」</td></tr>
+        <tr><td>402</td><td>帳號額度不足</td><td>保留連結，回覆顯示「你的 OpenRouter 帳號額度不足」</td></tr>
+        <tr><td>其他錯誤</td><td></td><td>現有的「生成中斷，請稍後再試」</td></tr>
+      </table>
+    </div>
+    <div class="warn"><b>絕不悄悄改用平台金鑰：</b>已連結的人可能正在用付費模型。失敗時改用平台金鑰重試，等於讓平台替他付錢，也讓他以為連結還正常。</div>
+    <div class="tip"><b>已連結者一律走 OpenRouter：</b>程式裡模型名稱以 <code>gemini</code> 開頭會走直連 Google 的路徑，那條路用的是平台的 Google 金鑰（正式站已經沒有這把金鑰，只剩本機測試用）。已連結者可以輸入任何模型 ID，所以要先擋掉這條路。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+        <tr><td>1</td><td>入口</td><td>首頁「開始使用」直接進訪客模式；登入按鈕在側欄左下</td><td>2026-11-13 確認</td></tr>
+        <tr><td>2</td><td>訪客額度</td><td>每個訪客每天 10 則</td><td>2026-11-14 確認</td></tr>
+        <tr><td>3</td><td>訪客可用模型</td><td>所有免費模型，不能輸入自訂模型 ID</td><td>2026-11-14 確認</td></tr>
+        <tr><td>4</td><td>IP 上限</td><td>同一 IP 每天最多 10 個訪客身分、合計 100 則</td><td>2026-11-14 確認</td></tr>
+        <tr><td>5</td><td>登入後的試用對話</td><td>登入時詢問一次，選否就刪除</td><td>2026-11-14 確認</td></tr>
+        <tr><td>6</td><td>訪客資料保留</td><td>7 天沒活動自動刪除</td><td>2026-11-14 確認</td></tr>
+        <tr><td>7</td><td>登入用戶的模型來源</td><td>用自己的 OpenRouter（OAuth 授權）</td><td>2026-11-14 確認</td></tr>
+        <tr><td>8</td><td>登入但未連結</td><td>和訪客相同：每天 10 則、免費模型（取代原本的 20 則）</td><td>2026-11-14 確認</td></tr>
+        <tr><td>9</td><td>連線方式</td><td>只做 OAuth PKCE，不做手動貼金鑰</td><td>2026-11-14 確認</td></tr>
+        <tr><td>10</td><td>已連結者的限制</td><td>不限則數、任何模型 ID；保留每分鐘速率限制</td><td>2026-11-14 確認</td></tr>
+        <tr><td>11</td><td>全站每日上限</td><td>試用者共用 900 則，不另外切給訪客</td><td>提案，未提出修改</td></tr>
+        <tr><td>12</td><td>訪客身分</td><td>訪客是一列 User＋httpOnly cookie；IP 只限流、存雜湊</td><td>提案，未提出修改</td></tr>
+        <tr><td>13</td><td>金鑰保存</td><td>Fernet 加密存資料庫，加密金鑰放 VM 的 <code>.env</code></td><td>2026-11-14 確認</td></tr>
+        <tr><td>14</td><td>金鑰失效</td><td>顯示錯誤並請使用者重新連結，不改用平台金鑰</td><td>提案，未提出修改</td></tr>
+        <tr><td>15</td><td>機器人驗證</td><td>初版不做</td><td>提案，未提出修改</td></tr>
+        <tr><td>16</td><td>隱私權說明</td><td>補上訪客保留期限、IP 雜湊、金鑰保存方式</td><td>提案，未提出修改</td></tr>
+        <tr><td>17</td><td>直連 Gemini</td><td>正式站不提供，只留給本機測試</td><td>提案，未提出修改</td></tr>
+        <tr><td>18</td><td>保留期限從何時算</td><td>從最後一次送訊息算 7 天（不是從建立算）</td><td>Claude 提案，待你看過</td></tr>
+        <tr><td>19</td><td>洗額度</td><td>登入時把訪客當天已用次數併入帳號</td><td>Claude 提案，待你看過</td></tr>
+        <tr><td>20</td><td>IP 計數保留</td><td>雜湊值保留 2 天後刪除</td><td>Claude 提案，待你看過</td></tr>
+        <tr><td>21</td><td>訪客沒有登出按鈕</td><td>側欄只有「登入」；要清掉試用資料就等 7 天或登入後選「刪除」</td><td>Claude 提案，待你看過</td></tr>
+        <tr><td>22</td><td>已連結者的模型選單</td><td>免費清單＋自訂模型 ID 輸入；不做付費模型瀏覽清單</td><td>Claude 提案，待你看過</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>G2-1</td><td>migration：last_active_at、guest_ip_usage、openrouter_credential</td><td>未開始</td></tr>
+        <tr><td>G2-2</td><td>訪客身分與每 IP 訪客數上限</td><td>未開始</td></tr>
+        <tr><td>G2-3</td><td>額度：每日 10 則、IP 則數上限、退款</td><td>未開始</td></tr>
+        <tr><td>G2-4</td><td>登入時的額度併入與對話搬移</td><td>未開始</td></tr>
+        <tr><td>G2-5</td><td>保留期限清理</td><td>未開始</td></tr>
+        <tr><td>G2-6</td><td>前端訪客模式</td><td>未開始</td></tr>
+        <tr><td>G2-7</td><td>前端搬移對話框</td><td>未開始</td></tr>
+        <tr><td>G2-8</td><td>OpenRouter 連結與加密保存</td><td>未開始</td></tr>
+        <tr><td>G2-9</td><td>用自己的金鑰生成與失效處理</td><td>未開始</td></tr>
+        <tr><td>G2-10</td><td>前端連結介面</td><td>未開始</td></tr>
+        <tr><td>G2-11</td><td>隱私權說明、環境變數、部署說明</td><td>未開始</td></tr>
+      </table>
+    </div>
+    <p class="muted">規格、驗收指令與瀏覽器清單：<code>PLAN_v2.md</code>「G2 規格與驗收」。分支 <code>feat/landing-guest</code>。OpenRouter 流程對照官方文件 <code>openrouter.ai/docs/use-cases/oauth-pkce</code>（2026-11-14）。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">11</span>練習</h2>
+    <ol>
+      <li>訪客 A 知道訪客 B 某則訊息的 id，直接呼叫 <code>GET /chats/{id}/history</code> 會得到什麼？是哪一段既有的程式擋下的？</li>
+      <li>如果 IP 只用 SHA-256 不加密鑰，拿到資料庫的人要怎麼找出某個雜湊對應的 IPv4？大概要算幾次？</li>
+      <li>「先 SELECT 次數、在 Python 判斷、再 UPDATE 加一」在 20 個併發請求下會發生什麼事？一句 <code>INSERT ... ON CONFLICT ... WHERE</code> 為什麼不會？</li>
+      <li>搬移對話的 API 如果改成收一個 <code>guest_user_id</code> 參數，會出現什麼攻擊？</li>
+      <li>OpenRouter 回呼少了 <code>state</code> 檢查時，攻擊者可以怎麼讓受害者的對話經過攻擊者的金鑰？</li>
+      <li>為什麼金鑰用 Fernet 加密而不是像 session token 一樣存 SHA-256？</li>
+      <li>已連結者的金鑰回 401 時，如果程式自動改用平台金鑰重試，會造成哪兩個問題？</li>
+    </ol>
+  </section>
+
+</div>
+</body>
+</html>
