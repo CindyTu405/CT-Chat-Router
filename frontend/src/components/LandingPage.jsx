@@ -270,23 +270,24 @@ export default function LandingPage({ onStart }) {
         </div>
       </header>
 
-      {/* (L1-3) 標語區 */}
-      <section className="px-4 md:px-6 py-4 md:py-6 text-center border-b border-gray-200 flex-shrink-0">
-        <h1 className="text-xl md:text-3xl font-semibold tracking-tight text-gray-800">追問細節，不打斷主線</h1>
-        <p className="mt-1 md:mt-2 text-sm md:text-base text-gray-500">選取 AI 回答裡的任何一段，開一條分支繼續問。</p>
-        <button
-          type="button"
-          onClick={onStart}
-          className="mt-3 md:mt-4 min-h-[44px] px-6 rounded-xl bg-[#51A8DD] hover:bg-[#3d97cf] text-white font-semibold shadow-sm cursor-pointer transition-colors"
-        >
-          開始使用
-        </button>
-      </section>
-
       {/* (L1-3) 展示區：主對話＋右側分支面板 */}
       <div className="flex-1 min-h-0 flex">
         <div className="flex-1 flex flex-col h-full relative min-w-0 bg-[#E8F1F5] bg-[linear-gradient(to_right,#d3e3eb_1px,transparent_1px),linear-gradient(to_bottom,#d3e3eb_1px,transparent_1px)] bg-[size:16px_16px]">
-          <div className="flex items-center justify-between gap-3 px-4 py-2 text-xs text-gray-500 bg-white/70 border-b border-gray-200 flex-shrink-0">
+          {/* (L1-5) 標語區融進格線背景的對話區，不再是獨立的白色橫條。調整：pt-5 md:pt-8 是標語上方留白，pb-2 md:pb-3 是下方留白。 */}
+          <section className="px-4 md:px-6 pt-5 md:pt-8 pb-2 md:pb-3 text-center flex-shrink-0">
+            <h1 className="text-xl md:text-3xl font-semibold tracking-tight text-gray-800">追問細節，不打斷主線</h1>
+            <p className="mt-1 md:mt-2 text-sm md:text-base text-gray-500">選取 AI 回答裡的任何一段，開一條分支繼續問。</p>
+            <button
+              type="button"
+              onClick={onStart}
+              className="mt-3 md:mt-4 min-h-[44px] px-6 rounded-xl bg-[#51A8DD] hover:bg-[#3d97cf] text-white font-semibold shadow-sm cursor-pointer transition-colors"
+            >
+              開始使用
+            </button>
+          </section>
+
+          {/* (L1-3) 示範列：位於標語區下方，透明疊在格線上 */}
+          <div className="flex items-center justify-between gap-3 px-4 md:px-6 pt-2 pb-1 text-xs text-gray-500 flex-shrink-0">
             <span className="min-w-0 truncate">示範對話 · {article.topic}{'\u3000'}點虛線文字，或選取任何一段，試試開分支</span>
             <button
               type="button"
