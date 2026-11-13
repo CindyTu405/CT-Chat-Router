@@ -52,6 +52,8 @@ export default function LandingPage({ onStart }) {
   const [branchList, setBranchList] = useState([]);
   const [activeBranchId, setActiveBranchId] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  // (L1-7) 每按一次「換一篇」加一，讓自動播放從頭再播
+  const [autoplayKey, setAutoplayKey] = useState(0);
 
   const scrollContainerRef = useRef(null);
   const timersRef = useRef(new Set());
@@ -106,8 +108,14 @@ export default function LandingPage({ onStart }) {
     sel.addRange(range);
   };
 
-  // (L1-4) 自動播放：游標位置與是否顯示由 hook 決定；使用者互動即永久停止
-  const cursor = useDemoAutoplay({ scrollContainerRef, selectHint });
+  // (L1-4) 自動播放：游標位置與是否顯示由 hook 決定。
+  // (L1-7) 自動播放會把所有虛線片語依序點完；使用者互動即停止這一輪，按「換一篇」會重新開始。
+  const cursor = useDemoAutoplay({
+    scrollContainerRef,
+    selectHint,
+    isBusy: branches.some((b) => b.isLoading),
+    restartKey: autoplayKey,
+  });
 
   const openBranch = (branch) => {
     setActiveBranchId(branch.id);
@@ -237,6 +245,7 @@ export default function LandingPage({ onStart }) {
     clearAllTimers();
     window.getSelection()?.removeAllRanges();
     setArticleIndex((i) => (i + 1) % DEMO_ARTICLES.length);
+    setAutoplayKey((k) => k + 1); // (L1-7) 讓自動播放從頭再播
     setBranches([]);
     setBranchList([]);
     setActiveBranchId(null);
