@@ -51,6 +51,7 @@ When a floating control (⋯, buttons) covers text, fade the text with a `mask-i
 - Prod `api` has no source volume mount: after `git pull`, rebuild (`sudo docker compose up -d --build`) for code changes to take effect.
 - Migrations are NOT run automatically. After any pull that adds `backend/alembic/versions/*`, run `sudo docker compose exec api alembic upgrade head`. Skipping it gives `UndefinedColumn` 500s on `POST /chat` (seen 2026-11-02 with `branch_id`).
 - Host shell does not have `$POSTGRES_USER`/`$POSTGRES_DB`; inspect the DB with `sudo docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`.
+- G2 needs `CREDENTIAL_ENCRYPTION_KEY` in the VM's `.env` (generate once with `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`; never commit it; losing or changing it invalidates every OpenRouter link, users just reconnect), and the G2 migration (`sudo docker compose exec api alembic upgrade head`) after the pull.
 
 ## Context hygiene
 Durable state lives in the skill, the PLAN docs and git. Suggest a fresh session (`/clear`) once a conversation gets very long.
