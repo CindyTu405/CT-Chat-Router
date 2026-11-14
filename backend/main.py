@@ -20,6 +20,8 @@ from slowapi.errors import RateLimitExceeded
 # 自訂模組
 from database import get_session, engine
 from auth_routes import cookie_secure, get_current_user, router as auth_router, SESSION_COOKIE_NAME
+from log_redaction import install_access_log_redaction  # (G2-8) uvicorn access log 遮罩 /auth/ 查詢字串
+from openrouter_connect import router as openrouter_router  # (G2-8) 必須先於 auth_router 掛載（/auth/{provider}/callback 會匹配 openrouter）
 from rate_limit import limiter  # (G2-2) 單一實例，auth_routes 也會用
 import guest  # (G2-3) 訪客 IP 雜湊與每 IP 訊息上限
 from models import (
@@ -249,6 +251,8 @@ async def lifespan(app: FastAPI):
     # 資料表一律由 Alembic 管理（alembic upgrade head），啟動時不再自動 create_all。
     # (G2-5) 每小時清一次 7 天沒活動的訪客；阻塞的 DB 呼叫丟到執行緒，不擋事件迴圈
     purge_task = asyncio.create_task(_guest_purge_loop())
+    # (G2-8) uvicorn 可能在 main 匯入之後才套用自己的 logging 設定；啟動時再裝一次（idempotent）
+    install_access_log_redaction()
     yield
     purge_task.cancel()
     try:
@@ -267,6 +271,9 @@ def _api_docs_enabled() -> bool:
         "on",
     )
 
+
+# (G2-8) 模組匯入時就裝一次；lifespan 啟動時會再裝一次，確保 uvicorn 套用 logging 設定後仍有效
+install_access_log_redaction()
 
 _DOCS_ON = _api_docs_enabled()
 app = FastAPI(
@@ -384,6 +391,9 @@ app.add_middleware(
     same_site="lax",
     https_only=cookie_secure(),
 )
+
+# (G2-8) OpenRouter 連結：必須在 auth_router 之前，否則 /auth/openrouter/callback 會被 oauth_callback 先匹配
+app.include_router(openrouter_router)
 
 # OAuth 登入 / 回呼 / 登出
 app.include_router(auth_router)
