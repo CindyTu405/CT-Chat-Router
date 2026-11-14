@@ -4,6 +4,8 @@ import { FaGithub } from 'react-icons/fa';
 import App from '../App';
 // (L1-3) 未登入的首頁
 import LandingPage from './LandingPage';
+// (G2-7) 訪客對話搬移對話框
+import GuestClaimDialog from './GuestClaimDialog';
 import { API_URL, apiFetch } from '../api';
 
 // 後端導回時帶的 auth_error 代碼 → 固定文案；不認得的一律用通用訊息，絕不顯示原始參數
@@ -98,6 +100,8 @@ function AuthGate() {
   const [starting, setStarting] = useState(false);
   // (G2-6) 登入頁上方的提示文字（試用失敗時設定；返回首頁時清掉）
   const [loginNotice, setLoginNotice] = useState(null);
+  // (G2-7) 變更 key 會讓 App 整個重新掛載（用於搬移對話後重新載入側欄對話列表）
+  const [appKey, setAppKey] = useState(0);
 
   // (G2-6) 重新讀取 /auth/me：成功＝使用者資料，非 200 或網路錯誤＝視為未登入
   const refreshUser = useCallback(async () => {
@@ -167,11 +171,21 @@ function AuthGate() {
   // (G2-6) 訪客在聊天中按「登入」：登入頁以覆蓋層顯示，App 保持掛載（不遺失目前的對話）
   return (
     <>
-      <App user={user} onRequestLogin={() => setView('login')} onUserChanged={refreshUser} />
+      <App key={appKey} user={user} onRequestLogin={() => setView('login')} onUserChanged={refreshUser} />
       {user.is_guest && view === 'login' && (
         <div className="fixed inset-0 z-[100]">
           <LoginPage backLabel="← 返回" onBack={() => setView('landing')} />
         </div>
+      )}
+      {/* (G2-7) 登入後有待搬移的試用對話：顯示一次對話框；完成後重新讀取 /auth/me（guest_claim 變成 null，對話框消失）並用 key 重新掛載 App，讓側欄重新載入對話列表 */}
+      {!user.is_guest && user.guest_claim && (
+        <GuestClaimDialog
+          chatCount={user.guest_claim.chat_count}
+          onDone={async () => {
+            await refreshUser();
+            setAppKey((k) => k + 1);
+          }}
+        />
       )}
     </>
   );
