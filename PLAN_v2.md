@@ -1004,6 +1004,8 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 
 **狀態（2026-11-14，波次 3）**：波次 3 完成，未 push。G2-8 `c022090`、G2-9 `60aaeef`。主代理在 `g2_tmp` 重跑：`openrouter_connect_harness` `ALL PASS (88)`；`guest`、`quota`、`regenerate`、`auth`、`model_options`、`branch_entries`、`limits`、`pool` 八支都 `ALL PASS`。G2-9 的 harness 起了一個假的 OpenRouter HTTP 伺服器，跑的是真正的 `openrouter_chat_stream`，檢查上游收到的 `Authorization`。規格外新增：`backend/log_redaction.py`，把 uvicorn 存取紀錄裡 `/auth/` 路徑的查詢字串改記成 `?[redacted]`（原本會把 OAuth 導回的 `code`、`state` 寫進 log，Google／GitHub 登入也一樣）；使用者金鑰的 client 設 `max_retries=0`（一次生成只打一次上游）；401 後只在資料庫的密文仍是那把失效金鑰時才刪除連結（期間重新連結的不會被刪）；pending 的 `state` 另有 10 分鐘期限。與規格文字不同處：全站上限的回應是既有的 503 `site_quota_exceeded`（不是 429）；使用者在 OpenRouter 同意頁按拒絕時，目前會得到 `state_mismatch`（沒有獨立的代碼）。本機要試真的連結，`backend/.env` 需要先加 `CREDENTIAL_ENCRYPTION_KEY`。
 
+**狀態（2026-11-14，波次 4）**：波次 4 完成，G2 全部任務完成，未 push、未合併、未部署。G2-10 `1a1486c`、G2-11 `6780760`。使用者在本機用真的 OpenRouter 授權跑過清單 B 後同意 commit；第 7 項由主代理代查：`chat_db` 的 `openrouter_credential.key_encrypted` 開頭是 `gAAAAA`（Fernet 密文），本機後端 log 沒有 `sk-or-`、沒有 `code=`／`state=`，callback 記成 `?[redacted]`。主代理另用內建瀏覽器接假登入、假連結的測試後端（`g2_tmp`）看過連結成功橫幅、已連結列、自訂模型輸入、金鑰被拒後側欄自動回到未連結、手機寬度 375 的側欄列與中斷連結對話框。新增元件 `OpenRouterLinkRow.jsx`、`OpenRouterNotice.jsx`。已知且決定不處理：手機上側欄開著時，結果橫幅會蓋住側欄頂端的 ✕ 最多 8 秒。Stage 1 的完整瀏覽器清單（登入後回歸、手機版）仍未逐項跑完。部署步驟見下方「部署注意」。
+
 **波次**
 - 波次 1（後端，G2-1 到 G2-5）：沒有可看的畫面，做完回報後直接進波次 2。
 - 波次 2（前端，G2-6、G2-7）：停下來等使用者跑瀏覽器清單 A。
