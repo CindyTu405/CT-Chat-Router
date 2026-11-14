@@ -18,6 +18,7 @@ function ChatInput({
   model, setModel, isCustomModel, setIsCustomModel, freeModels, freeModelsLoading,
   presets, defaultModel, optionsLoading,
   variant = 'main', placeholder = '輸入訊息...',
+  allowCustom = false, // (G2-6) 是否允許自訂模型輸入，轉給 ModelSelector
 }) {
   const v = CHAT_INPUT_VARIANTS[variant] || CHAT_INPUT_VARIANTS.main;
   const textareaRef = useRef(null);
@@ -79,6 +80,7 @@ function ChatInput({
           freeModelsLoading={freeModelsLoading}
           presets={presets}
           defaultModel={defaultModel}
+          allowCustom={allowCustom}
         />
         <span className="text-xs text-gray-400 font-medium">
           {v.hint}

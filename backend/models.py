@@ -1,6 +1,6 @@
 from typing import Optional, List
 from sqlmodel import SQLModel, Field
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Text, UniqueConstraint
 from datetime import date, datetime, timezone
 from pydantic import BaseModel, field_serializer
 import uuid
@@ -187,6 +187,9 @@ class FreeModelsCache(SQLModel, table=True):
 
 # ===== Phase 0：OAuth 使用者與登入 session =====
 
+GUEST_PROVIDER = "guest"  # (G2-1) 訪客的 oauth_provider 值
+
+
 class User(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("oauth_provider", "oauth_sub", name="uq_user_oauth_provider_sub"),
@@ -197,6 +200,8 @@ class User(SQLModel, table=True):
     # provider 端的唯一使用者識別碼（sub）
     oauth_sub: str = Field(index=True)
     email: Optional[str] = None
+    # (G2-1) 最後一次送訊息的時間（naive UTC）；訪客保留期限從這裡算，None 時用 created_at
+    last_active_at: Optional[datetime] = None
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
@@ -204,6 +209,11 @@ class User(SQLModel, table=True):
     @field_serializer("created_at")
     def serialize_created_at(self, value: Optional[datetime], _info) -> Optional[str]:
         return to_utc_iso(value)
+
+    @property
+    def is_guest(self) -> bool:
+        """(G2-1) 訪客：oauth_provider 為 "guest" 的使用者列。"""
+        return self.oauth_provider == GUEST_PROVIDER
 
 
 class AuthSession(SQLModel, table=True):
@@ -225,3 +235,24 @@ class DailyUsage(SQLModel, table=True):
     user_id: uuid.UUID = Field(foreign_key="user.id", primary_key=True, ondelete="CASCADE")
     day: date = Field(primary_key=True)
     count: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+
+
+# ===== G2-1：訪客的 IP 計數（只存雜湊，不存原始 IP）=====
+# 每個 (ip_hash, 台灣日期) 一列。guests_created：當日由這個 IP 建立的訪客數；messages：當日訪客送出的則數。
+class GuestIpUsage(SQLModel, table=True):
+    __tablename__ = "guest_ip_usage"
+    ip_hash: str = Field(primary_key=True, max_length=64)
+    day: date = Field(primary_key=True)
+    guests_created: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    messages: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+
+
+# ===== G2-1：使用者自己的 OpenRouter 金鑰（只存 Fernet 密文）=====
+# 一位使用者最多一列；使用者刪除時一併刪除。key_encrypted 絕不回傳前端、不寫 log。
+class OpenRouterCredential(SQLModel, table=True):
+    __tablename__ = "openrouter_credential"
+    user_id: uuid.UUID = Field(foreign_key="user.id", primary_key=True, ondelete="CASCADE")
+    key_encrypted: str = Field(sa_type=Text)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )

@@ -19,6 +19,7 @@ function ModelSelector({
   freeModelsLoading,
   presets = NO_PRESETS,
   defaultModel = null,
+  allowCustom = false, // (G2-6) false 時不顯示「自訂輸入」群組（訪客或後端未開放）
 }) {
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false); // 下方空間不足時向上展開
@@ -44,7 +45,10 @@ function ModelSelector({
       ...(googlePresets.length ? [{ label: 'Google (原生 API)', options: googlePresets }] : []),
       ...(otherPresets.length ? [{ label: '預設', options: otherPresets }] : []),
       { label: 'OpenRouter (需儲值/免費)', options: openRouterOptions },
-      { label: '進階功能', options: [{ value: 'custom', label: '✨ 自訂輸入 (貼上模型 ID)...' }] },
+      // (G2-6) allowCustom 為 false 時整組不列入（前端隱藏；後端另有白名單擋）
+      ...(allowCustom
+        ? [{ label: '進階功能', options: [{ value: 'custom', label: '✨ 自訂輸入 (貼上模型 ID)...' }] }]
+        : []),
     ];
 
     const list = [];
@@ -53,7 +57,7 @@ function ModelSelector({
       g.options.forEach((o) => list.push({ kind: 'option', ...o }));
     });
     return list;
-  }, [presets, freeModels, freeModelsLoading]);
+  }, [presets, freeModels, freeModelsLoading, allowCustom]);
 
   // 只有可選中的項目參與鍵盤導航（跳過群組標題與 disabled 佔位項）
   const selectableIndexes = useMemo(

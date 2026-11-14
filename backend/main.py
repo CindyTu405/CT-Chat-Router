@@ -10,16 +10,21 @@ from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import hashlib
+import hmac
 import logging
 import os
 import uuid
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 # 自訂模組
 from database import get_session, engine
 from auth_routes import cookie_secure, get_current_user, router as auth_router, SESSION_COOKIE_NAME
+from log_redaction import install_access_log_redaction  # (G2-8) uvicorn access log 遮罩 /auth/ 查詢字串
+from openrouter_connect import router as openrouter_router  # (G2-8) 必須先於 auth_router 掛載（/auth/{provider}/callback 會匹配 openrouter）
+from rate_limit import limiter  # (G2-2) 單一實例，auth_routes 也會用
+import guest  # (G2-3) 訪客 IP 雜湊與每 IP 訊息上限
 from models import (
     User,
     Message,
@@ -32,11 +37,13 @@ from models import (
     CreateBranchRequest,
     RegenerateRequest,
     DailyUsage,
+    OpenRouterCredential,  # (G2-9)
     to_utc_iso,
 )
 # from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
-from openrouter_llm import openrouter_chat_stream
+from openrouter_llm import openrouter_chat_stream, UserKeyInvalid, UserKeyInsufficientCredit, UserKeyUpstreamError
+from crypto_utils import CredentialKeyError, decrypt_key  # (G2-9)
 from scraper import get_free_models
 
 
@@ -84,8 +91,8 @@ def _int_env(name: str, default: int) -> int:
 
 
 def daily_message_limit() -> int:
-    """(V1-2) 每位使用者每個台灣日期的次數上限（DAILY_MESSAGE_LIMIT，預設 20）。"""
-    return _int_env("DAILY_MESSAGE_LIMIT", 20)
+    """(V1-2)(G2-3) 試用者（訪客與未連結 OpenRouter 的登入用戶）每個台灣日期的次數上限（DAILY_MESSAGE_LIMIT，預設 10）。"""
+    return guest.trial_daily_limit()
 
 
 def site_daily_message_limit() -> int:
@@ -100,13 +107,29 @@ def _daily_quota_exceeded(day: date) -> HTTPException:
     )
 
 
-def charge_daily_quota(session: Session, user_id: uuid.UUID) -> date:
-    """(V1-2) 扣一次當日額度。不 commit：由呼叫端之後的 commit 與訊息寫入同一交易，
-    之後的檢查失敗或交易失敗都不會留下扣款。回傳扣款的台灣日期（退額度時要用同一天）。
+def charge_daily_quota(
+    session: Session, user_id: uuid.UUID, guest_ip_hash: str | None = None, linked: bool = False
+) -> date | None:
+    """(V1-2)(G2-3) 扣一次當日額度。不 commit：由呼叫端之後的 commit 與訊息寫入同一交易，
+    回傳扣款的台灣日期（退額度時要用同一天）。
 
+    三層檢查依序進行，任何一層失敗都在同一交易內 rollback，因此不會留下任何扣款：
     1. 全站當日總和 >= SITE_DAILY_MESSAGE_LIMIT → 503 site_quota_exceeded
-    2. 使用者額度：單一 INSERT ... ON CONFLICT DO UPDATE ... WHERE count < limit；沒有回傳列 → 429
+    2. 試用上限 DAILY_MESSAGE_LIMIT < 1 → 429 daily_quota_exceeded
+    3. 訪客（guest_ip_hash 不為 None）：該 IP 當日訊息數 +1，超過 GUEST_IP_DAILY_MESSAGES → 429 guest_ip_limit
+       （try_count_guest_message 失敗時已自行 rollback）
+    4. 個人每日額度：單一 INSERT ... ON CONFLICT DO UPDATE ... WHERE count < limit；沒有回傳列 → rollback（連第 3 層的 IP 加一一起丟掉）→ 429 daily_quota_exceeded
+    5. 通過後更新 user.last_active_at（UTC，naive）
     """
+    # (G2-9) 已連結者（用自己的 OpenRouter 金鑰）：不檢查全站上限、不寫 daily_usage、不計 IP，只更新 last_active_at。
+    # 回傳 None，之後的失敗也不會退額度（沒有扣款）。
+    if linked:
+        session.execute(
+            text('UPDATE "user" SET last_active_at = :now WHERE id = :u'),
+            {"now": datetime.now(timezone.utc).replace(tzinfo=None), "u": user_id},
+        )
+        return None
+
     day = taiwan_today()
 
     site_used = session.exec(
@@ -119,6 +142,13 @@ def charge_daily_quota(session: Session, user_id: uuid.UUID) -> date:
     if user_limit < 1:
         raise _daily_quota_exceeded(day)
 
+    if guest_ip_hash is not None:
+        if not guest.try_count_guest_message(session, guest_ip_hash, day):
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "guest_ip_limit", "reset_at": next_reset_at_utc(day)},
+            )
+
     row = session.execute(
         text("""
         INSERT INTO daily_usage (user_id, day, count) VALUES (:u, :d, 1)
@@ -130,19 +160,28 @@ def charge_daily_quota(session: Session, user_id: uuid.UUID) -> date:
     ).first()
     if row is None:
         # 被拒絕時立刻結束交易：ON CONFLICT 已對該列取得鎖，若留到 session 關閉才釋放，
-        # 同一個事件迴圈裡的其他 DB 呼叫會卡住（實測造成死結）。此時尚無其他待寫入的變更。
+        # 同一個事件迴圈裡的其他 DB 呼叫會卡住（實測造成死結）。
+        # rollback 同時丟掉第 3 層剛加的 IP 計數（同一交易）。
         session.rollback()
         raise _daily_quota_exceeded(day)
+
+    session.execute(
+        text('UPDATE "user" SET last_active_at = :now WHERE id = :u'),
+        {"now": datetime.now(timezone.utc).replace(tzinfo=None), "u": user_id},
+    )
     return day
 
 
-def refund_daily_quota(user_id: uuid.UUID, day: date) -> None:
-    """(V1-2) 退 1 次（不低於 0）。自己開 session，不依賴請求的 session 生命週期。"""
+def refund_daily_quota(user_id: uuid.UUID, day: date, guest_ip_hash: str | None = None) -> None:
+    """(V1-2)(G2-3) 退 1 次（不低於 0）。自己開 session，不依賴請求的 session 生命週期。
+    guest_ip_hash 有值時同一交易也退該 IP 當日的訊息計數。"""
     with Session(engine) as db_session:
         db_session.execute(
             text("UPDATE daily_usage SET count = GREATEST(count - 1, 0) WHERE user_id = :u AND day = :d"),
             {"u": user_id, "d": day},
         )
+        if guest_ip_hash is not None:
+            guest.refund_guest_message(db_session, guest_ip_hash, day)
         db_session.commit()
 
 
@@ -157,6 +196,56 @@ def _persist_generation(ai_msg_id: str, text: str) -> None:
             db_session.commit()
 
 
+# (G2-9) 使用者自己的金鑰失敗時的固定文字（不含供應商回應）
+USER_KEY_INVALID_TEXT = "⚠️ 你的 OpenRouter 連結已失效，請重新連結"
+USER_KEY_CREDIT_TEXT = "⚠️ 你的 OpenRouter 帳號額度不足"
+
+
+def resolve_user_api_key(session: Session, user: User) -> str | None:
+    """(G2-9) 連結者回傳解密後的金鑰；試用者（含訪客）或沒有連結列回 None。
+    只用已驗證的 user.id 查列。金鑰無法解密（加密金鑰已更換）→ 刪除該列並回 409，不建立任何訊息。"""
+    if user.is_guest:
+        return None
+    row = session.get(OpenRouterCredential, user.id)
+    if row is None:
+        return None
+    try:
+        return decrypt_key(row.key_encrypted)
+    except CredentialKeyError:
+        session.delete(row)
+        session.commit()
+        raise HTTPException(status_code=409, detail={"code": "openrouter_reconnect_required"})
+
+
+def _drop_credential_if_same(user_id: uuid.UUID, failed_key: str) -> bool:
+    """(G2-9) 401 後移除失效連結，但只在目前的密文仍解出 failed_key 時才刪。
+    使用者若已在此期間重新連結（列已是新金鑰），保留新列。DELETE 同時比對所讀到的密文。"""
+    with Session(engine) as db_session:
+        row = db_session.get(OpenRouterCredential, user_id)
+        if row is None:
+            return False
+        enc = row.key_encrypted
+        try:
+            current = decrypt_key(enc)
+        except CredentialKeyError:
+            return False
+        if not hmac.compare_digest(current.encode("utf-8"), failed_key.encode("utf-8")):
+            return False
+        result = db_session.execute(
+            sa_delete(OpenRouterCredential).where(
+                OpenRouterCredential.user_id == user_id,
+                OpenRouterCredential.key_encrypted == enc,
+            )
+        )
+        db_session.commit()
+        return result.rowcount > 0
+
+
+def _is_linked(session: Session, user: User) -> bool:
+    """(G2-9) 已連結者：非訪客且有 openrouter_credential 列。"""
+    return (not user.is_guest) and session.get(OpenRouterCredential, user.id) is not None
+
+
 async def run_generation(
     ai_msg_id: str,
     message: str,
@@ -164,25 +253,49 @@ async def run_generation(
     model: str,
     usage_user_id: uuid.UUID | None = None,
     usage_day: date | None = None,
+    usage_ip_hash: str | None = None,
+    api_key: str | None = None,
+    key_owner_id: uuid.UUID | None = None,
 ):
     """背景執行一次 AI 生成：邊收 chunk 邊寫入緩衝，完成後寫回 DB。
     (V1-2) 失敗時：不記錄訊息內容、只給固定提示；若一個字都還沒產出，退回扣款的 1 次。
     (B12) 退次數與寫回都是阻塞的 DB 呼叫，改用 asyncio.to_thread，避免卡住事件迴圈。"""
     buf = GENERATIONS[ai_msg_id]
     try:
-        if model.startswith("gemini"):
+        if api_key is not None:
+            # (G2-9) 連結者：一律走 OpenRouter 並用自己的金鑰（即使是 gemini* 模型，也不走直連 Gemini）
+            stream = openrouter_chat_stream(message, history, model, api_key=api_key)
+        elif model.startswith("gemini"):
             stream = gemini_chat_stream(message, history, model)
         else:
+            # 試用者：維持原本的呼叫形式（不帶 api_key 參數）
             stream = openrouter_chat_stream(message, history, model)
         async for chunk in stream:
             buf["text"] += chunk
+    except UserKeyInvalid:
+        # (G2-9) 401：固定文字；只有目前的密文仍是這把失效金鑰時才移除連結。不重試、不改用平台金鑰。
+        logger.warning("(G2-9) 使用者 OpenRouter 金鑰被拒絕 ai_msg=%s", ai_msg_id)
+        buf["text"] = USER_KEY_INVALID_TEXT
+        if api_key is not None and key_owner_id is not None:
+            try:
+                await asyncio.to_thread(_drop_credential_if_same, key_owner_id, api_key)
+            except Exception:
+                logger.warning("(G2-9) 移除失效連結失敗 ai_msg=%s", ai_msg_id)
+    except UserKeyInsufficientCredit:
+        # (G2-9) 402：固定文字；連結保留
+        logger.warning("(G2-9) 使用者 OpenRouter 額度不足 ai_msg=%s", ai_msg_id)
+        buf["text"] = USER_KEY_CREDIT_TEXT
+    except UserKeyUpstreamError:
+        # (G2-9) 其他錯誤：沿用現有的固定提示；不重試、不改用平台金鑰。連結者的生成不扣額度，也無需退額度。
+        logger.warning("(G2-9) 使用者 OpenRouter 生成失敗 ai_msg=%s", ai_msg_id)
+        buf["text"] += GENERATION_FAILED_TEXT
     except Exception:
         logger.exception("(V1-2) 生成失敗 ai_msg=%s model=%s", ai_msg_id, model)
         had_output = bool(buf["text"])
         buf["text"] += GENERATION_FAILED_TEXT
         if not had_output and usage_user_id is not None and usage_day is not None:
             try:
-                await asyncio.to_thread(refund_daily_quota, usage_user_id, usage_day)
+                await asyncio.to_thread(refund_daily_quota, usage_user_id, usage_day, usage_ip_hash)
             except Exception:
                 logger.exception("(V1-2) 退回額度失敗 user=%s day=%s", usage_user_id, usage_day)
     finally:
@@ -203,11 +316,36 @@ async def run_generation(
             GENERATIONS.pop(ai_msg_id, None)
 
 
+# (G2-5) 保留期限清理的執行間隔（秒）
+GUEST_PURGE_INTERVAL_SECONDS = 3600
+
+
+async def _guest_purge_loop():
+    """(G2-5) 每小時清一次過期訪客。guest.run_purge_once 是阻塞的 DB 呼叫，丟到執行緒執行。"""
+    while True:
+        try:
+            n = await asyncio.to_thread(guest.run_purge_once)
+            if n:
+                logger.info("(G2-5) 清除過期訪客 %s 位", n)
+        except Exception:
+            logger.exception("(G2-5) 清除過期訪客失敗")
+        await asyncio.sleep(GUEST_PURGE_INTERVAL_SECONDS)
+
+
 # 1. Lifespan (生命週期管理器)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 資料表一律由 Alembic 管理（alembic upgrade head），啟動時不再自動 create_all。
+    # (G2-5) 每小時清一次 7 天沒活動的訪客；阻塞的 DB 呼叫丟到執行緒，不擋事件迴圈
+    purge_task = asyncio.create_task(_guest_purge_loop())
+    # (G2-8) uvicorn 可能在 main 匯入之後才套用自己的 logging 設定；啟動時再裝一次（idempotent）
+    install_access_log_redaction()
     yield
+    purge_task.cancel()
+    try:
+        await purge_task
+    except asyncio.CancelledError:
+        pass
     print("伺服器關閉中...")
 
 
@@ -221,6 +359,9 @@ def _api_docs_enabled() -> bool:
     )
 
 
+# (G2-8) 模組匯入時就裝一次；lifespan 啟動時會再裝一次，確保 uvicorn 套用 logging 設定後仍有效
+install_access_log_redaction()
+
 _DOCS_ON = _api_docs_enabled()
 app = FastAPI(
     lifespan=lifespan,
@@ -231,7 +372,6 @@ app = FastAPI(
 
 # 2. Rate limit (slowapi)：預設 key 仍是來源 IP；/chat 與 regenerate 改用 rate_limit_key（依登入者）。
 # /chat 會觸發付費 LLM 呼叫，限制每分鐘 10 次，避免被刷。
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -339,6 +479,9 @@ app.add_middleware(
     https_only=cookie_secure(),
 )
 
+# (G2-8) OpenRouter 連結：必須在 auth_router 之前，否則 /auth/openrouter/callback 會被 oauth_callback 先匹配
+app.include_router(openrouter_router)
+
 # OAuth 登入 / 回呼 / 登出
 app.include_router(auth_router)
 
@@ -400,9 +543,14 @@ async def chat_endpoint(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    # (G2-9) 連結者的金鑰：最先解密（失效 → 409，不建立訊息、不扣額度）
+    api_key = resolve_user_api_key(session, user)
+    linked = api_key is not None
+
     # 0. 模型白名單檢查（免費 tier）：必須在任何寫入 DB / 呼叫 LLM 之前就擋掉，
     #    否則會留下沒有回覆的孤兒訊息；而且串流一旦開始就無法再回 403。
-    if not is_model_allowed(payload.model, session):
+    #    (G2-9) 連結者跳過白名單（只有長度限制，由 ChatRequest 檢查）。
+    if not linked and not is_model_allowed(payload.model, session):
         raise HTTPException(status_code=403, detail=f"Model '{payload.model}' is not allowed on this plan")
 
     # (S-U1-4) 擁有者檢查：帶了的 parent_id / branch_id / anchor_message_id 都要屬於本人，
@@ -420,7 +568,8 @@ async def chat_endpoint(
 
     # (V1-2) 扣每日額度：在任何寫入之前；不 commit，下面第一個 commit 與訊息寫入同一交易
     user_id = user.id  # 先取出，commit 之後 ORM 物件會過期
-    usage_day = charge_daily_quota(session, user_id)
+    guest_ip_hash = guest.hash_ip(guest.client_ip(request)) if user.is_guest else None  # (G2-3) 訪客才計 IP
+    usage_day = charge_daily_quota(session, user_id, guest_ip_hash, linked=linked)
 
     # 1. 先存使用者的訊息 (User Message)
     user_msg = Message(role="user", content=payload.message, parent_id=payload.parent_id,
@@ -476,7 +625,8 @@ async def chat_endpoint(
     history_plain = [SimpleNamespace(role=m.role, content=m.content) for m in history]
     asyncio.create_task(run_generation(
         ai_id, payload.message, history_plain, payload.model,
-        usage_user_id=user_id, usage_day=usage_day,
+        usage_user_id=user_id, usage_day=usage_day, usage_ip_hash=guest_ip_hash,
+        api_key=api_key, key_owner_id=user_id,
     ))
     # (B12) 串流可能持續數十秒；這裡先還回連線。之後的回應只用上面的純值，不碰 ORM 物件。
     session.close()
@@ -580,8 +730,12 @@ async def regenerate_message(
     if payload.content is not None and not payload.content.strip():
         raise HTTPException(status_code=422, detail="content is empty")
 
-    # b. 403：模型白名單（跟 /chat 同一個檢查，必須在任何寫入之前）
-    if not is_model_allowed(payload.model, session):
+    # (G2-9) 連結者的金鑰：在模型檢查與任何改寫之前解密（失效 → 409，不改任何訊息）
+    api_key = resolve_user_api_key(session, user)
+    linked = api_key is not None
+
+    # b. 403：模型白名單（跟 /chat 同一個檢查，必須在任何寫入之前）；連結者跳過白名單
+    if not linked and not is_model_allowed(payload.model, session):
         raise HTTPException(status_code=403, detail=f"Model '{payload.model}' is not allowed on this plan")
 
     ai_id = str(ai.id)
@@ -604,7 +758,8 @@ async def regenerate_message(
 
     # (V1-2) 扣每日額度：通過所有 4xx 檢查之後、任何改寫之前；不 commit，f 的 commit 一併提交
     usage_user_id = user.id  # 先取出，commit 之後 ORM 物件會過期
-    usage_day = charge_daily_quota(session, usage_user_id)
+    guest_ip_hash = guest.hash_ip(guest.client_ip(request)) if user.is_guest else None  # (G2-3) 訪客才計 IP
+    usage_day = charge_daily_quota(session, usage_user_id, guest_ip_hash, linked=linked)
 
     # (F9-1) 編輯 user 訊息：與下面的幽靈化、AI 清空同一個 commit，不能分開寫
     if payload.content is not None:
@@ -647,7 +802,8 @@ async def regenerate_message(
     GENERATIONS[ai_id] = {"text": "", "done": False}
     asyncio.create_task(run_generation(
         ai_id, user_content, history_plain, payload.model,
-        usage_user_id=usage_user_id, usage_day=usage_day,
+        usage_user_id=usage_user_id, usage_day=usage_day, usage_ip_hash=guest_ip_hash,
+        api_key=api_key, key_owner_id=usage_user_id,
     ))
 
     # h. 串流：與 /chat 相同，讀緩衝直到 done
@@ -1360,4 +1516,8 @@ def get_model_options_endpoint(
     user: User = Depends(get_current_user),
 ):
     presets = _model_presets()
-    return {"presets": presets, "default_model": _default_model(session, presets)}
+    return {
+        "presets": presets,
+        "default_model": _default_model(session, presets),
+        "allow_custom": _is_linked(session, user),  # (G2-9) 只有已連結者可以輸入自訂模型
+    }

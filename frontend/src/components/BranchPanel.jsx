@@ -18,6 +18,7 @@ import BranchListOverlay from './BranchListOverlay';
 //   freeModels        (G3-2) 免費模型清單（模型選單用）
 //   freeModelsLoading (G3-2) 免費模型清單是否載入中
 //   presets / defaultModel / optionsLoading (V1-3) 後端模型選項（GET /api/model-options）與載入狀態
+//   allowCustom       (G2-6) 是否允許自訂模型輸入（轉給 ChatInput／ModelSelector）；未傳則 false
 //   branchList        (E4) 目前對話的分支清單（GET /chats/{root}/branches 原始資料），分支列表用
 //   messages          (E4) 主對話訊息，分支列表依位置排序用
 //   scrollContainerRef (E4) 主對話捲動容器的 ref，點分支列表項目後捲動主對話用
@@ -26,6 +27,9 @@ import BranchListOverlay from './BranchListOverlay';
 //   onSend(id)
 //   onRetry(branchId, msg)  (G6-2) 重新生成分支裡的最後一則 AI 回覆；只有最後一則 AI 回覆會觸發（見 MessageList）
 //   onEdit(branchId, userMsg, aiMsg, text)  (F9-2) 編輯分支裡最後一則 user 訊息並重新生成其後的 AI 回覆（見 MessageList）；未傳則分支內不能編輯
+//   footer            (L1-2) 傳入（非 undefined）時，分支底部改顯示此節點，取代 ChatInput（例如落地頁示範的固定提示列）；未傳則照常顯示 ChatInput
+//   defaultWidthPercent (L1-6) 沒有儲存值時的預設寬度（視窗寬度的百分比，預設 25）
+//   persistWidth      (L1-6) false 時不讀也不寫 localStorage（首頁示範用，預設 true）
 //   onToggle()        收起整個面板
 function BranchPanel({
   branches,
@@ -39,6 +43,7 @@ function BranchPanel({
   presets,
   defaultModel,
   optionsLoading,
+  allowCustom = false, // (G2-6)
   branchList,
   messages,
   scrollContainerRef,
@@ -47,6 +52,9 @@ function BranchPanel({
   onSend,
   onRetry,
   onEdit,
+  footer,
+  defaultWidthPercent = 25,
+  persistWidth = true,
   onToggle,
 }) {
   // (G3-2) 自己送出訊息時強制捲到底（比照主對話 forceScrollToken）
@@ -57,21 +65,23 @@ function BranchPanel({
   // 面板寬度（可拖曳調整）：佔視窗寬度 20% ~ 50%，以百分比儲存並持久化
   const MIN_PANEL_PERCENT = 20;
   const MAX_PANEL_PERCENT = 50;
-  const DEFAULT_PANEL_PERCENT = 25;
   const PANEL_WIDTH_STORAGE_KEY = 'ct-chat:branchPanelWidthPercent';
 
   const clampPanelPercent = (percent) =>
     Math.min(MAX_PANEL_PERCENT, Math.max(MIN_PANEL_PERCENT, percent));
 
+  // (L1-6) defaultWidthPercent：沒有儲存值時的預設寬度（視窗寬度的百分比）；persistWidth=false 時不讀也不寫 localStorage（首頁示範用，避免動到使用者在正式介面調過的寬度）
   // 從 localStorage 還原（掛載時讀取一次），無效值則回退預設
   const [panelPercent, setPanelPercent] = useState(() => {
-    try {
-      const stored = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
-      if (Number.isFinite(stored) && stored > 0) return clampPanelPercent(stored);
-    } catch {
-      // localStorage 不可用時忽略
+    if (persistWidth) {
+      try {
+        const stored = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
+        if (Number.isFinite(stored) && stored > 0) return clampPanelPercent(stored);
+      } catch {
+        // localStorage 不可用時忽略
+      }
     }
-    return DEFAULT_PANEL_PERCENT;
+    return clampPanelPercent(defaultWidthPercent);
   });
   const [isResizing, setIsResizing] = useState(false);
   // P3b-F5：手機（< 768px）不套用 inline 百分比寬度
@@ -85,12 +95,13 @@ function BranchPanel({
 
   // 寬度變動時寫回 localStorage
   useEffect(() => {
+    if (!persistWidth) return;
     try {
       window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(panelPercent));
     } catch {
       // localStorage 不可用時忽略
     }
-  }, [panelPercent]);
+  }, [panelPercent, persistWidth]);
 
   const activeBranch = branches.find((b) => b.id === activeBranchId) || null;
 
@@ -160,9 +171,10 @@ function BranchPanel({
   return (
     // P3b-F5：手機（< 768px）滿版覆蓋（fixed）；桌面（md 以上）維持並排的百分比寬度。
     // 桌面寬度用 inline style；手機不設 inline 寬度，由 w-full 決定。
+    // (L1-8) 掛載時由右往左滑入（animate-panel-slide-in，定義在 index.css）。
     <aside
       style={isDesktop ? { width: `${panelPercent}%` } : undefined}
-      className="isolate fixed inset-0 z-40 w-full md:z-auto md:inset-auto md:h-full md:w-auto md:relative flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)]"
+      className="isolate fixed inset-0 z-40 w-full md:z-auto md:inset-auto md:h-full md:w-auto md:relative flex flex-shrink-0 h-full flex-col bg-white/95 border-l border-[#7DB9DE]/60 shadow-[-4px_0_12px_rgba(81,168,221,0.06)] animate-panel-slide-in"
     >
       {/* --- 左側拖曳把手：調整面板寬度（僅桌面） --- */}
       <div
@@ -194,7 +206,8 @@ function BranchPanel({
             <p className="text-sm font-semibold text-gray-700 leading-tight truncate">
               {activeBranch ? activeBranch.title || '未命名分支' : '分支對話'}
             </p>
-            <p className="text-[11px] text-gray-400 font-mono truncate">{model}</p>
+            {/* (L1-2) 沒有模型名稱時不佔位 */}
+            {model && <p className="text-[11px] text-gray-400 font-mono truncate">{model}</p>}
           </div>
         </div>
         {onToggle && (
@@ -247,7 +260,9 @@ function BranchPanel({
       />
 
       {/* --- 底部輸入框（只在有分支時出現，與主對話共用 ChatInput） --- */}
-      {activeBranch && (
+      {/* (L1-2) 傳入 footer 時以它取代 ChatInput（未傳則行為不變） */}
+      {footer !== undefined && activeBranch && footer}
+      {footer === undefined && activeBranch && (
         <ChatInput
           variant="branch"
           placeholder={activeBranch.isLoading ? '等待回覆中...' : '在這個分支繼續對話...'}
@@ -264,6 +279,7 @@ function BranchPanel({
           presets={presets}
           defaultModel={defaultModel}
           optionsLoading={optionsLoading}
+          allowCustom={allowCustom}
         />
       )}
 

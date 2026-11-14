@@ -255,7 +255,8 @@ def run_endpoint_checks():
     r = hit("GET", "/auth/me", token)
     check("me: valid -> 200", r.status_code == 200, str(r.status_code))
     body = r.json() if r.status_code == 200 else {}
-    check("me: keys exactly email, provider", set(body) == {"email", "provider"}, str(body))
+    check("me: keys exactly email, provider, is_guest, openrouter_connected, guest_claim",
+          set(body) == {"email", "provider", "is_guest", "openrouter_connected", "guest_claim"}, str(body))
     check("me: values correct", body.get("email") == FAKE_EMAIL and body.get("provider") == "github", str(body))
     check("me: Cache-Control no-store", r.headers.get("cache-control") == "no-store",
           str(r.headers.get("cache-control")))

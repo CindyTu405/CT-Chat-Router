@@ -17,3 +17,25 @@
 .animate-fade-zoom-in {
   animation: fade-zoom-in 0.2s ease-out;
 }
+
+/* (L1-8) 分支面板開啟時由右往左滑入。只在掛載時播一次；動畫結束後不保留 transform
+ * （不加 forwards），避免面板內 position: fixed 的子元素被 transform 影響定位。
+ * 調整：0.28s 是滑入時間；translateX(100%) 是起點（100% = 整個面板寬度之外）。 */
+@keyframes panel-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-panel-slide-in {
+  animation: panel-slide-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-panel-slide-in {
+    animation: none;
+  }
+}
