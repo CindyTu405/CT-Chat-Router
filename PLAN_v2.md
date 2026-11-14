@@ -1002,6 +1002,8 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 
 **狀態（2026-11-14，波次 2）**：波次 2 完成，未 push。G2-6 `a79ccd0`、G2-7 `1349c8b`。兩個 commit 各自 `npm run build` 成功。使用者在自己的瀏覽器跑過清單 A 後同意 commit；主代理另外用內建瀏覽器接假登入、假模型的測試後端（`g2_tmp`）走過開始試用、送訊息、登入後對話框（446px 與 1280px）、移到帳號、刪除、超過額度被擋。本機 `chat_db` 已執行 G2-1 的 migration。驗收期間的插曲：長時間執行的 Vite 開發伺服器送出舊版 `AuthGate.jsx`，造成「登入後沒有對話框」，重啟後正常，程式沒有改。`chat_db` 留有幾個測試用的訪客身分與對話，會在保留期限後自動清除。登入後沒有自訂模型輸入是決策 #9 的預期行為，波次 3、4 才開放。
 
+**狀態（2026-11-14，波次 3）**：波次 3 完成，未 push。G2-8 `c022090`、G2-9 `60aaeef`。主代理在 `g2_tmp` 重跑：`openrouter_connect_harness` `ALL PASS (88)`；`guest`、`quota`、`regenerate`、`auth`、`model_options`、`branch_entries`、`limits`、`pool` 八支都 `ALL PASS`。G2-9 的 harness 起了一個假的 OpenRouter HTTP 伺服器，跑的是真正的 `openrouter_chat_stream`，檢查上游收到的 `Authorization`。規格外新增：`backend/log_redaction.py`，把 uvicorn 存取紀錄裡 `/auth/` 路徑的查詢字串改記成 `?[redacted]`（原本會把 OAuth 導回的 `code`、`state` 寫進 log，Google／GitHub 登入也一樣）；使用者金鑰的 client 設 `max_retries=0`（一次生成只打一次上游）；401 後只在資料庫的密文仍是那把失效金鑰時才刪除連結（期間重新連結的不會被刪）；pending 的 `state` 另有 10 分鐘期限。與規格文字不同處：全站上限的回應是既有的 503 `site_quota_exceeded`（不是 429）；使用者在 OpenRouter 同意頁按拒絕時，目前會得到 `state_mismatch`（沒有獨立的代碼）。本機要試真的連結，`backend/.env` 需要先加 `CREDENTIAL_ENCRYPTION_KEY`。
+
 **波次**
 - 波次 1（後端，G2-1 到 G2-5）：沒有可看的畫面，做完回報後直接進波次 2。
 - 波次 2（前端，G2-6、G2-7）：停下來等使用者跑瀏覽器清單 A。
