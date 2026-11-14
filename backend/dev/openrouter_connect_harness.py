@@ -29,13 +29,19 @@ sys.path.insert(0, BACKEND_DIR)
 
 os.environ["CORS_ORIGINS"] = "http://localhost:5173"
 os.environ["FRONTEND_URL"] = "http://localhost:5173"
-os.environ["ALLOWED_MODELS"] = "gemini*"
+os.environ["ALLOWED_MODELS"] = "gemini-2.5-flash-lite,vendor/free-model"  # (G2-9) 非 gemini 的白名單模型供試用者測試
+os.environ["DAILY_MESSAGE_LIMIT"] = "2"  # (G2-9) 試用者每日 2 則，連結者不受限
 
 from cryptography.fernet import Fernet  # noqa: E402
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
-from sqlalchemy import delete as sa_delete  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+from openai import AsyncOpenAI  # noqa: E402
+from sqlalchemy import delete as sa_delete, update as sa_update  # noqa: E402
 from sqlmodel import Session, select  # noqa: E402
+from starlette.applications import Starlette  # noqa: E402
+from starlette.responses import JSONResponse, StreamingResponse  # noqa: E402
+from starlette.routing import Route  # noqa: E402
 
 from database import engine  # noqa: E402
 
@@ -82,11 +88,13 @@ import auth_routes  # noqa: E402
 import crypto_utils  # noqa: E402
 import openrouter_connect as oc  # noqa: E402
 import guest  # noqa: E402
-from models import AuthSession, DailyUsage, GuestIpUsage, OpenRouterCredential, User, GUEST_PROVIDER  # noqa: E402
+from models import AuthSession, Branch, DailyUsage, GuestIpUsage, Message, OpenRouterCredential, User, GUEST_PROVIDER  # noqa: E402
+import openrouter_llm  # noqa: E402
 from crypto_utils import CredentialKeyError, decrypt_key, encrypt_key  # noqa: E402
 
 engine.echo = False
 main.limiter.enabled = False
+main.get_free_models = lambda session, force_refresh=False: []  # 不去抓 OpenRouter 免費清單
 
 FRONTEND = "http://localhost:5173"
 OR_AUTH = "https://openrouter.ai/auth"
@@ -184,7 +192,7 @@ def env(**kv):
 # ---------- 身分與 client ----------
 
 def mk_client() -> httpx.Client:
-    c = httpx.Client(base_url=BASE, timeout=30, follow_redirects=False)
+    c = httpx.Client(base_url=BASE, timeout=30, follow_redirects=False, event_hooks={"response": [_keep_body]})
     OPEN_CLIENTS.append(c)
     return c
 
@@ -560,12 +568,463 @@ def wait_for(pred, timeout: float = 5.0) -> bool:
     return pred()
 
 
+# ---------- (G2-9) 使用者自己的金鑰生成 ----------
+# 假的 OpenRouter（同一個程序內另一個 port）；真正的 openrouter_chat_stream 會打到它。
+USER_KEY_INVALID_LIT = "⚠️ 你的 OpenRouter 連結已失效，請重新連結"   # 字面值（與 main 常數獨立比對）
+USER_KEY_CREDIT_LIT = "⚠️ 你的 OpenRouter 帳號額度不足"
+GEN_FAILED_LIT = "\n\n⚠️ 生成中斷，請稍後再試"
+PLATFORM_KEY = f"sk-or-v1-PLATFORM-{_real_secrets.token_hex(12)}"
+ALL_KEYS.append(PLATFORM_KEY)
+FREE_MODEL = "vendor/free-model"     # ALLOWED_MODELS 內的非 gemini 模型（試用者可用）
+GEMINI_X = "gemini-x"                # 不在白名單（gemini* 萬用字元未開）
+UNLISTED = "openai/gpt-x"
+FAKE = {"log": [], "mode": {}, "hook": {}}  # log: 每次上游請求的 auth/model；mode: key→HTTP 狀態；hook: key→一次性 callable
+GEM = {"n": 0}                        # 直連 Gemini 的呼叫次數（應該不會增加）
+BODIES: list[bytes] = []              # 測試端收到的所有 HTTP 回應本文（洩漏檢查用）
+G9: dict = {}                         # G2-9 案例之間共用的狀態
+G9_UIDS: list[uuid.UUID] = []
+
+
+def _keep_body(resp: httpx.Response) -> None:
+    resp.read()
+    BODIES.append(resp.content)
+
+
+def new_user_key() -> str:
+    k = f"sk-or-v1-USER-{_real_secrets.token_hex(12)}"
+    ALL_KEYS.append(k)
+    return k
+
+
+async def fake_gemini(message, history, model="gemini-2.5-flash-lite"):
+    GEM["n"] += 1
+    yield "GEMINI-DIRECT"
+
+
+main.gemini_chat_stream = fake_gemini  # (G2-9) 直連 Gemini 的記錄器；連結者必須保持 0 次
+
+
+def _sse(model: str, delta: dict, finish) -> bytes:
+    import json as _json
+    chunk = {"id": "gen-1", "object": "chat.completion.chunk", "created": 0, "model": model,
+             "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+    return b"data: " + _json.dumps(chunk).encode("utf-8") + b"\n\n"
+
+
+async def _fake_completions(request):
+    body = await request.json()
+    auth = request.headers.get("authorization", "")
+    key = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+    model = str(body.get("model", ""))
+    FAKE["log"].append({"auth": auth, "model": model})
+    hook = FAKE["hook"].pop(key, None)
+    if hook is not None:
+        hook()
+    status = FAKE["mode"].get(key, 200)
+    if status != 200:
+        return JSONResponse({"error": {"message": "fake upstream rejected"}}, status_code=status)
+
+    async def gen():
+        yield _sse(model, {"role": "assistant", "content": "FAKE"}, None)
+        yield _sse(model, {"content": "-REPLY"}, None)
+        yield _sse(model, {}, "stop")
+        yield b"data: [DONE]\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+fake_app = Starlette(routes=[Route("/api/v1/chat/completions", _fake_completions, methods=["POST"])])
+
+
+def start_fake_openrouter() -> uvicorn.Server:
+    port = free_port()
+    config = uvicorn.Config(fake_app, host="127.0.0.1", port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    threading.Thread(target=server.run, daemon=True).start()
+    deadline = time.time() + 20
+    while not server.started and time.time() < deadline:
+        time.sleep(0.05)
+    if not server.started:
+        raise RuntimeError("fake OpenRouter did not start")
+    base = f"http://127.0.0.1:{port}/api/v1"
+    # 真實的 openrouter_chat_stream 用的是模組常數（使用者金鑰）與平台 client（試用者）；兩者都指向假伺服器
+    openrouter_llm.OPENROUTER_BASE_URL = base
+    openrouter_llm.client = AsyncOpenAI(base_url=base, api_key=PLATFORM_KEY)
+    return server
+
+
+def link_user(uid: uuid.UUID, key: str) -> None:
+    with Session(engine) as s:
+        s.add(OpenRouterCredential(user_id=uid, key_encrypted=encrypt_key(key),
+                                   created_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+        s.commit()
+    cred_row(uid)  # 把密文記進 CIPHERS（洩漏檢查用）
+
+
+def replace_link(uid: uuid.UUID, key: str) -> None:
+    with Session(engine) as s:
+        s.execute(sa_delete(OpenRouterCredential).where(OpenRouterCredential.user_id == uid))
+        s.add(OpenRouterCredential(user_id=uid, key_encrypted=encrypt_key(key),
+                                   created_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+        s.commit()
+    cred_row(uid)
+
+
+def linked_user(label: str) -> tuple[httpx.Client, uuid.UUID, str]:
+    token, uid = new_account(label)
+    G9_UIDS.append(uid)
+    key = new_user_key()
+    link_user(uid, key)
+    return with_session(token), uid, key
+
+
+def unlinked_user(label: str) -> tuple[httpx.Client, uuid.UUID]:
+    token, uid = new_account(label)
+    G9_UIDS.append(uid)
+    return with_session(token), uid
+
+
+def trial_guest() -> tuple[httpx.Client, uuid.UUID]:
+    c, uid = new_guest()
+    G9_UIDS.append(uid)
+    return c, uid
+
+
+def send_chat(c: httpx.Client, text_msg: str, model: str, parent: str | None = None) -> httpx.Response:
+    body = {"message": text_msg, "model": model}
+    if parent is not None:
+        body["parent_id"] = parent
+    return c.post("/chat", json=body)
+
+
+def msg_content(mid: uuid.UUID) -> str | None:
+    with Session(engine) as s:
+        m = s.get(Message, mid)
+        return m.content if m else None
+
+
+def msg_count(uid: uuid.UUID) -> int:
+    with Session(engine) as s:
+        return len(s.exec(select(Message).where(Message.user_id == uid)).all())
+
+
+def daily_rows(uid: uuid.UUID) -> int:
+    with Session(engine) as s:
+        return len(s.exec(select(DailyUsage).where(DailyUsage.user_id == uid)).all())
+
+
+def daily_value(uid: uuid.UUID) -> int:
+    with Session(engine) as s:
+        rows = s.exec(select(DailyUsage.count).where(DailyUsage.user_id == uid)).all()
+        return sum(rows)
+
+
+def last_active_set(uid: uuid.UUID) -> bool:
+    with Session(engine) as s:
+        u = s.get(User, uid)
+        return u is not None and u.last_active_at is not None
+
+
+def cred_count_of(uid: uuid.UUID) -> int:
+    return cred_count(uid)
+
+
+def fake_since(n: int) -> list[dict]:
+    return FAKE["log"][n:]
+
+
+def fake_auths(entries: list[dict]) -> set[str]:
+    return {e["auth"] for e in entries}
+
+
+def chat_ai_id(r: httpx.Response) -> str:
+    return r.headers.get("X-Message-Id", "")
+
+
+def g9_1_linked_thirty():
+    c, uid, key = linked_user("g9-L1")
+    G9["L1"] = (c, uid, key)
+    n0 = len(FAKE["log"])
+    statuses, ai_ids = [], []
+    for i in range(30):
+        r = send_chat(c, f"l1 {i}", FREE_MODEL)
+        statuses.append(r.status_code)
+        ai_ids.append(chat_ai_id(r))
+    G9["L1_seg"] = (n0, len(FAKE["log"]))
+    G9["L1_last_ai"] = ai_ids[-1]
+    check("G2-9-1a linked user: 30 /chat with DAILY_MESSAGE_LIMIT=2 all 200",
+          statuses == [200] * 30, str(statuses[:5]))
+    check("G2-9-1b all 30 replies stored",
+          all(a and msg_content(uuid.UUID(a)) == "FAKE-REPLY" for a in ai_ids), "content mismatch")
+    check("G2-9-1c no daily_usage row for the linked user", daily_rows(uid) == 0, str(daily_rows(uid)))
+    check("G2-9-1d last_active_at set for the linked user", last_active_set(uid))
+
+
+def g9_2_site_limit():
+    c, uid, _ = G9["L1"]
+    with env(SITE_DAILY_MESSAGE_LIMIT="0"):
+        r = send_chat(c, "site linked", FREE_MODEL)
+        gc, _gid = trial_guest()
+        rt = send_chat(gc, "site trial", FREE_MODEL)
+    check("G2-9-2a with site limit reached, linked user still 200",
+          r.status_code == 200, f"status={r.status_code}")
+    d = rt.json().get("detail", {}) if rt.status_code != 200 else {}
+    check("G2-9-2b with site limit reached, trial user blocked (503 site_quota_exceeded)",
+          rt.status_code == 503 and isinstance(d, dict) and d.get("code") == "site_quota_exceeded",
+          f"status={rt.status_code} body={rt.text[:120]}")
+
+
+def g9_3_bearer_by_identity():
+    n0, n1 = G9["L1_seg"]
+    check("G2-9-3a linked user's upstream calls carried only Bearer <its key>",
+          fake_auths(FAKE["log"][n0:n1]) == {f"Bearer {G9['L1'][2]}"}, str(fake_auths(FAKE["log"][n0:n1])))
+    tu, uid_u = unlinked_user("g9-U")
+    G9["U"] = (tu, uid_u)
+    gc, gid = trial_guest()
+    G9["G"] = (gc, gid)
+    n = len(FAKE["log"])
+    ru = send_chat(tu, "trial account", FREE_MODEL)
+    rg = send_chat(gc, "trial guest", FREE_MODEL)
+    seg = FAKE["log"][n:]
+    check("G2-9-3b unlinked account and guest both 200 via platform path",
+          ru.status_code == 200 and rg.status_code == 200, f"{ru.status_code}/{rg.status_code}")
+    check("G2-9-3c unlinked account and guest carried only Bearer <platform key>",
+          fake_auths(seg) == {f"Bearer {PLATFORM_KEY}"} and len(seg) == 2, str(fake_auths(seg)))
+
+
+def g9_4_two_linked_users():
+    ca, ua, ka = G9["L1"]
+    cb, ub, kb = linked_user("g9-L2")
+    G9["L2"] = (cb, ub, kb)
+    seen_a, seen_b, bad = set(), set(), []
+    for i in range(3):
+        n = len(FAKE["log"])
+        r = send_chat(ca, f"a4 {i}", FREE_MODEL)
+        seen_a |= fake_auths(fake_since(n))
+        if r.status_code != 200:
+            bad.append(("a", r.status_code))
+        n = len(FAKE["log"])
+        r = send_chat(cb, f"b4 {i}", FREE_MODEL)
+        seen_b |= fake_auths(fake_since(n))
+        if r.status_code != 200:
+            bad.append(("b", r.status_code))
+    check("G2-9-4 A's requests only ever carry A's key; B's only B's",
+          not bad and seen_a == {f"Bearer {ka}"} and seen_b == {f"Bearer {kb}"},
+          f"bad={bad} a={len(seen_a)} b={len(seen_b)}")
+
+
+def g9_5_model_gate():
+    ca, _, ka = G9["L1"]
+    n = len(FAKE["log"])
+    gem0 = GEM["n"]
+    rx = send_chat(ca, "gx linked", GEMINI_X)
+    rg = send_chat(ca, "gem linked", "gemini-2.5-flash-lite")
+    seg = FAKE["log"][n:]
+    check("G2-9-5a linked user with non-whitelisted gemini-x → 200 via OpenRouter with the user key",
+          rx.status_code == 200 and seg and seg[0]["model"] == GEMINI_X and seg[0]["auth"] == f"Bearer {ka}",
+          f"status={rx.status_code} seg={seg[:1]}")
+    check("G2-9-5b the Gemini recorder was never called for linked users",
+          GEM["n"] == gem0 and rg.status_code == 200, f"gem_calls={GEM['n'] - gem0}")
+    tu, uid_u = G9["U"]
+    n = len(FAKE["log"])
+    before = (daily_value(uid_u), msg_count(uid_u))
+    ru = send_chat(tu, "unlisted trial", UNLISTED)
+    check("G2-9-5c unlinked account with non-whitelisted model → 403, nothing charged",
+          ru.status_code == 403 and (daily_value(uid_u), msg_count(uid_u)) == before and len(FAKE["log"]) == n,
+          f"status={ru.status_code}")
+    gc, _ = G9["G"]
+    rgx = send_chat(gc, "guest unlisted", UNLISTED)
+    rgx2 = send_chat(gc, "guest gemini-x", GEMINI_X)
+    check("G2-9-5d guest with non-whitelisted models → 403 (backend enforced)",
+          rgx.status_code == 403 and rgx2.status_code == 403, f"{rgx.status_code}/{rgx2.status_code}")
+
+
+def g9_6_invalid_401():
+    c, uid, key = linked_user("g9-C")
+    FAKE["mode"][key] = 401
+    n = len(FAKE["log"])
+    r = send_chat(c, "c401", FREE_MODEL)
+    ai = chat_ai_id(r)
+    seg = FAKE["log"][n:]
+    check("G2-9-6a 401: AI message content is exactly the fixed reconnect text",
+          r.status_code == 200 and ai and msg_content(uuid.UUID(ai)) == USER_KEY_INVALID_LIT,
+          f"status={r.status_code} content={msg_content(uuid.UUID(ai)) if ai else None!r}")
+    check("G2-9-6b 401: credential row deleted and upstream called exactly once, with the user key",
+          cred_count_of(uid) == 0 and len(seg) == 1 and seg[0]["auth"] == f"Bearer {key}",
+          f"rows={cred_count_of(uid)} seg={len(seg)}")
+    FAKE["mode"].pop(key, None)
+    n = len(FAKE["log"])
+    r2 = send_chat(c, "after 401", FREE_MODEL)
+    seg2 = FAKE["log"][n:]
+    check("G2-9-6c next message goes the trial way: platform key, daily_usage charged",
+          r2.status_code == 200 and fake_auths(seg2) == {f"Bearer {PLATFORM_KEY}"} and daily_value(uid) == 1,
+          f"status={r2.status_code} auths={fake_auths(seg2)} daily={daily_value(uid)}")
+
+
+def g9_7_401_after_reconnect_keeps_new_row():
+    c, uid, key1 = linked_user("g9-D")
+    key2 = new_user_key()
+
+    def swap():
+        replace_link(uid, key2)
+
+    FAKE["hook"][key1] = swap
+    FAKE["mode"][key1] = 401
+    r = send_chat(c, "d401 race", FREE_MODEL)
+    FAKE["mode"].pop(key1, None)
+    with Session(engine) as s:
+        row = s.get(OpenRouterCredential, uid)
+        still = row is not None and decrypt_key(row.key_encrypted) == key2
+    ai = chat_ai_id(r)
+    check("G2-9-7a 401 after the user reconnected (row now holds another key) → new row kept",
+          still and ai and msg_content(uuid.UUID(ai)) == USER_KEY_INVALID_LIT, f"status={r.status_code}")
+    dropped = main._drop_credential_if_same(uid, key1)
+    check("G2-9-7b direct call with the stale key does not delete the new row",
+          dropped is False and cred_count_of(uid) == 1, f"dropped={dropped}")
+
+
+def g9_8_402():
+    c, uid, key = linked_user("g9-E")
+    FAKE["mode"][key] = 402
+    n = len(FAKE["log"])
+    r = send_chat(c, "e402", FREE_MODEL)
+    ai = chat_ai_id(r)
+    seg = FAKE["log"][n:]
+    FAKE["mode"].pop(key, None)
+    check("G2-9-8a 402: AI message exactly the fixed credit text",
+          r.status_code == 200 and ai and msg_content(uuid.UUID(ai)) == USER_KEY_CREDIT_LIT,
+          f"status={r.status_code}")
+    check("G2-9-8b 402: row kept and exactly one upstream call with the user key",
+          cred_count_of(uid) == 1 and len(seg) == 1 and seg[0]["auth"] == f"Bearer {key}", f"seg={len(seg)}")
+
+
+def g9_9_500():
+    c, uid, key = linked_user("g9-F")
+    FAKE["mode"][key] = 500
+    n = len(FAKE["log"])
+    r = send_chat(c, "f500", FREE_MODEL)
+    ai = chat_ai_id(r)
+    seg = FAKE["log"][n:]
+    FAKE["mode"].pop(key, None)
+    check("G2-9-9a 500: existing fixed error text, row kept",
+          r.status_code == 200 and ai and msg_content(uuid.UUID(ai)) == GEN_FAILED_LIT and cred_count_of(uid) == 1,
+          f"content={msg_content(uuid.UUID(ai)) if ai else None!r}")
+    check("G2-9-9b 500: one upstream call with the user key, no platform-key call",
+          len(seg) == 1 and seg[0]["auth"] == f"Bearer {key}", f"seg={[e['auth'][:12] for e in seg]}")
+
+
+def g9_10_decrypt_failure():
+    ch, uh, kh = linked_user("g9-H")
+    r0 = send_chat(ch, "h before", FREE_MODEL)
+    check("G2-9-10a setup: linked H chats under the original key → 200", r0.status_code == 200, str(r0.status_code))
+    ci, ui, ki = linked_user("g9-I")
+    r1 = send_chat(ci, "i before", FREE_MODEL)
+    ai_i = chat_ai_id(r1)
+    content_before = msg_content(uuid.UUID(ai_i))
+    h_before = msg_count(uh)
+    n = len(FAKE["log"])
+    other = Fernet.generate_key().decode("ascii")
+    ALL_KEYS.append(other)
+    with env(CREDENTIAL_ENCRYPTION_KEY=other):
+        rh = send_chat(ch, "h after switch", FREE_MODEL)
+        dh = rh.json().get("detail", {}) if rh.status_code != 200 else {}
+        ri = ci.post(f"/messages/{ai_i}/regenerate", json={"model": FREE_MODEL})
+        di = ri.json().get("detail", {}) if ri.status_code != 200 else {}
+    check("G2-9-10b /chat with undecryptable key → 409 openrouter_reconnect_required",
+          rh.status_code == 409 and isinstance(dh, dict) and dh.get("code") == "openrouter_reconnect_required",
+          f"status={rh.status_code} body={rh.text[:120]}")
+    check("G2-9-10c /chat 409: no message created, row deleted, no upstream call",
+          msg_count(uh) == h_before and cred_count_of(uh) == 0 and len(FAKE["log"]) == n,
+          f"msgs={msg_count(uh)}/{h_before} rows={cred_count_of(uh)}")
+    check("G2-9-10d regenerate with undecryptable key → 409, target message unchanged, row deleted",
+          ri.status_code == 409 and isinstance(di, dict) and di.get("code") == "openrouter_reconnect_required"
+          and msg_content(uuid.UUID(ai_i)) == content_before and cred_count_of(ui) == 0 and len(FAKE["log"]) == n,
+          f"status={ri.status_code} content_same={msg_content(uuid.UUID(ai_i)) == content_before}")
+
+
+def g9_11_regenerate_linked():
+    c, uid, key = G9["L1"]
+    n = len(FAKE["log"])
+    r = c.post(f"/messages/{G9['L1_last_ai']}/regenerate", json={"model": FREE_MODEL})
+    seg = FAKE["log"][n:]
+    check("G2-9-11a linked regenerate → 200, reply FAKE-REPLY, user key only",
+          r.status_code == 200 and r.text == "FAKE-REPLY" and fake_auths(seg) == {f"Bearer {key}"},
+          f"status={r.status_code} seg={len(seg)}")
+    check("G2-9-11b linked regenerate writes no daily_usage",
+          daily_rows(uid) == 0, str(daily_rows(uid)))
+
+
+def g9_12_allow_custom():
+    cl, _, _ = G9["L1"]
+    tu, _ = G9["U"]
+    gc, _ = G9["G"]
+
+    def allow(cl_):
+        r = cl_.get("/api/model-options")
+        return r.json().get("allow_custom") if r.status_code == 200 else f"status {r.status_code}"
+
+    check("G2-9-12a allow_custom true for linked, false for unlinked and guest",
+          allow(cl) is True and allow(tu) is False and allow(gc) is False,
+          f"linked={allow(cl)} unlinked={allow(tu)} guest={allow(gc)}")
+    cz, _, _ = linked_user("g9-Z")
+    before = allow(cz)
+    rd = cz.delete("/auth/openrouter")
+    check("G2-9-12b after disconnect allow_custom false (before connected it was true)",
+          before is True and rd.status_code == 200 and allow(cz) is False,
+          f"before={before} delete={rd.status_code} after={allow(cz)}")
+
+
+def g9_13_ownership():
+    cb, ub, _ = G9["L2"]
+    cl, ul, _ = G9["L1"]
+    ai = G9["L1_last_ai"]
+    n = len(FAKE["log"])
+    before_msgs, before_content = msg_count(ul), msg_content(uuid.UUID(ai))
+    r1 = cb.post(f"/messages/{ai}/regenerate", json={"model": FREE_MODEL})
+    r2 = send_chat(cb, "steal", FREE_MODEL, parent=ai)
+    check("G2-9-13a linked B cannot regenerate or continue A's message (404), no upstream call",
+          r1.status_code == 404 and r2.status_code == 404 and len(FAKE["log"]) == n,
+          f"regen={r1.status_code} chat={r2.status_code} calls={len(FAKE['log']) - n}")
+    check("G2-9-13b A's messages unchanged",
+          msg_count(ul) == before_msgs and msg_content(uuid.UUID(ai)) == before_content, "changed")
+
+
+G9_CASES = [
+    g9_1_linked_thirty, g9_2_site_limit, g9_3_bearer_by_identity, g9_4_two_linked_users,
+    g9_5_model_gate, g9_6_invalid_401, g9_7_401_after_reconnect_keeps_new_row, g9_8_402, g9_9_500,
+    g9_10_decrypt_failure, g9_11_regenerate_linked, g9_12_allow_custom, g9_13_ownership,
+]
+
+
+def g9_14_leak_check():
+    text = CAPTURE.getvalue()
+    bodies = b"\n".join(BODIES).decode("utf-8", "replace")
+    with Session(engine) as s:
+        contents = "\n".join(
+            m.content or "" for m in s.exec(select(Message).where(Message.user_id.in_(G9_UIDS))).all()
+        )
+    pool = set(ALL_KEYS) | set(CIPHERS) | {FERNET_KEY} | set(GENERATED) | set(ALL_CODES)
+    pool = {x for x in pool if x}
+    where = {"logs": 0, "bodies": 0, "message_rows": 0}
+    for x in pool:
+        if x in text:
+            where["logs"] += 1
+        if x in bodies:
+            where["bodies"] += 1
+        if x in contents:
+            where["message_rows"] += 1
+    check("G2-9-14 no key, ciphertext, code, state or verifier in logs/stdout, response bodies or message rows",
+          all(v == 0 for v in where.values()) and len(BODIES) > 0 and len(text) > 0, str(where) + f" bodies={len(BODIES)}")
+
+
+
 CASES = [
     c01_connect_redirect, c02_callback_success, c03_me_connected, c04_replay,
     c05_wrong_state_then_right, c06_missing_code, c07_cross_account_cookie,
     c08_guest_and_anonymous, c09_encryption_unconfigured, c10_exchange_failed,
     c11_reconnect_replaces, c12_delete_self, c13_delete_does_not_touch_other,
     c14_expired_state, c16_crypto_wrong_key, c17_route_order, c18_access_log_redacted,
+    *G9_CASES,
 ]
 
 
@@ -601,9 +1060,19 @@ def start_server() -> uvicorn.Server:
 
 
 def cleanup():
+    uids = list(dict.fromkeys(CREATED_UIDS))
     try:
         with Session(engine) as s:
-            for uid in dict.fromkeys(CREATED_UIDS):
+            if uids:
+                s.execute(sa_update(Branch).where(Branch.user_id.in_(uids)).values(
+                    root_message_id=None, anchor_message_id=None, attach_root_id=None, parent_branch_id=None))
+                s.execute(sa_update(Message).where(Message.user_id.in_(uids)).values(
+                    parent_id=None, branch_id=None, anchor_message_id=None))
+                s.execute(sa_delete(Branch).where(Branch.user_id.in_(uids)))
+                s.execute(sa_delete(Message).where(Message.user_id.in_(uids)))
+                s.commit()
+        for uid in uids:
+            with Session(engine) as s:
                 s.execute(sa_delete(OpenRouterCredential).where(OpenRouterCredential.user_id == uid))
                 s.execute(sa_delete(DailyUsage).where(DailyUsage.user_id == uid))
                 for a in s.exec(select(AuthSession).where(AuthSession.user_id == uid)).all():
@@ -619,16 +1088,19 @@ def cleanup():
                 s.execute(sa_delete(GuestIpUsage).where(GuestIpUsage.ip_hash.in_(hashes)))
                 s.commit()
     except Exception as e:  # noqa: BLE001
-        print(f"cleanup FAILED: {type(e).__name__}")
+        print(f"cleanup FAILED: {type(e).__name__}: {e}")
 
 
 def main_entry() -> int:
     server = None
+    fake = None
     try:
+        fake = start_fake_openrouter()
         server = start_server()
         for fn in CASES:
             run(fn)
         run(c15_leak_check)
+        run(g9_14_leak_check)
     except Exception as e:  # noqa: BLE001
         check("harness setup", False, f"exception: {type(e).__name__}")
     finally:
@@ -636,6 +1108,8 @@ def main_entry() -> int:
             c.close()
         if server is not None:
             server.should_exit = True
+        if fake is not None:
+            fake.should_exit = True
         cleanup()
 
     total = len(RESULTS)
