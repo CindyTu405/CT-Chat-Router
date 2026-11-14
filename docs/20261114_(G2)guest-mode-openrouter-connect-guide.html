@@ -286,8 +286,8 @@ f = Fernet(CREDENTIAL_ENCRYPTION_KEY)      <span class="cm"># 加密金鑰只放
         <tr><td>G2-7</td><td>前端搬移對話框</td><td>完成，<code>1349c8b</code>。對話框只看 <code>/auth/me</code> 的 <code>guest_claim</code>；處理完重新讀取使用者資料，並換 <code>key</code> 讓聊天畫面重新掛載、側欄重新載入</td></tr>
         <tr><td>G2-8</td><td>OpenRouter 連結與加密保存</td><td>完成，<code>c022090</code>。<code>state</code> 一進 callback 就先從 session 移除，所以失敗也只能用一次。額外加了 <code>log_redaction.py</code>：伺服器存取紀錄原本會把導回網址上的 <code>code</code>、<code>state</code> 寫進 log，現在 <code>/auth/</code> 路徑的查詢字串一律記成 <code>?[redacted]</code></td></tr>
         <tr><td>G2-9</td><td>用自己的金鑰生成與失效處理</td><td>完成，<code>60aaeef</code>。金鑰在請求裡解密後只以參數傳給背景工作，每次呼叫建立一個 client、用完關閉、不重試。401 後只在資料庫裡仍是那把失效金鑰時才刪除連結</td></tr>
-        <tr><td>G2-10</td><td>前端連結介面</td><td>未開始</td></tr>
-        <tr><td>G2-11</td><td>隱私權說明、環境變數、部署說明</td><td>未開始</td></tr>
+        <tr><td>G2-10</td><td>前端連結介面</td><td>完成，<code>1a1486c</code>。「連結 OpenRouter」是一般連結（整頁導向），前端從頭到尾不接觸金鑰。已連結者每次生成結束後重新讀取 <code>/auth/me</code>，金鑰失效時側欄會自動回到未連結。中斷連結的對話框用 Portal 掛到 <code>body</code>，不會被手機版側欄困住</td></tr>
+        <tr><td>G2-11</td><td>隱私權說明、環境變數、部署說明</td><td>完成，<code>6780760</code>。<code>CREDENTIAL_ENCRYPTION_KEY</code> 在 compose 檔沒有預設值，沒設定時連結功能直接停用，不會用明碼儲存</td></tr>
       </table>
     </div>
     <p class="muted">規格、驗收指令與瀏覽器清單：<code>PLAN_v2.md</code>「G2 規格與驗收」。分支 <code>feat/landing-guest</code>。OpenRouter 流程對照官方文件 <code>openrouter.ai/docs/use-cases/oauth-pkce</code>（2026-11-14）。</p>
