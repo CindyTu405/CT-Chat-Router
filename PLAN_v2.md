@@ -1000,6 +1000,8 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 
 **狀態（2026-11-14）**：波次 1 完成，未 push。G2-1 `2d868ee`、G2-2 `d004ab3`、G2-3 `54a2151`、G2-4 `e902726`、G2-5 `19f68e3`。主代理在臨時資料庫 `g2_tmp` 重跑：`guest_harness` `ALL PASS (141)`；`auth`、`quota`、`regenerate`、`branch_entries`、`model_options`、`pool`、`limits` 七支 harness 都 `ALL PASS`。臨時資料庫的建法：`createdb g2_tmp` → `pg_dump -s chat_db | psql g2_tmp` → `POSTGRES_DB=g2_tmp uv run alembic stamp f1a2b3c4d5e6`（baseline migration 無法從空資料庫建表）。本機 `chat_db` 尚未執行這支 migration（仍在 `f1a2b3c4d5e6`）。實作時新增而規格沒寫的：`backend/rate_limit.py`（limiter 單一實例）、`backend/guest.py`（訪客相關純函式）；`GUEST_RETENTION_DAYS < 1` 時不刪任何訪客；`POST /auth/guest-claim` 無待處理訪客時回 409 並清掉 `guest_session` cookie。
 
+**狀態（2026-11-14，波次 2）**：波次 2 完成，未 push。G2-6 `a79ccd0`、G2-7 `1349c8b`。兩個 commit 各自 `npm run build` 成功。使用者在自己的瀏覽器跑過清單 A 後同意 commit；主代理另外用內建瀏覽器接假登入、假模型的測試後端（`g2_tmp`）走過開始試用、送訊息、登入後對話框（446px 與 1280px）、移到帳號、刪除、超過額度被擋。本機 `chat_db` 已執行 G2-1 的 migration。驗收期間的插曲：長時間執行的 Vite 開發伺服器送出舊版 `AuthGate.jsx`，造成「登入後沒有對話框」，重啟後正常，程式沒有改。`chat_db` 留有幾個測試用的訪客身分與對話，會在保留期限後自動清除。登入後沒有自訂模型輸入是決策 #9 的預期行為，波次 3、4 才開放。
+
 **波次**
 - 波次 1（後端，G2-1 到 G2-5）：沒有可看的畫面，做完回報後直接進波次 2。
 - 波次 2（前端，G2-6、G2-7）：停下來等使用者跑瀏覽器清單 A。
