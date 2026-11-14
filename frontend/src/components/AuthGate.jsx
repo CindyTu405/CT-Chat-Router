@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FcGoogle } from 'react-icons/fc';
 import { FaGithub } from 'react-icons/fa';
 import App from '../App';
@@ -21,7 +21,8 @@ function readAuthError() {
     : AUTH_ERROR_FALLBACK;
 }
 
-function LoginPage({ onBack }) {
+// (G2-6) notice：從首頁試用失敗等情況帶進來的提示（琥珀色框）；backLabel：返回按鈕文字（聊天中的登入頁用「← 返回」）
+function LoginPage({ onBack, notice = null, backLabel = '← 回首頁' }) {
   // 只在掛載時讀一次，讀完立刻把參數從網址移除（重新整理不會再出現）
   const [errorMessage] = useState(readAuthError);
   useEffect(() => {
@@ -50,6 +51,12 @@ function LoginPage({ onBack }) {
             {errorMessage}
           </p>
         )}
+        {/* (G2-6) 試用失敗等提示：琥珀色，和紅色的 auth_error 區分開 */}
+        {notice && (
+          <p role="status" className="w-full text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-center">
+            {notice}
+          </p>
+        )}
         <a href={`${API_URL}/auth/google/login`} className={buttonClass}>
           <FcGoogle className="w-5 h-5" aria-hidden="true" />
           使用 Google 繼續
@@ -64,7 +71,7 @@ function LoginPage({ onBack }) {
           onClick={onBack}
           className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 cursor-pointer"
         >
-          ← 回首頁
+          {backLabel}
         </button>
         <a
           href="/privacy.html"
@@ -87,41 +94,87 @@ function AuthGate() {
   const [view, setView] = useState(() =>
     new URLSearchParams(window.location.search).has('auth_error') ? 'login' : 'landing'
   );
+  // (G2-6) 「開始使用」進行中（按鈕停用，避免重複發起試用請求）
+  const [starting, setStarting] = useState(false);
+  // (G2-6) 登入頁上方的提示文字（試用失敗時設定；返回首頁時清掉）
+  const [loginNotice, setLoginNotice] = useState(null);
+
+  // (G2-6) 重新讀取 /auth/me：成功＝使用者資料，非 200 或網路錯誤＝視為未登入
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await apiFetch('/auth/me');
+      const data = res.ok ? await res.json() : null;
+      setUser(data);
+    } catch {
+      setUser(null);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
     const onUnauthorized = () => {
-      if (!cancelled) setUser(null);
+      setUser(null);
+      // (G2-6) 失效後回首頁（不是登入頁）
+      setView('landing');
     };
     window.addEventListener('auth:unauthorized', onUnauthorized);
-
-    (async () => {
-      try {
-        const res = await apiFetch('/auth/me');
-        const data = res.ok ? await res.json() : null;
-        if (!cancelled) setUser(data);
-      } catch {
-        if (!cancelled) setUser(null);
-      }
-    })();
+    refreshUser();
 
     return () => {
-      cancelled = true;
       window.removeEventListener('auth:unauthorized', onUnauthorized);
     };
-  }, []);
+  }, [refreshUser]);
+
+  // (G2-6) 首頁「開始使用」：按下才發試用請求（首頁本身不發請求）；成功後重新讀取 /auth/me 進入聊天
+  const startGuest = async () => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      const res = await apiFetch('/auth/guest', { method: 'POST' });
+      if (res.ok) {
+        await refreshUser();
+      } else if (res.status === 429) {
+        // 這個網路的訪客名額用完：帶提示進登入頁
+        setLoginNotice('這個網路今天的試用名額已滿，請登入後使用。');
+        setView('login');
+      } else {
+        setLoginNotice('目前無法開始試用，請稍後再試，或直接登入。');
+        setView('login');
+      }
+    } catch {
+      setLoginNotice('目前無法開始試用，請稍後再試，或直接登入。');
+      setView('login');
+    } finally {
+      setStarting(false);
+    }
+  };
 
   if (user === undefined) {
     return <div className="h-screen supports-[height:100dvh]:h-dvh bg-[#E8F1F5]" />;
   }
   if (user === null) {
     return view === 'login' ? (
-      <LoginPage onBack={() => setView('landing')} />
+      <LoginPage
+        notice={loginNotice}
+        onBack={() => {
+          setLoginNotice(null);
+          setView('landing');
+        }}
+      />
     ) : (
-      <LandingPage onStart={() => setView('login')} />
+      <LandingPage onStart={startGuest} onLogin={() => setView('login')} starting={starting} />
     );
   }
-  return <App user={user} />;
+  // (G2-6) 訪客在聊天中按「登入」：登入頁以覆蓋層顯示，App 保持掛載（不遺失目前的對話）
+  return (
+    <>
+      <App user={user} onRequestLogin={() => setView('login')} onUserChanged={refreshUser} />
+      {user.is_guest && view === 'login' && (
+        <div className="fixed inset-0 z-[100]">
+          <LoginPage backLabel="← 返回" onBack={() => setView('landing')} />
+        </div>
+      )}
+    </>
+  );
 }
 
 export default AuthGate;

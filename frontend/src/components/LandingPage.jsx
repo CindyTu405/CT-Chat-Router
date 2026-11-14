@@ -42,7 +42,8 @@ const clearTimerSet = (timers) => {
   timers.clear();
 };
 
-export default function LandingPage({ onStart }) {
+// (G2-6) onStart：開始使用（只有 AuthGate 會在按下後發起試用請求）；onLogin：頂列登入；starting：試用建立中（按鈕停用、顯示「準備中…」）
+export default function LandingPage({ onStart, onLogin, starting = false }) {
   // (L1-3) 每次打開隨機一篇；「換一篇」往後移一篇
   const [articleIndex, setArticleIndex] = useState(() => Math.floor(Math.random() * DEMO_ARTICLES.length));
   const article = DEMO_ARTICLES[articleIndex];
@@ -271,7 +272,7 @@ export default function LandingPage({ onStart }) {
           </a>
           <button
             type="button"
-            onClick={onStart}
+            onClick={onLogin}
             className="min-h-[36px] px-3 text-sm font-semibold text-[#51A8DD] hover:bg-[#E8F1F5] rounded-lg cursor-pointer"
           >
             登入
@@ -290,9 +291,10 @@ export default function LandingPage({ onStart }) {
           <button
             type="button"
             onClick={onStart}
-            className="mt-3 md:mt-8 min-h-[44px] px-6 md:px-8 rounded-xl bg-[#51A8DD] hover:bg-[#3d97cf] text-white font-semibold shadow-sm cursor-pointer transition-colors"
+            disabled={starting}
+            className="mt-3 md:mt-8 min-h-[44px] px-6 md:px-8 rounded-xl bg-[#51A8DD] hover:bg-[#3d97cf] text-white font-semibold shadow-sm cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-default"
           >
-            開始使用
+            {starting ? '準備中…' : '開始使用'}
           </button>
         </section>
 
@@ -328,9 +330,10 @@ export default function LandingPage({ onStart }) {
             <button
               type="button"
               onClick={onStart}
-              className="flex-shrink-0 min-h-[36px] px-4 rounded-lg bg-[#51A8DD] hover:bg-[#3d97cf] text-white text-sm font-semibold cursor-pointer"
+              disabled={starting}
+              className="flex-shrink-0 min-h-[36px] px-4 rounded-lg bg-[#51A8DD] hover:bg-[#3d97cf] text-white text-sm font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-default"
             >
-              開始使用
+              {starting ? '準備中…' : '開始使用'}
             </button>
           </div>
         </div>

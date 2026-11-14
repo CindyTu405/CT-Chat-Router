@@ -18,6 +18,7 @@ import BranchListOverlay from './BranchListOverlay';
 //   freeModels        (G3-2) 免費模型清單（模型選單用）
 //   freeModelsLoading (G3-2) 免費模型清單是否載入中
 //   presets / defaultModel / optionsLoading (V1-3) 後端模型選項（GET /api/model-options）與載入狀態
+//   allowCustom       (G2-6) 是否允許自訂模型輸入（轉給 ChatInput／ModelSelector）；未傳則 false
 //   branchList        (E4) 目前對話的分支清單（GET /chats/{root}/branches 原始資料），分支列表用
 //   messages          (E4) 主對話訊息，分支列表依位置排序用
 //   scrollContainerRef (E4) 主對話捲動容器的 ref，點分支列表項目後捲動主對話用
@@ -42,6 +43,7 @@ function BranchPanel({
   presets,
   defaultModel,
   optionsLoading,
+  allowCustom = false, // (G2-6)
   branchList,
   messages,
   scrollContainerRef,
@@ -277,6 +279,7 @@ function BranchPanel({
           presets={presets}
           defaultModel={defaultModel}
           optionsLoading={optionsLoading}
+          allowCustom={allowCustom}
         />
       )}
 

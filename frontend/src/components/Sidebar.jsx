@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, ArrowUpDown, Check, X, Trash2, Edit2, MessageSquare, MoreVertical } from 'lucide-react';
+import { Plus, ArrowUpDown, Check, X, Trash2, Edit2, MessageSquare, MoreVertical, UserRound } from 'lucide-react';
 import { TbBinaryTree2 } from 'react-icons/tb';
 import { FcGoogle } from 'react-icons/fc';
 import { FaGithub } from 'react-icons/fa';
@@ -289,6 +289,7 @@ function Sidebar({
   onStartRenaming,
   onSubmitRename,
   onCloseSidebar,
+  onRequestLogin, // (G2-6) 訪客按「登入」時呼叫，由 AuthGate 顯示登入頁
 }) {
   // P5a：時間軸分組跟著當前排序走（updated → last_activity，created → created_at）
   const timeGroups = useMemo(
@@ -488,6 +489,23 @@ function Sidebar({
 
       {/* (S-U1-7) 帳號區：固定在側欄底部、不在捲動列表內；底部用 max() 補手機安全區，避免被瀏覽器工具列蓋住 */}
       <div className="mt-auto flex-shrink-0 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-gray-300 bg-[#E8F1F5]">
+        {/* (G2-6) 訪客：顯示「試用中」與「登入」，不顯示登出 */}
+        {user?.is_guest ? (
+          <>
+            <div className="flex items-center gap-2 min-h-[2.5rem]">
+              <UserRound className="w-5 h-5 flex-shrink-0 text-gray-500" aria-hidden="true" />
+              <span className="flex-1 min-w-0 text-sm text-gray-700">試用中</span>
+              <button
+                type="button"
+                onClick={onRequestLogin}
+                className="flex-shrink-0 min-h-[36px] px-4 text-sm font-semibold text-white bg-[#51A8DD] hover:bg-[#3d97cf] rounded-lg cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7DB9DE]"
+              >
+                登入
+              </button>
+            </div>
+            <p className="pl-7 text-xs text-gray-500">登入後可保留對話</p>
+          </>
+        ) : (
         <div className="flex items-center gap-2 min-h-[2.5rem]">
           {user?.provider === 'github' ? (
             <FaGithub className="w-5 h-5 flex-shrink-0 text-gray-700" aria-hidden="true" />
@@ -509,6 +527,7 @@ function Sidebar({
             登出
           </button>
         </div>
+        )}
         <a
           href="/privacy.html"
           target="_blank"

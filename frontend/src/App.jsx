@@ -19,7 +19,8 @@ const MAX_ANCHOR_TEXT_CHARS = 5000;
 const TOO_LONG_MSG = "內容太長，上限 20,000 字";
 
 // 429 / 503 時依 detail.code 轉成 QuotaError；其他回應不做任何事
-async function throwIfQuotaError(response) {
+// (G2-6) user：目前登入者（訪客 is_guest 為 true），用來決定每日額度用完時的文案
+async function throwIfQuotaError(response, user) {
   // (B13) 安全網：後端 pydantic 驗證失敗（detail 為陣列，例如內容超長）→ 走同一條還原路徑
   if (response.status === 422) {
     let detail = null;
@@ -34,6 +35,14 @@ async function throwIfQuotaError(response) {
     code = body?.detail?.code ?? null;
   } catch { /* 忽略解析錯誤（例如 rate limiter 回的是 {"error": ...}） */ }
 
+  // (G2-6) 同一 IP 的訪客名額用完：要先於通用 429 判斷
+  if (response.status === 429 && code === 'guest_ip_limit') {
+    throw new QuotaError("這個網路今天的試用額度已滿，請登入後使用");
+  }
+  // (G2-6) 訪客每日額度用完：引導登入並連結 OpenRouter
+  if (response.status === 429 && code === 'daily_quota_exceeded' && user?.is_guest) {
+    throw new QuotaError("今日試用額度已用完。登入並連結 OpenRouter 就能繼續使用");
+  }
   if (response.status === 429 && code === 'daily_quota_exceeded') {
     throw new QuotaError("今日額度已用完，將於台灣時間 00:00 重置");
   }
@@ -45,7 +54,9 @@ async function throwIfQuotaError(response) {
   }
 }
 
-function App({ user }) {
+// (G2-6) onRequestLogin：訪客按側欄「登入」時呼叫（AuthGate 顯示登入頁覆蓋層）
+// (G2-6) 之後搬移對話與連結 OpenRouter 完成時用來重新讀取 /auth/me（目前尚未使用，見 AuthGate 的 onUserChanged）
+function App({ user, onRequestLogin }) {
   // 清掉舊版的匿名 session id（已改用登入 cookie），只在掛載時執行一次
   useEffect(() => {
     try { localStorage.removeItem('chat_session_id'); } catch { /* 忽略 */ }
@@ -60,6 +71,8 @@ function App({ user }) {
   const [presets, setPresets] = useState([]); // 後端 ALLOWED_MODELS 可直接選的項目
   const [defaultModel, setDefaultModel] = useState(null); // 後端決定的預設模型，null = 沒有可用模型
   const [optionsLoading, setOptionsLoading] = useState(true);
+  // (G2-6) 是否允許自訂模型輸入（後端 allow_custom；目前欄位尚未回傳時視為 false）
+  const [allowCustom, setAllowCustom] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [freeModels, setFreeModels] = useState([]);
   const [freeModelsLoading, setFreeModelsLoading] = useState(true);
@@ -137,15 +150,25 @@ function App({ user }) {
         const nextDefault = data.default_model || null;
         setPresets(nextPresets);
         setDefaultModel(nextDefault);
+        setAllowCustom(data.allow_custom === true); // (G2-6)
         setModel(prev => prev || nextDefault || "");
       })
       .catch(err => {
         console.error("無法載入模型選項:", err);
         setPresets([]);
         setDefaultModel(null);
+        setAllowCustom(false); // (G2-6)
       })
       .finally(() => setOptionsLoading(false));
   }, []);
+
+  // (G2-6) 不允許自訂模型（例如訪客）時，若目前正在自訂輸入模式，就切回預設模型
+  useEffect(() => {
+    if (!optionsLoading && !allowCustom && isCustomModel) {
+      setIsCustomModel(false);
+      if (model !== (defaultModel || '')) setModel(defaultModel || '');
+    }
+  }, [optionsLoading, allowCustom, isCustomModel, model, defaultModel]);
   // 2. 載入特定對話 (點擊側邊欄觸發)
 
   // (P2-12) 取得這棵對話樹的所有分支，供錨點文字持久高亮使用
@@ -346,7 +369,7 @@ function App({ user }) {
         })
       });
 
-      await throwIfQuotaError(response);
+      await throwIfQuotaError(response, user);
       if (!response.ok) throw new Error("API Error");
       
       if (messages.length === 0) {
@@ -484,7 +507,7 @@ function App({ user }) {
         body: JSON.stringify(content != null ? { model, content } : { model }),
       });
 
-      await throwIfQuotaError(response);
+      await throwIfQuotaError(response, user);
       if (!response.ok) throw new Error("API Error");
       accepted = true;
 
@@ -728,7 +751,7 @@ function App({ user }) {
         }),
       });
 
-      await throwIfQuotaError(response);
+      await throwIfQuotaError(response, user);
       if (!response.ok) throw new Error("API Error");
 
       const reader = response.body.getReader();
@@ -840,7 +863,7 @@ function App({ user }) {
         body: JSON.stringify(content != null ? { model, content } : { model }),
       });
 
-      await throwIfQuotaError(response);
+      await throwIfQuotaError(response, user);
       if (!response.ok) throw new Error("API Error");
       accepted = true;
 
@@ -975,6 +998,7 @@ function App({ user }) {
       
       <Sidebar
         user={user}
+        onRequestLogin={onRequestLogin}
         sidebarOpen={sidebarOpen}
         activeChatId={messages[0]?.id ?? null}
         historyList={historyList}
@@ -1035,6 +1059,7 @@ function App({ user }) {
           presets={presets}
           defaultModel={defaultModel}
           optionsLoading={optionsLoading}
+          allowCustom={allowCustom}
         />
 
       </div>
@@ -1053,6 +1078,7 @@ function App({ user }) {
           presets={presets}
           defaultModel={defaultModel}
           optionsLoading={optionsLoading}
+          allowCustom={allowCustom}
           // (E4) 分支列表：目前對話的分支、主對話訊息（排序用）、捲動容器、開啟分支
           branchList={branchList}
           messages={messages}
