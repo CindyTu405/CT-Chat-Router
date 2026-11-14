@@ -5,6 +5,8 @@ import { FcGoogle } from 'react-icons/fc';
 import { FaGithub } from 'react-icons/fa';
 import { apiFetch } from '../api';
 import { formatDateTime, groupByTimeRange } from '../dateUtils';
+// (G2-10) 帳號區下方的 OpenRouter 列（僅已登入、非訪客）
+import OpenRouterLinkRow from './OpenRouterLinkRow';
 
 // 一列對話：左側載入按鈕 + 右側單一三點選單（分支圖／改名／刪除）
 // E4 修正：不再把 <div onClick> 巢狀在 <button> 內，操作項目改為真正的 <button>，
@@ -290,6 +292,7 @@ function Sidebar({
   onSubmitRename,
   onCloseSidebar,
   onRequestLogin, // (G2-6) 訪客按「登入」時呼叫，由 AuthGate 顯示登入頁
+  onUserChanged, // (G2-10) 連結／中斷 OpenRouter 後重新讀取 /auth/me
 }) {
   // P5a：時間軸分組跟著當前排序走（updated → last_activity，created → created_at）
   const timeGroups = useMemo(
@@ -506,6 +509,7 @@ function Sidebar({
             <p className="pl-7 text-xs text-gray-500">登入後可保留對話</p>
           </>
         ) : (
+        <>
         <div className="flex items-center gap-2 min-h-[2.5rem]">
           {user?.provider === 'github' ? (
             <FaGithub className="w-5 h-5 flex-shrink-0 text-gray-700" aria-hidden="true" />
@@ -527,6 +531,12 @@ function Sidebar({
             登出
           </button>
         </div>
+        {/* (G2-10) OpenRouter 列放在帳號列下方；收合時 aside 為 w-0 + overflow-hidden，與帳號列一樣被裁掉 */}
+        <OpenRouterLinkRow
+          connected={user?.openrouter_connected === true}
+          onUserChanged={onUserChanged}
+        />
+        </>
         )}
         <a
           href="/privacy.html"

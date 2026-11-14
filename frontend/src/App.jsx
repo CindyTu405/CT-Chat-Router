@@ -28,13 +28,18 @@ async function throwIfQuotaError(response, user) {
     if (Array.isArray(detail)) throw new QuotaError(TOO_LONG_MSG);
     return;
   }
-  if (response.status !== 429 && response.status !== 503) return;
+  // (G2-10) 409 只處理 openrouter_reconnect_required，其他 409 維持原本行為（不擋）
+  if (response.status !== 429 && response.status !== 503 && response.status !== 409) return;
   let code = null;
   try {
     const body = await response.json();
     code = body?.detail?.code ?? null;
   } catch { /* 忽略解析錯誤（例如 rate limiter 回的是 {"error": ...}） */ }
 
+  // (G2-10) 自己的 OpenRouter 金鑰被拒（已被後端移除連結）：文字放回輸入框；呼叫端會在結束後重新讀取 /auth/me
+  if (response.status === 409 && code === 'openrouter_reconnect_required') {
+    throw new QuotaError("OpenRouter 連結已失效，請重新連結");
+  }
   // (G2-6) 同一 IP 的訪客名額用完：要先於通用 429 判斷
   if (response.status === 429 && code === 'guest_ip_limit') {
     throw new QuotaError("這個網路今天的試用額度已滿，請登入後使用");
@@ -42,6 +47,10 @@ async function throwIfQuotaError(response, user) {
   // (G2-6) 訪客每日額度用完：引導登入並連結 OpenRouter
   if (response.status === 429 && code === 'daily_quota_exceeded' && user?.is_guest) {
     throw new QuotaError("今日試用額度已用完。登入並連結 OpenRouter 就能繼續使用");
+  }
+  // (G2-10) 已登入但未連結 OpenRouter：引導連結即可不限則數
+  if (response.status === 429 && code === 'daily_quota_exceeded' && !user?.openrouter_connected) {
+    throw new QuotaError("今日試用額度已用完。連結 OpenRouter 就能不限則數");
   }
   if (response.status === 429 && code === 'daily_quota_exceeded') {
     throw new QuotaError("今日額度已用完，將於台灣時間 00:00 重置");
@@ -56,11 +65,15 @@ async function throwIfQuotaError(response, user) {
 
 // (G2-6) onRequestLogin：訪客按側欄「登入」時呼叫（AuthGate 顯示登入頁覆蓋層）
 // (G2-6) 之後搬移對話與連結 OpenRouter 完成時用來重新讀取 /auth/me（目前尚未使用，見 AuthGate 的 onUserChanged）
-function App({ user, onRequestLogin }) {
+// (G2-10) onUserChanged：重新讀取 /auth/me（AuthGate 的 refreshUser，只更新 user，不會重新掛載 App）
+function App({ user, onRequestLogin, onUserChanged }) {
   // 清掉舊版的匿名 session id（已改用登入 cookie），只在掛載時執行一次
   useEffect(() => {
     try { localStorage.removeItem('chat_session_id'); } catch { /* 忽略 */ }
   }, []);
+
+  // (G2-10) 是否已連結 OpenRouter（布林值，作為 effect 的依賴）
+  const openrouterConnected = user?.openrouter_connected === true;
 
   // --- 狀態管理 ---
   const [input, setInput] = useState("");
@@ -139,6 +152,7 @@ function App({ user, onRequestLogin }) {
   }, []);
 
   // (V1-3) 載入模型選項：presets、預設模型都由後端決定；失敗時視為沒有 presets 且沒有預設
+  // (G2-10) 依賴 openrouter_connected：連結／中斷後重新抓，allow_custom 立即切換（不用重新整理）
   useEffect(() => {
     apiFetch(`/api/model-options`)
       .then(res => {
@@ -160,7 +174,7 @@ function App({ user, onRequestLogin }) {
         setAllowCustom(false); // (G2-6)
       })
       .finally(() => setOptionsLoading(false));
-  }, []);
+  }, [openrouterConnected]);
 
   // (G2-6) 不允許自訂模型（例如訪客）時，若目前正在自訂輸入模式，就切回預設模型
   useEffect(() => {
@@ -317,6 +331,12 @@ function App({ user, onRequestLogin }) {
     setIsTreeModalOpen(true);
   };
 
+  // (G2-10) 一次生成結束（送出／重新生成，含分支）：已連結者重新讀取 /auth/me，
+  // 金鑰中途被拒時側欄會回到「連結 OpenRouter」。未連結者與訪客不發任何額外請求。
+  const refreshAfterGeneration = () => {
+    if (openrouterConnected) onUserChanged?.();
+  };
+
   // 4. 發送訊息 (核心邏輯)
   const handleSend = async () => {
     if (!input.trim() || isLoading || !model) return;
@@ -464,6 +484,7 @@ function App({ user, onRequestLogin }) {
         streamAbortRef.current = null;
         setIsLoading(false);
       }
+      refreshAfterGeneration(); // (G2-10)
     }
   };
 
@@ -579,6 +600,7 @@ function App({ user, onRequestLogin }) {
         streamAbortRef.current = null;
         setIsLoading(false);
       }
+      refreshAfterGeneration(); // (G2-10)
     }
   };
 
@@ -827,6 +849,7 @@ function App({ user, onRequestLogin }) {
       if (branch.rootMessageId) {
         loadBranchMessages(branchId, branch.rootMessageId);
       }
+      refreshAfterGeneration(); // (G2-10)
     }
   };
 
@@ -911,6 +934,7 @@ function App({ user, onRequestLogin }) {
       }));
     } finally {
       updateBranch(branchId, b => ({ ...b, isLoading: false }));
+      refreshAfterGeneration(); // (G2-10)
     }
   };
 
@@ -999,6 +1023,7 @@ function App({ user, onRequestLogin }) {
       <Sidebar
         user={user}
         onRequestLogin={onRequestLogin}
+        onUserChanged={onUserChanged} // (G2-10)
         sidebarOpen={sidebarOpen}
         activeChatId={messages[0]?.id ?? null}
         historyList={historyList}

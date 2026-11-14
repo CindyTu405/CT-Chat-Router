@@ -6,6 +6,8 @@ import App from '../App';
 import LandingPage from './LandingPage';
 // (G2-7) 訪客對話搬移對話框
 import GuestClaimDialog from './GuestClaimDialog';
+// (G2-10) 連結 OpenRouter 結果的橫幅
+import OpenRouterNotice from './OpenRouterNotice';
 import { API_URL, apiFetch } from '../api';
 
 // 後端導回時帶的 auth_error 代碼 → 固定文案；不認得的一律用通用訊息，絕不顯示原始參數
@@ -21,6 +23,33 @@ function readAuthError() {
   return Object.prototype.hasOwnProperty.call(AUTH_ERROR_MESSAGES, code)
     ? AUTH_ERROR_MESSAGES[code]
     : AUTH_ERROR_FALLBACK;
+}
+
+// (G2-10) 連結 OpenRouter 的結果（後端導回 /?openrouter=connected 或 /?openrouter_error=<code>）
+// 與 readAuthError 相同做法：固定文案、own-property 查表、不認得的代碼用通用訊息，絕不顯示原始參數
+const OPENROUTER_OK_MESSAGE = '已連結 OpenRouter。現在不限則數，可用任何模型。';
+const OPENROUTER_ERROR_MESSAGES = {
+  login_required: '請先登入再連結 OpenRouter。',
+  unavailable: '目前無法連結 OpenRouter，請稍後再試。',
+  state_mismatch: '連結沒有完成，請再試一次。',
+  exchange_failed: 'OpenRouter 沒有回傳金鑰，請再試一次。',
+};
+const OPENROUTER_ERROR_FALLBACK = '連結 OpenRouter 時發生問題，請再試一次。';
+
+// 回傳 { tone, text } 或 null（沒有參數、或 openrouter 的值不認得時不顯示）
+function readOpenRouterNotice() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('openrouter') === 'connected') {
+    return { tone: 'ok', text: OPENROUTER_OK_MESSAGE };
+  }
+  const code = params.get('openrouter_error');
+  if (code === null) return null;
+  return {
+    tone: 'error',
+    text: Object.prototype.hasOwnProperty.call(OPENROUTER_ERROR_MESSAGES, code)
+      ? OPENROUTER_ERROR_MESSAGES[code]
+      : OPENROUTER_ERROR_FALLBACK,
+  };
 }
 
 // (G2-6) notice：從首頁試用失敗等情況帶進來的提示（琥珀色框）；backLabel：返回按鈕文字（聊天中的登入頁用「← 返回」）
@@ -102,6 +131,23 @@ function AuthGate() {
   const [loginNotice, setLoginNotice] = useState(null);
   // (G2-7) 變更 key 會讓 App 整個重新掛載（用於搬移對話後重新載入側欄對話列表）
   const [appKey, setAppKey] = useState(0);
+  // (G2-10) OpenRouter 連結結果橫幅：只在掛載時讀一次網址（惰性初始化）
+  const [openRouterNotice, setOpenRouterNotice] = useState(readOpenRouterNotice);
+  const closeOpenRouterNotice = useCallback(() => setOpenRouterNotice(null), []);
+
+  // (G2-10) 讀完立刻把 openrouter / openrouter_error 從網址移除（重新整理不會再出現；寫法同 LoginPage 的 auth_error）
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('openrouter') && !params.has('openrouter_error')) return;
+    params.delete('openrouter');
+    params.delete('openrouter_error');
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
+    );
+  }, []);
 
   // (G2-6) 重新讀取 /auth/me：成功＝使用者資料，非 200 或網路錯誤＝視為未登入
   const refreshUser = useCallback(async () => {
@@ -152,25 +198,42 @@ function AuthGate() {
     }
   };
 
+  // (G2-10) 橫幅放在每個分支最前面（固定定位，不影響版面）；沒有結果時為 null，App 的位置不變，不會因此重新掛載
+  const banner = openRouterNotice && (
+    <OpenRouterNotice notice={openRouterNotice} onClose={closeOpenRouterNotice} />
+  );
+
   if (user === undefined) {
-    return <div className="h-screen supports-[height:100dvh]:h-dvh bg-[#E8F1F5]" />;
+    return (
+      <>
+        {banner}
+        <div className="h-screen supports-[height:100dvh]:h-dvh bg-[#E8F1F5]" />
+      </>
+    );
   }
   if (user === null) {
     return view === 'login' ? (
-      <LoginPage
-        notice={loginNotice}
-        onBack={() => {
-          setLoginNotice(null);
-          setView('landing');
-        }}
-      />
+      <>
+        {banner}
+        <LoginPage
+          notice={loginNotice}
+          onBack={() => {
+            setLoginNotice(null);
+            setView('landing');
+          }}
+        />
+      </>
     ) : (
-      <LandingPage onStart={startGuest} onLogin={() => setView('login')} starting={starting} />
+      <>
+        {banner}
+        <LandingPage onStart={startGuest} onLogin={() => setView('login')} starting={starting} />
+      </>
     );
   }
   // (G2-6) 訪客在聊天中按「登入」：登入頁以覆蓋層顯示，App 保持掛載（不遺失目前的對話）
   return (
     <>
+      {banner}
       <App key={appKey} user={user} onRequestLogin={() => setView('login')} onUserChanged={refreshUser} />
       {user.is_guest && view === 'login' && (
         <div className="fixed inset-0 z-[100]">
