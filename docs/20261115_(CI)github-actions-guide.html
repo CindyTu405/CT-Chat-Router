@@ -191,6 +191,7 @@ jobs:
       <li><b>不會花模型的錢。</b>harness 從來不呼叫真的 Gemini 或 OpenRouter。</li>
       <li><b>時間：</b>本機 9 支合計約 1.5 分鐘，加上安裝，預估每次 3 分鐘內。</li>
     </ul>
+    <div class="tip"><b>實際結果（2026-11-15）：</b>下面這個疑慮成真了兩次，都靠在 workflow 補假的環境變數解決，沒有改程式。假值只是讓程式能啟動，harness 不會用它連到真的服務。</div>
     <div class="warn"><b>還沒驗證的一點：</b>本機跑 harness 時會讀到 repo 根目錄的 <code>.env</code>，CI 上沒有這個檔。可能有模組在缺少某些環境變數（例如 OAuth 的 client id）時行為不同。第一次 CI 執行會告訴我們；若失敗，在 workflow 補上假的值即可，不動程式。</div>
   </section>
 
@@ -229,7 +230,7 @@ jobs:
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
         <tr><td>CI-1</td><td>baseline migration 補上 <code>message</code>、<code>freemodelscache</code> 建表</td><td>完成（744b773），2026-11-15 驗收：空資料庫 <code>alembic upgrade head</code> 到最新版，結構與 <code>chat_db</code> 完全相同；<code>chat_db</code> 沒有重跑任何 migration</td></tr>
         <tr><td>CI-2</td><td><code>backend/dev/run_harnesses.sh</code></td><td>完成（21145ed），2026-11-15 驗收：<code>g2_tmp</code> 上 <code>9 passed, 0 failed</code>、結束碼 0；換成別的資料庫名稱時 <code>FAIL openrouter_connect</code>、結束碼 1</td></tr>
-        <tr><td>CI-3</td><td><code>.github/workflows/ci.yml</code>（backend、frontend 兩個 job）</td><td>已寫好（53c45d2），設定檔可解析、沒有使用 secret；GitHub 上的實際執行結果待 push 後確認</td></tr>
+        <tr><td>CI-3</td><td><code>.github/workflows/ci.yml</code>（backend、frontend 兩個 job）</td><td>完成（53c45d2、93b24bb、cd6c462）。前兩次執行 <code>backend</code> 失敗：CI 沒有 <code>.env</code>，缺 <code>OPENROUTER_API_KEY</code>（import 就報錯）與 <code>GOOGLE_API_KEY</code>（<code>quota_harness</code> 第 11 案），在 workflow 補假值後第三次兩個 job 都通過（2026-11-15）。第二次的失敗也證明一支 harness 失敗時 CI 會變紅</td></tr>
       </table>
     </div>
   </section>
