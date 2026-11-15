@@ -216,15 +216,31 @@ const { finished } = await readTextStream(response, {
     <div class="table-wrap">
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
-        <tr><td>R-0</td><td>送出按鈕 <code>aria-label</code>、訊息區 <code>data-testid</code>，測試改用它們</td><td>未開始</td></tr>
-        <tr><td>R-1</td><td><code>quotaErrors.js</code></td><td>未開始</td></tr>
-        <tr><td>R-2</td><td><code>hooks/useModelOptions.js</code></td><td>未開始</td></tr>
-        <tr><td>R-3</td><td>補兩條 E2E：分支重新生成、編輯最後一則</td><td>未開始</td></tr>
-        <tr><td>R-4</td><td><code>readTextStream.js</code>，五個迴圈改用它</td><td>未開始</td></tr>
-        <tr><td>R-5</td><td><code>hooks/useBranchPanel.js</code></td><td>未開始</td></tr>
-        <tr><td>R-6</td><td><code>hooks/useMainChat.js</code></td><td>未開始</td></tr>
+        <tr><td>R-0</td><td>送出按鈕 <code>aria-label</code>、訊息區 <code>data-testid</code>，測試改用它們</td><td>完成（e7c8e3b）</td></tr>
+        <tr><td>R-1</td><td><code>quotaErrors.js</code></td><td>完成（8d56694），App.jsx 1,139 → 1,087 行</td></tr>
+        <tr><td>R-2</td><td><code>hooks/useModelOptions.js</code></td><td>完成（e63562c），→ 1,038 行。搬過去後 lint 才報出一段既有程式的問題，照決策 #6 不改行為，加附理由的停用註解並記進 BUGS B19</td></tr>
+        <tr><td>R-3</td><td>補兩條 E2E：分支重新生成、編輯最後一則</td><td>完成（dd6e44f），E2E 從 6 條變 8 條</td></tr>
+        <tr><td>R-4</td><td><code>readTextStream.js</code>，五個迴圈改用它</td><td>完成（26c8943），→ 976 行。故意把主對話的兩層「切換就停止」保護一起拿掉，第 6 條會失敗；只拿掉一層時另一層仍擋得住，測試分不出來</td></tr>
+        <tr><td>R-5</td><td><code>hooks/useBranchPanel.js</code></td><td>完成（82066fa、323fe9f），→ 630 行。切法調整：分支清單也放進這個 Hook，建立分支由 App 傳入對話 id，避免兩個 Hook 互相依賴（見下方說明）</td></tr>
+        <tr><td>R-6</td><td><code>hooks/useMainChat.js</code></td><td>完成（80c671b），→ 266 行。同 R-2，側欄一段沒搬動的程式在檔案變小後被 lint 報出，處理方式相同</td></tr>
       </table>
     </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">11</span>實作時的調整：避免兩個 Hook 互相依賴</h2>
+    <p>原本的切法是「分支 Hook 管分支面板，主對話 Hook 管訊息與分支清單」。實際交辦前檢查相依方向時發現它們互相需要對方：</p>
+    <ul>
+      <li>建立分支要知道目前對話的 id（在主對話的 <code>messages</code> 裡）。</li>
+      <li>主對話重新生成後，要關掉被幽靈化的分支 tab（在分支 Hook 的狀態裡）。</li>
+    </ul>
+    <p>兩個 Hook 在同一個元件裡依序呼叫，先呼叫的那個拿不到後呼叫的那個的值。解法是讓依賴只往一個方向：</p>
+    <pre><code><span class="cm">// 示意</span>
+const branch = useBranchPanel({ model, user, ... });               <span class="cm">// 不需要 messages</span>
+const chat = useMainChat({ ..., loadBranchList: branch.loadBranchList,
+                                closeBranches: branch.closeBranches });
+&lt;MessageList onCreateBranch={(...args) =&gt; branch.handleCreateBranch(chat.messages[0]?.id, ...args)} /&gt;</code></pre>
+    <p>需要對方資料的地方，改成「呼叫時由 App 傳進去」或「呼叫對方提供的函式」，而不是直接讀對方的狀態。這是拆 Hook 時常用的做法。</p>
   </section>
 
   <section class="card">
