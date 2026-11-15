@@ -206,3 +206,13 @@
 - **線索**：使用者測了其他對話都正常，只有這則超長標題的對話會發生（2026-11-09），很可能和長標題有關
 - **待查**：是否和捲到最底、分支面板開啟時的版面變動（捲動或 resize 事件清掉選取狀態）有關；長標題是否相關；桌面與手機是否都會發生
 - **狀態**：未修（使用者：先記錄，不急）
+
+## B19：前端 `eslint` 有 3 個 error、1 個 warning
+
+- **發生於**：`frontend/src/components/BranchListOverlay.jsx:28`（`react-refresh/only-export-components`：元件檔同時匯出非元件）、`ModelSelector.jsx:93`、`:104`（`react-hooks/set-state-in-effect`：effect 裡同步呼叫 setState）、`UserMessageEditor.jsx:50`（warning：用不到的 `eslint-disable`）
+- **發現於**：規劃 CI 時執行 lint（2026-11-15）
+- **重現**：`cd frontend && npx eslint .` → `4 problems (3 errors, 1 warning)`
+- **預期**：`npx eslint .` 沒有 error
+- **影響**：不影響 build 與執行。但 lint 不乾淨就無法放進 CI 當關卡
+- **修正方向**：逐項修掉後，把 `npm run lint` 加進 CI 的 `frontend` job
+- **狀態**：未修（CI 第一版只跑 build，使用者 2026-11-15 決定）
