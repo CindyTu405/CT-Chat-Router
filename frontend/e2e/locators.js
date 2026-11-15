@@ -15,6 +15,8 @@ export const branchSendButton = (page) =>
 // 主對話的訊息區（MessageList 的捲動容器，data-testid="message-list"）。
 // 分支面板也用同一個組件，但主對話在 DOM 上較前面，所以取第一個。
 export const messageList = (page) => page.getByTestId('message-list').first();
+// 分支面板的訊息區：同一個 MessageList 的第二個 message-list（面板在 DOM 上排在主對話之後）
+export const branchMessageList = (page) => page.getByTestId('message-list').nth(1);
 
 // 側欄的對話列按鈕：無障礙名稱以對話標題開頭（⋯ 按鈕的 aria-label 以「 開頭，不會誤中）
 export const sidebarChat = (page, title) => page.getByRole('button', { name: new RegExp(`^${title}`) });

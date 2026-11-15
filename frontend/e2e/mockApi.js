@@ -72,6 +72,13 @@ export function branchOf(overrides = {}) {
   };
 }
 
+// GET /chats/br-u1/history 的回傳：甲對話全部祖先 + 分支 br-1 的兩則（面板只取 br-u1 之後的部分）
+export const BRANCH_BR1_HISTORY = [
+  ...CHAT_A_HISTORY,
+  { id: 'br-u1', role: 'user', content: '分支裡的問題', title: '甲對話', parent_id: 'a-ai1', model_used: null, created_at: '2026-11-01T00:00:03Z', has_branch: false, branch_id: 'br-1' },
+  { id: 'br-ai1', role: 'assistant', content: '分支裡的舊回答', parent_id: 'br-u1', model_used: 'gemini-2.5-flash-lite', created_at: '2026-11-01T00:00:04Z', branch_id: 'br-1' },
+];
+
 // 模型選項（預設 gemini-2.5-flash-lite，不允許自訂）
 export function modelOptions(overrides = {}) {
   return {
