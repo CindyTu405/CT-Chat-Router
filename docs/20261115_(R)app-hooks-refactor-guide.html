@@ -200,13 +200,13 @@ const { finished } = await readTextStream(response, {
     <div class="table-wrap">
       <table>
         <tr><th>#</th><th>問題</th><th>提議</th><th>狀態</th></tr>
-        <tr><td>1</td><td>做在哪個分支</td><td><code>refactor/app-hooks</code>，從 <code>test/e2e</code> 開出（要用到 E2E 測試）</td><td>提議，待確認</td></tr>
-        <tr><td>2</td><td>拆成幾步、什麼順序</td><td>第 4 節的五塊，加上第 0 步（測試定位）與補測試，共七步，由低風險到高風險</td><td>提議，待確認</td></tr>
-        <tr><td>3</td><td>要不要加 <code>aria-label</code>／<code>data-testid</code></td><td>要。業界標準是測試用穩定的屬性定位，不依賴樣式</td><td>提議，待確認</td></tr>
-        <tr><td>4</td><td>合併讀串流前要不要先補測試</td><td>要，補兩條：分支重新生成、編輯最後一則 user 訊息</td><td>提議，待確認</td></tr>
-        <tr><td>5</td><td>每一步都停下來等你在瀏覽器驗嗎</td><td>不用。每步由 E2E＋build 把關、主代理讀過改動；全部做完再請你跑一次瀏覽器清單。理由：重構不改畫面，每步的自動測試比人工重驗更快、更不會漏</td><td>提議，待確認</td></tr>
-        <tr><td>6</td><td>拆的過程發現 bug</td><td>照原樣搬，記進 <code>BUGS.md</code>，之後另開一步修</td><td>提議，待確認</td></tr>
-        <tr><td>7</td><td>側欄改名／刪除、樹狀圖要不要一起拆</td><td>這一輪不拆，留在 <code>App.jsx</code></td><td>提議，待確認</td></tr>
+        <tr><td>1</td><td>做在哪個分支</td><td><code>refactor/app-hooks</code>，從 <code>test/e2e</code> 開出（要用到 E2E 測試）</td><td>2026-11-15 確認</td></tr>
+        <tr><td>2</td><td>拆成幾步、什麼順序</td><td>第 4 節的五塊，加上第 0 步（測試定位）與補測試，共七步，由低風險到高風險</td><td>2026-11-15 確認</td></tr>
+        <tr><td>3</td><td>要不要加 <code>aria-label</code>／<code>data-testid</code></td><td>要。業界標準是測試用穩定的屬性定位，不依賴樣式</td><td>2026-11-15 確認</td></tr>
+        <tr><td>4</td><td>合併讀串流前要不要先補測試</td><td>要，補兩條：分支重新生成、編輯最後一則 user 訊息</td><td>2026-11-15 確認</td></tr>
+        <tr><td>5</td><td>每一步都停下來等你在瀏覽器驗嗎</td><td>不用。每步由 E2E＋build 把關、主代理讀過改動；全部做完再請你跑一次瀏覽器清單。理由：重構不改畫面，每步的自動測試比人工重驗更快、更不會漏</td><td>2026-11-15 確認</td></tr>
+        <tr><td>6</td><td>拆的過程發現 bug</td><td>照原樣搬，記進 <code>BUGS.md</code>，之後另開一步修</td><td>2026-11-15 確認</td></tr>
+        <tr><td>7</td><td>側欄改名／刪除、樹狀圖要不要一起拆</td><td>這一輪不拆，留在 <code>App.jsx</code></td><td>2026-11-15 確認</td></tr>
       </table>
     </div>
   </section>
