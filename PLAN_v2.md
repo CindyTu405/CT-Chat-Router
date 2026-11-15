@@ -1142,3 +1142,44 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 - 與規格不同：第 5 條點的是內文高亮（`title="開啟分支：重點片語"`），不是底部入口，因為底部入口只給 `precise === false` 的分支。
 - 已知的脆弱點（拆 `App.jsx` 時一併處理，需要改 `src/`，尚未確認）：送出按鈕沒有文字也沒有 `aria-label`，測試靠「輸入框後面的第一個按鈕」找；主對話訊息區靠 class `div.overflow-y-auto.p-4` 找。建議分別加 `aria-label="送出"` 與 `data-testid="message-list"`。
 - 本機執行需要先 `cd frontend && npx playwright install chromium`（一次）。
+
+## 交接（2026-11-15，可維護性改進，下一個工作階段從這裡接手）
+
+**來源**：2026-11-15 可維護性檢視的四項建議。使用者第一次接觸 CI 與自動測試，決策時要用「業界怎麼做、為什麼、不這樣做會怎樣」說明並給明確建議，不要丟一串選項。
+
+**進度**
+| 項目 | 狀態 | 分支 |
+|---|---|---|
+| 1 CI（CI-1～CI-3） | ✅ 完成，已 push，未合併 | `chore/ci`（從 `main` 09ccc3f） |
+| 3 前端自動測試（E2E-1～E2E-3） | ✅ 完成，已 push，未合併 | `test/e2e`（疊在 `chore/ci` 上，b5232e6） |
+| 2 拆 `App.jsx` | ⏳ 下一項。教學與規格都還沒寫，細節未確認 | 建議從 `test/e2e` 開新分支 |
+| 4 拆 `main.py` | ⏳ 未開始，細節未確認 | — |
+
+**待使用者決定（都還沒問到答案）**
+- `chore/ci`、`test/e2e` 何時合併回 `main`。使用者 2026-11-15 對 `chore/ci` 說「先不合併」。合併前 `main` 沒有 CI 保護。兩個分支是疊起來的，合併 `test/e2e` 就包含 `chore/ci`。
+- 上一輪結尾問了「要接著寫拆 `App.jsx` 的教學嗎」，使用者尚未回答。
+- branch protection：決定是 CI 連續約十次穩定後再開（GitHub 網頁設定，不改程式）。目前綠的次數：`chore/ci` 1 次、`test/e2e` 1 次。
+
+**現在的檢查關卡（CLAUDE.md 的「Frontend-only edits ... no UI test suite」已過時，尚未更新，更新前先問使用者）**
+- 後端：`cd backend && POSTGRES_DB=g2_tmp ./dev/run_harnesses.sh` → `9 passed, 0 failed`。
+- 前端：`cd frontend && npm run build`、`npm run test:e2e` → `6 passed`（第一次要 `npx playwright install chromium`）。
+- CI 狀態不用登入就查得到（repo 是公開的，本機沒有 `gh`）：`curl -s 'https://api.github.com/repos/CindyTu405/CT-Chat-Router/actions/runs?branch=<分支>&per_page=1'`，再查 `/actions/runs/<id>/jobs`。log 需要登入；失敗時照「CI 上線紀錄」的方法在本機重現。
+- 空資料庫現在可以直接 `alembic upgrade head`（CI-1），不必再 `pg_dump -s chat_db` 加 `alembic stamp`。
+
+**拆 `App.jsx` 的分析（主代理讀完全檔後的草案，尚未與使用者討論，不是已確認的規格）**
+- `App.jsx` 1,139 行。四份很像的串流程式：`handleSend`（341–489）、`handleRetry`（495–605）、`sendBranchMessage`（742–854）、`retryBranchMessage`（859–939）。主對話兩份有 `activeRootIdRef`／`streamAbortRef` 的切換對話保護，分支兩份沒有（用 `updateBranch` 寫回指定分支）。
+- 建議由低風險到高風險，一步一個 commit，每步跑 `npm run test:e2e`＋`npm run build`：
+  1. `quotaErrors.js`：搬出 `QuotaError`、`throwIfQuotaError`、`MAX_*` 常數（純函式，不含 React）。
+  2. `useModelOptions`：`model`、`presets`、`defaultModel`、`optionsLoading`、`allowCustom`、`freeModels`、`freeModelsLoading`、`isCustomModel` 與三個 effect（146–185）；輸入只有 `openrouterConnected`。
+  3. 讀串流的共用函式（四個 `while (true)` 迴圈）：這步是改寫不是搬移，風險最高的一步之一，先確認 E2E 第 2、4、5、6 條涵蓋。
+  4. `useBranchPanel`：`branches`、`activeBranchId`、`branchPanelOpen`、`updateBranch`、`loadBranchMessages`、`openBranchFromHighlight`、`sendBranchMessage`、`retryBranchMessage`。
+  5. 主對話的送出／重新生成／載入／續讀（`messages`、`input`、`isLoading`、捲動還原）。與分支狀態互相呼叫（`handleRetry` 會 `setBranches`、`handleDeleteChat` 會清分支），最後做。
+- 順便處理（要改 `src/`，未確認）：送出按鈕加 `aria-label="送出"`、訊息區加 `data-testid="message-list"`，再把 `frontend/e2e/locators.js` 改用它們。
+- E2E 目前沒涵蓋、拆之前值得考慮補的：分支重新生成（`retryBranchMessage`）、編輯最後一則 user（F9）、續讀（`resumeGeneration`）、刪除與改名對話、手機寬度。
+- 照規則：新概念（custom hook）要先寫教學 `docs/YYYYMMDD_(<id>)...-guide.html`，獨立 `docs:` commit，使用者說「開始」才交給 implementer；程式一律由 implementer 寫。
+
+**這個工作階段留下的環境狀態**
+- 臨時資料庫 `ci_spike`、`ci_tmp` 已刪；`g2_tmp` 保留（harness 用）。臨時容器與臨時 worktree 已移除。本機前後端開發伺服器沒有啟動。
+- 工作目錄在 `test/e2e`；`.claude/settings.json` 有使用者自己的未 commit 修改（`model`），不要動。
+- BUGS B19（前端 lint 3 個 error）未修；修完後把 `npm run lint` 加進 CI 的 `frontend` job。
+- implementer 的 commit 尾註有的是 Haiku、有的是 Fable（任務文字寫死造成），不影響內容。
