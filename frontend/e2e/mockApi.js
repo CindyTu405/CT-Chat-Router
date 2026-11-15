@@ -35,6 +35,43 @@ export function chatReply({ text, messageId, userMessageId }) {
   };
 }
 
+// ---------- 對話假資料（形狀與後端 GET /chats/<root>/history 相同）----------
+
+// 甲對話的 AI 回覆；其中的「重點片語」是分支錨點（測試 4、5 共用）
+export const CHAT_A_AI_TEXT = '甲對話的回答，包含重點片語在裡面。';
+export const CHAT_A_HISTORY = [
+  { id: 'a-u1', role: 'user', content: '甲對話的問題', title: '甲對話', parent_id: null, model_used: null, created_at: '2026-11-01T00:00:00Z', has_branch: false },
+  { id: 'a-ai1', role: 'assistant', content: CHAT_A_AI_TEXT, parent_id: 'a-u1', model_used: 'gemini-2.5-flash-lite', created_at: '2026-11-01T00:00:01Z' },
+];
+
+// 乙對話：只用來測切換對話
+export const CHAT_B_HISTORY = [
+  { id: 'b-u1', role: 'user', content: '乙對話的問題', title: '乙對話', parent_id: null, model_used: null, created_at: '2026-11-01T00:00:00Z', has_branch: false },
+  { id: 'b-ai1', role: 'assistant', content: '乙對話的回答', parent_id: 'b-u1', model_used: 'gemini-2.5-flash-lite', created_at: '2026-11-01T00:00:01Z' },
+];
+
+// GET /chats/roots：每串對話只回根訊息（第一則），側欄會讀 last_activity
+export function rootsOf(...histories) {
+  return histories.map(([root]) => ({ ...root, last_activity: root.created_at }));
+}
+
+// GET /chats/<root>/branches 的一筆分支（預設：甲對話 AI 回覆裡的「重點片語」，尚無訊息）
+export function branchOf(overrides = {}) {
+  const start = CHAT_A_AI_TEXT.indexOf('重點片語');
+  return {
+    id: 'br-1',
+    anchor_message_id: 'a-ai1',
+    root_message_id: null,
+    title: '重點片語',
+    anchor_text: '重點片語',
+    anchor_start: start,
+    anchor_end: start + 4,
+    is_orphaned: false,
+    created_at: '2026-11-01T00:00:02Z',
+    ...overrides,
+  };
+}
+
 // 模型選項（預設 gemini-2.5-flash-lite，不允許自訂）
 export function modelOptions(overrides = {}) {
   return {

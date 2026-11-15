@@ -1,11 +1,7 @@
 // 第 1–2 條：首頁試用進入聊天、送出兩則訊息（API 全部由 mockApi 假造）
 import { test, expect } from '@playwright/test';
 import { mockApi, expectNoUnhandled, guestUser, chatReply } from './mockApi';
-
-// 主對話的輸入框（ChatInput 預設 placeholder）
-const mainInput = (page) => page.getByPlaceholder('輸入訊息...');
-// 送出按鈕：ChatInput 的按鈕沒有文字與 aria-label，緊接在輸入框後面，用相鄰關係找
-const sendButton = (page) => mainInput(page).locator('xpath=following-sibling::button[1]');
+import { mainInput, sendButton } from './locators';
 
 test('首頁按開始使用進入聊天', async ({ page }) => {
   // 試用建立前 /auth/me 回 401（未登入）；呼叫過 POST /auth/guest 後回訪客資料
