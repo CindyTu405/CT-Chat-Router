@@ -185,11 +185,11 @@ npx playwright test --ui      <span class="cm"># 開圖形介面，看每一步�
       <table>
         <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
         <tr><td>1</td><td>先加測試還是先拆 <code>App.jsx</code></td><td>先加測試。業界標準是重構前先用測試固定現有行為</td><td>2026-11-15 確認</td></tr>
-        <tr><td>2</td><td>用什麼工具</td><td>Playwright。業界主流、內建自動等待與請求攔截、官方支援 GitHub Actions。另一個常見選擇 Cypress 功能相近，沒有明顯理由選它</td><td>提議，待確認</td></tr>
-        <tr><td>3</td><td>後端用真的還是假的</td><td>假的（攔截請求）。真後端要資料庫、假登入、假模型，設定成本高，而且後端已有 harness</td><td>提議，待確認</td></tr>
-        <tr><td>4</td><td>測幾條</td><td>六條，都是拆 <code>App.jsx</code> 會動到的路徑。之後每修一個前端 bug 再補一條</td><td>提議，待確認</td></tr>
-        <tr><td>5</td><td>要不要為了測試改產品程式</td><td>原則上不改。真的找不到穩定的定位方式時，才加 <code>data-testid</code> 屬性（對使用者沒有影響）</td><td>提議，待確認</td></tr>
-        <tr><td>6</td><td>做在哪個分支</td><td><code>test/e2e</code>，從 <code>chore/ci</code> 開出（要改 CI 設定檔）</td><td>提議，待確認</td></tr>
+        <tr><td>2</td><td>用什麼工具</td><td>Playwright。業界主流、內建自動等待與請求攔截、官方支援 GitHub Actions。另一個常見選擇 Cypress 功能相近，沒有明顯理由選它</td><td>2026-11-15 確認</td></tr>
+        <tr><td>3</td><td>後端用真的還是假的</td><td>假的（攔截請求）。真後端要資料庫、假登入、假模型，設定成本高，而且後端已有 harness</td><td>2026-11-15 確認</td></tr>
+        <tr><td>4</td><td>測幾條</td><td>六條，都是拆 <code>App.jsx</code> 會動到的路徑。之後每修一個前端 bug 再補一條</td><td>2026-11-15 確認</td></tr>
+        <tr><td>5</td><td>要不要為了測試改產品程式</td><td>原則上不改。真的找不到穩定的定位方式時，才加 <code>data-testid</code> 屬性（對使用者沒有影響）</td><td>2026-11-15 確認</td></tr>
+        <tr><td>6</td><td>做在哪個分支</td><td><code>test/e2e</code>，從 <code>chore/ci</code> 開出（要改 CI 設定檔）</td><td>2026-11-15 確認</td></tr>
       </table>
     </div>
   </section>
