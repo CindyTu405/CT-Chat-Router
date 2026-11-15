@@ -7,6 +7,7 @@ import ChatInput from './components/ChatInput';
 import BranchPanel from './components/BranchPanel';
 import { scrollToMessage } from './scrollUtils';
 import { useModelOptions } from './hooks/useModelOptions';
+import { readTextStream } from './readTextStream';
 
 import { apiFetch } from './api';
 import { QuotaError, throwIfQuotaError, MAX_MESSAGE_CHARS, MAX_ANCHOR_TEXT_CHARS, TOO_LONG_MSG } from './quotaErrors';
@@ -161,26 +162,18 @@ function App({ user, onRequestLogin, onUserChanged }) {
     try {
       const res = await apiFetch(`/messages/${messageId}/stream?offset=0`);
       if (!res.ok || !res.body) return;
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let text = "";
-      while (true) {
-        if (activeRootIdRef.current !== rootId) {
-          try { await reader.cancel(); } catch { /* ignore */ }
-          break;
-        }
-        const { done, value } = await reader.read();
-        if (done) break;
-        text += decoder.decode(value, { stream: true });
-        setMessages(prev => {
+      // 切走（activeRootIdRef 不再等於 rootId）就停止讀取與寫入
+      await readTextStream(res, {
+        shouldStop: () => activeRootIdRef.current !== rootId,
+        onText: (text) => setMessages(prev => {
           if (activeRootIdRef.current !== rootId) return prev;
           const next = [...prev];
           const lastMsg = next[next.length - 1];
           if (!lastMsg || lastMsg.id !== messageId) return prev;
           next[next.length - 1] = { ...lastMsg, content: text };
           return next;
-        });
-      }
+        }),
+      });
     } catch (error) {
       console.error("續讀失敗:", error);
     }
@@ -295,9 +288,6 @@ function App({ user, onRequestLogin, onUserChanged }) {
         setTimeout(fetchHistory, 1000);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let aiResponseText = "";
       
       // ★ 修正 1：將 ID 的抓取移到 while 迴圈「之前」，這樣迴圈內才能使用
       const newMsgId = response.headers.get("X-Message-Id");
@@ -320,26 +310,11 @@ function App({ user, onRequestLogin, onUserChanged }) {
         });
       }
 
-      while (true) {
-        // ★★★ (P3b) 使用者已切換到別的對話 → 停止套用，別把內容寫進別人的對話 ★★★
-        if (activeRootIdRef.current !== sendConvId) {
-          try { await reader.cancel(); } catch { /* ignore */ }
-          break;
-        }
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        // 讀取是非同步的，回來後再確認一次畫面上還是同一串對話
-        if (activeRootIdRef.current !== sendConvId) {
-          try { await reader.cancel(); } catch { /* ignore */ }
-          break;
-        }
-
-        const chunk = decoder.decode(value, { stream: true });
-        aiResponseText += chunk;
-
-        // 即時更新最後一則 (AI)
-        setMessages(prev => {
+      // ★★★ (P3b) 使用者已切換到別的對話 → 停止套用，別把內容寫進別人的對話 ★★★
+      // 讀取是非同步的，readTextStream 讀前、讀後各檢查一次
+      await readTextStream(response, {
+        shouldStop: () => activeRootIdRef.current !== sendConvId,
+        onText: (aiResponseText) => setMessages(prev => {
           // 防呆 0：(P3b) 對話已被切換就走人，避免污染新對話
           if (activeRootIdRef.current !== sendConvId) return prev;
           // 防呆 1：如果畫面已經被清空，直接放棄更新
@@ -354,8 +329,8 @@ function App({ user, onRequestLogin, onUserChanged }) {
           lastMsg.content = aiResponseText;
           if (newMsgId) lastMsg.id = newMsgId; // 這裡現在可以正常拿到 newMsgId 了
           return newMessages;
-        });
-      } // ★ 修正 2：補上 while 迴圈的右大括號！
+        }),
+      });
 
     } catch (error) {
       // (P3b) 切換對話造成的 abort 不是錯誤，也不要再往畫面塞訊息
@@ -434,34 +409,15 @@ function App({ user, onRequestLogin, onUserChanged }) {
       // (G6-2) 後端在 header 回傳這次被幽靈化的分支 id（逗號分隔，可能為空）
       const orphaned = (response.headers.get('X-Orphaned-Branch-Ids') || '').split(',').filter(Boolean);
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let aiResponseText = "";
-      let finished = false; // 串流完整讀完（沒有中途切走）才為 true
-
-      while (true) {
-        // 使用者已切換到別的對話 → 停止讀取，別把內容寫進別人的對話
-        if (activeRootIdRef.current !== convId) {
-          try { await reader.cancel(); } catch { /* ignore */ }
-          break;
-        }
-        const { done, value } = await reader.read();
-        if (done) { finished = true; break; }
-
-        // 讀取是非同步的，回來後再確認一次畫面上還是同一串對話
-        if (activeRootIdRef.current !== convId) {
-          try { await reader.cancel(); } catch { /* ignore */ }
-          break;
-        }
-
-        aiResponseText += decoder.decode(value, { stream: true });
-
+      // 使用者已切換到別的對話 → 停止讀取，別把內容寫進別人的對話（readTextStream 讀前、讀後各檢查一次）
+      const { finished } = await readTextStream(response, {
+        shouldStop: () => activeRootIdRef.current !== convId,
         // (G6-2) 寫回「id 等於 retryId 的那則」，不是最後一則
-        setMessages(prev => {
+        onText: (aiResponseText) => setMessages(prev => {
           if (activeRootIdRef.current !== convId) return prev;
           return prev.map(m => (m.id === retryId ? { ...m, content: aiResponseText } : m));
-        });
-      }
+        }),
+      });
 
       // 串流成功結束：分支高亮重抓；被幽靈化的分支 tab 關掉（若還是同一串對話才重抓清單）
       if (finished) {
@@ -675,9 +631,6 @@ function App({ user, onRequestLogin, onUserChanged }) {
       await throwIfQuotaError(response, user);
       if (!response.ok) throw new Error("API Error");
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let aiResponseText = "";
       const newMsgId = response.headers.get("X-Message-Id");
       // (F9-B4) 補回樂觀 user 訊息的 id：倒數第二則是沒有 id 的 user、最後一則是 assistant 時才補
       const newUserMsgId = response.headers.get("X-User-Message-Id");
@@ -695,15 +648,9 @@ function App({ user, onRequestLogin, onUserChanged }) {
         });
       }
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        aiResponseText += chunk;
-
-        // 只更新這條分支的最後一則 AI 訊息
-        updateBranch(branchId, b => {
+      // 只更新這條分支的最後一則 AI 訊息
+      await readTextStream(response, {
+        onText: (aiResponseText) => updateBranch(branchId, b => {
           if (b.messages.length === 0) return b;
           const msgs = [...b.messages];
           const lastMsg = msgs[msgs.length - 1];
@@ -714,8 +661,8 @@ function App({ user, onRequestLogin, onUserChanged }) {
             ...(newMsgId ? { id: newMsgId } : {}),
           };
           return { ...b, messages: msgs };
-        });
-      }
+        }),
+      });
     } catch (error) {
       if (error instanceof QuotaError) {
         // (V1-2) 額度／速率限制：後端沒寫入，撤掉這次樂觀加入的 user + 空 AI 佔位，文字放回分支輸入框
@@ -789,22 +736,13 @@ function App({ user, onRequestLogin, onUserChanged }) {
       if (!response.ok) throw new Error("API Error");
       accepted = true;
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let aiResponseText = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        aiResponseText += decoder.decode(value, { stream: true });
-
-        // 寫回這條分支裡 id 等於 retryId 的那則
-        updateBranch(branchId, b => ({
+      // 寫回這條分支裡 id 等於 retryId 的那則
+      await readTextStream(response, {
+        onText: (aiResponseText) => updateBranch(branchId, b => ({
           ...b,
           messages: b.messages.map(m => (m.id === retryId ? { ...m, content: aiResponseText } : m)),
-        }));
-      }
+        })),
+      });
     } catch (error) {
       // (F9-2) 請求被拒或沒送出：user 還原舊內容
       if (editing && !accepted) {
