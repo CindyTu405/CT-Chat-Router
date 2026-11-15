@@ -1046,7 +1046,7 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 **已確認（2026-11-15）**：從 `main` 開分支；前端第一版只跑 build（lint 見 BUGS B19）；修 baseline，CI 跑 `alembic upgrade head`。
 **已確認（2026-11-15，使用者說「開始」）**：觸發條件（任何分支 push＋對 `main` 的 PR）；CI 資料庫名稱用 `g2_tmp`；第一版不設 branch protection，CI 連續約十次穩定後再開啟。
 
-**後續項目（尚未確認細節，不動工）**：2 拆 `App.jsx`、3 前端瀏覽器自動測試、4 拆 `main.py`。各自先寫教學。
+**後續項目**：順序於 2026-11-15 調整為「前端自動測試（E2E，見下一節）→ 拆 `App.jsx` → 拆 `main.py`」。拆 `App.jsx`、拆 `main.py` 尚未確認細節，不動工，各自先寫教學。
 
 | 編號 | 任務 | 狀態 |
 |---|---|---|
@@ -1101,3 +1101,36 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 - 查 CI 失敗的方法：公開 API 看得到每個 step 的結果（`https://api.github.com/repos/CindyTu405/CT-Chat-Router/actions/runs?branch=<分支>`），但 log 要登入。本機重現方式：`git worktree add` 一份乾淨 checkout（沒有 `.env`）＋`docker run` 一個 `pgvector/pgvector:pg16`（`ci/ci/g2_tmp`，另一個 port）＋設定與 workflow 相同的環境變數，再跑 `alembic upgrade head` 與 `./dev/run_harnesses.sh`。用完移除容器與 worktree。
 - 尚未做：合併回 `main`；branch protection（決定：CI 連續約十次穩定後再開）；lint 進 CI（BUGS B19）。
 - 已知提醒：GitHub 顯示 `actions/checkout@v4`、`astral-sh/setup-uv@v6` 以 Node 20 為目標的棄用警告，目前不影響執行。
+
+## E2E 規格與驗收：前端自動測試（2026-11-15 擬定，等使用者讀完教學說「開始」才動工）
+
+**來源**：可維護性檢視第 3 項。2026-11-15 使用者同意提到拆 `App.jsx` 之前：`App.jsx` 的送出、重新生成、分支送出、分支重新生成是四份複製的串流迴圈，各有防呆（切換對話停止寫入、額度被擋還原畫面），重構前先用測試把現有行為固定下來。教學：`docs/20261115_(E2E)playwright-guide.html`。分支 `test/e2e`（從 `chore/ci` d271fb1，因為要改 `ci.yml`）。
+
+**做法**
+- 工具：Playwright（`@playwright/test`，只裝 Chromium）。測試檔在 `frontend/e2e/`。
+- 不啟動後端、不需要資料庫：測試用 `page.route` 攔截前端發出的 API 請求並回假資料。Playwright 自己啟動 Vite 開發伺服器，設 `VITE_API_URL=http://localhost:5199/__api`（與頁面同源，避免 CORS；`__api` 之下全部攔截，沒被測試定義的路徑回 404 並讓測試失敗）。
+- 第一版只測桌面寬度（1280×800）。手機寬度、文字選取建立分支、OAuth 與 OpenRouter 連結不在這一版。
+- 原則上不改 `src/`。找不到穩定的選擇器時，implementer 停下來回報要加哪個 `data-testid`，由主代理決定。
+- 限制（寫進教學）：假回應是一次送完，不是逐段串流；測不到後端的錯。後端仍由 harness 負責。
+
+| 編號 | 任務 | 狀態 |
+|---|---|---|
+| E2E-1 | 安裝 Playwright、`playwright.config.js`、`e2e/mockApi.js`、`npm run test:e2e`、第 1–2 條測試 | ⏳ |
+| E2E-2 | 第 3–6 條測試 | ⏳ |
+| E2E-3 | `ci.yml` 新增 `e2e` job | ⏳ |
+
+**六條測試（各自獨立，互不依賴）**
+1. 首頁進入試用：`/auth/me` 回 401 → 看到首頁的「開始使用」→ 點擊 → 發出 `POST /auth/guest` → 進入聊天畫面（看得到訊息輸入框）。
+2. 送訊息：以訪客身分進入 → 輸入「你好」送出 → 畫面出現 user 訊息「你好」與假回覆文字；輸入框清空；`POST /chat` 的 body 是 `{message:"你好", model:<model-options 的 default_model>, parent_id:null}`。再送第二則 → body 的 `parent_id` 等於第一次回應 header `X-Message-Id` 的值。
+3. 額度被擋：`POST /chat` 回 429 `{"detail":{"code":"daily_quota_exceeded"}}` → 跳出的對話框文字是「今日試用額度已用完。登入並連結 OpenRouter 就能繼續使用」；畫面上沒有剛送出的 user 訊息；輸入框的內容還原成剛才輸入的文字。
+4. 載入對話並重新生成：側欄有一個對話 → 點擊 → 顯示歷史的 user 與 AI 訊息 → 對最後一則 AI 按重新生成 → 發出 `POST /messages/<該則 id>/regenerate`，body 含 `model`；該則內容變成新的假回覆，舊內容消失。
+5. 分支送訊息：載入的對話帶一條尚無訊息的分支（`root_message_id` 為 null，`anchor_text` 是 AI 回覆裡的一段文字）→ 點擊高亮或底部入口 → 右側面板開啟，輸入框已帶入 `anchor_text` → 送出 → `POST /chat` 的 body `branch_id` 等於該分支 id、`parent_id` 等於 `anchor_message_id`；面板內出現假回覆。
+6. 回覆未到就切換對話：側欄有 A、B 兩個對話，開啟 A → 送出一則訊息，`POST /chat` 延遲 1.5 秒才回應 → 回應前點擊 B → 等回應送達後，B 的畫面上沒有那則送出的文字，也沒有假回覆文字。
+
+**驗收**
+1. `cd frontend && npm run test:e2e 2>&1 | tail -3` → 含 `6 passed`，結束碼 0。
+2. 連跑三次都 `6 passed`（確認不是偶爾才過）。
+3. 測試真的擋得住：暫時刪掉 `App.jsx` 額度還原那行 `setInput(userMessageContent);` → 第 3 條失敗；還原後通過。暫時把 `handleSend` 的 `activeRootIdRef.current = sendConvId;` 之後的三處 `!== sendConvId` 判斷拿掉其中寫入畫面的那一處 → 第 6 條失敗；還原。驗完 `git status` 乾淨。
+4. `git diff d271fb1 --stat -- frontend/src` → 沒有輸出（沒改產品程式）；若有加 `data-testid`，逐一列在回報裡。
+5. `cd frontend && npm run build` 成功。
+6. push 後 GitHub Actions 的 `backend`、`frontend`、`e2e` 三個 job 都通過。
