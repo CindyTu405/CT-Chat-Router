@@ -216,4 +216,5 @@
 - **影響**：不影響 build 與執行。但 lint 不乾淨就無法放進 CI 當關卡
 - **修正方向**：逐項修掉後，把 `npm run lint` 加進 CI 的 `frontend` job
 - **補充（2026-11-15，R-2）**：`App.jsx` 的 (G2-6)「不允許自訂模型就切回預設」effect 也是 `react-hooks/set-state-in-effect`。在 `App.jsx` 裡 lint 沒報（規則沒分析到那麼大的元件），搬到 `hooks/useModelOptions.js` 後才被報出來；R-2 只搬移、不改行為，所以加了附理由的 `eslint-disable-next-line`。修 B19 時一併處理（可改成在 `allowCustom` 變成 false 的那個地方直接切回，不經過 effect）
+- **補充（2026-11-16，R-6）**：`App.jsx` 側欄的 `useEffect(() => { fetchHistory(); }, [fetchHistory])` 也被報 `react-hooks/set-state-in-effect`。這段沒有搬動，是 `App.jsx` 從 630 行變成約 260 行後規則才分析到。`fetchHistory` 的 `setHistoryList` 在 `await` 之後，不是同步更新，屬於誤判；加了附理由的 `eslint-disable-next-line`。修 B19 時一併檢視
 - **狀態**：未修（CI 第一版只跑 build，使用者 2026-11-15 決定）
