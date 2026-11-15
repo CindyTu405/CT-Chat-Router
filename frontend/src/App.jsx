@@ -6,6 +6,7 @@ import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
 import BranchPanel from './components/BranchPanel';
 import { scrollToMessage } from './scrollUtils';
+import { useModelOptions } from './hooks/useModelOptions';
 
 import { apiFetch } from './api';
 import { QuotaError, throwIfQuotaError, MAX_MESSAGE_CHARS, MAX_ANCHOR_TEXT_CHARS, TOO_LONG_MSG } from './quotaErrors';
@@ -27,18 +28,9 @@ function App({ user, onRequestLogin, onUserChanged }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [historyList, setHistoryList] = useState([]); // 側邊欄列表
-  // (V1-3) 模型初始值由後端 /api/model-options 決定（見下方 effect）；載入前為空，送出會被停用
-  const [model, setModel] = useState("");
-  const [presets, setPresets] = useState([]); // 後端 ALLOWED_MODELS 可直接選的項目
-  const [defaultModel, setDefaultModel] = useState(null); // 後端決定的預設模型，null = 沒有可用模型
-  const [optionsLoading, setOptionsLoading] = useState(true);
-  // (G2-6) 是否允許自訂模型輸入（後端 allow_custom；目前欄位尚未回傳時視為 false）
-  const [allowCustom, setAllowCustom] = useState(false);
+  const { model, setModel, presets, defaultModel, optionsLoading, allowCustom, freeModels, freeModelsLoading, isCustomModel, setIsCustomModel } = useModelOptions(openrouterConnected);
   const [isLoading, setIsLoading] = useState(false);
-  const [freeModels, setFreeModels] = useState([]);
-  const [freeModelsLoading, setFreeModelsLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
-  const [isCustomModel, setIsCustomModel] = useState(false); //即時輸入模型
   const [renamingId, setRenamingId] = useState(null); // 正在改名的對話 ID
   const [renameInput, setRenameInput] = useState(""); // 改名輸入框內容
   const [sortBy, setSortBy] = useState("updated"); // 新增：排序狀態 ('updated' = 最新活躍, 'created' = 建立時間)
@@ -90,47 +82,6 @@ function App({ user, onRequestLogin, onUserChanged }) {
     fetchHistory();
   }, [fetchHistory]); // 當 sortBy 改變時，自動重新載入列表
 
-  // 載入 OpenRouter 免費模型清單
-  useEffect(() => {
-    apiFetch(`/api/free-models`)
-      .then(res => res.json())
-      .then(data => setFreeModels(data.models || []))
-      .catch(err => console.error("無法載入免費模型:", err))
-      .finally(() => setFreeModelsLoading(false));
-  }, []);
-
-  // (V1-3) 載入模型選項：presets、預設模型都由後端決定；失敗時視為沒有 presets 且沒有預設
-  // (G2-10) 依賴 openrouter_connected：連結／中斷後重新抓，allow_custom 立即切換（不用重新整理）
-  useEffect(() => {
-    apiFetch(`/api/model-options`)
-      .then(res => {
-        if (!res.ok) throw new Error(`model-options ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        const nextPresets = data.presets || [];
-        const nextDefault = data.default_model || null;
-        setPresets(nextPresets);
-        setDefaultModel(nextDefault);
-        setAllowCustom(data.allow_custom === true); // (G2-6)
-        setModel(prev => prev || nextDefault || "");
-      })
-      .catch(err => {
-        console.error("無法載入模型選項:", err);
-        setPresets([]);
-        setDefaultModel(null);
-        setAllowCustom(false); // (G2-6)
-      })
-      .finally(() => setOptionsLoading(false));
-  }, [openrouterConnected]);
-
-  // (G2-6) 不允許自訂模型（例如訪客）時，若目前正在自訂輸入模式，就切回預設模型
-  useEffect(() => {
-    if (!optionsLoading && !allowCustom && isCustomModel) {
-      setIsCustomModel(false);
-      if (model !== (defaultModel || '')) setModel(defaultModel || '');
-    }
-  }, [optionsLoading, allowCustom, isCustomModel, model, defaultModel]);
   // 2. 載入特定對話 (點擊側邊欄觸發)
 
   // (P2-12) 取得這棵對話樹的所有分支，供錨點文字持久高亮使用
