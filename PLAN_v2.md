@@ -1183,3 +1183,28 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 - 工作目錄在 `test/e2e`；`.claude/settings.json` 有使用者自己的未 commit 修改（`model`），不要動。
 - BUGS B19（前端 lint 3 個 error）未修；修完後把 `npm run lint` 加進 CI 的 `frontend` job。
 - implementer 的 commit 尾註有的是 Haiku、有的是 Fable（任務文字寫死造成），不影響內容。
+
+## R 規格與驗收：拆分 `App.jsx`（2026-11-15 擬定，等使用者讀完教學說「開始」才動工）
+
+**來源**：可維護性檢視第 2 項。教學：`docs/20261115_(R)app-hooks-refactor-guide.html`。分支 `refactor/app-hooks`（從 `test/e2e` b896b2d）。
+**原則**：行為完全不變。一步一個 commit；搬移與改寫分開；拆的過程發現的 bug 照原樣搬、記進 `BUGS.md`，不在這一輪修。側欄（改名、刪除、排序）與樹狀圖視窗這一輪不拆。
+**待確認**：教學決策表 #1–#7。
+
+**每一步共同的驗收**（在 `frontend/` 下）
+- `npm run build` 成功；`npm run test:e2e` 全部通過（R-3 之前 6 條，之後 8 條），連跑兩次。
+- `npx eslint <這一步新增或修改的檔案>` 沒有 error（B19 既有的三個 error 不算）。
+- `git show --stat HEAD` 只列出該步的檔案。
+- `wc -l src/App.jsx` 比上一步少（R-0、R-3 除外）。
+- 主代理讀過 diff：搬移的步驟除了 import／export 與參數傳遞，程式內容逐行相同。
+
+| 編號 | 任務 | 檔案 | 狀態 |
+|---|---|---|---|
+| R-0 | `ChatInput` 送出按鈕加 `aria-label="送出"`；`MessageList` 捲動容器加 `data-testid="message-list"`；`e2e/locators.js` 改用 `getByRole('button', { name: '送出' })` 與 `getByTestId('message-list')`（分支面板也用同一組件，主對話取 `.first()`、分支送出鈕改在面板內找） | `ChatInput.jsx`、`MessageList.jsx`、`e2e/locators.js` | ⏳ |
+| R-1 | `src/quotaErrors.js`：搬出 `QuotaError`、`throwIfQuotaError`、`MAX_MESSAGE_CHARS`、`MAX_TITLE_CHARS`、`MAX_ANCHOR_TEXT_CHARS`、`TOO_LONG_MSG`（App.jsx 12–64 行） | `quotaErrors.js`、`App.jsx` | ⏳ |
+| R-2 | `src/hooks/useModelOptions.js`：`model`、`presets`、`defaultModel`、`optionsLoading`、`allowCustom`、`freeModels`、`freeModelsLoading`、`isCustomModel` 與 146–185 行三個 effect；參數 `openrouterConnected`；回傳上述值與 `setModel`、`setIsCustomModel` | `hooks/useModelOptions.js`、`App.jsx` | ⏳ |
+| R-3 | 補 E2E 第 7 條「分支重新生成」（分支面板裡最後一則 AI 按重新生成 → `POST /messages/<id>/regenerate`，面板內內容被取代）與第 8 條「編輯最後一則 user」（主對話編輯後送出 → body 含 `content`；後端回 429 時 user 訊息還原成舊內容）。不改 `src/` | `e2e/*` | ⏳ |
+| R-4 | `src/readTextStream.js`：`readTextStream(response, { shouldStop, onText }) → { finished, text }`。讀之前與讀之後各檢查一次 `shouldStop`，停止時 `reader.cancel()`；每段解碼後以累積全文呼叫 `onText`。五處迴圈（`resumeGeneration`、`handleSend`、`handleRetry`、`sendBranchMessage`、`retryBranchMessage`）改用它；分支兩處不傳 `shouldStop`。迴圈外的 header 處理、錯誤處理、finally 不動 | `readTextStream.js`、`App.jsx` | ⏳ |
+| R-5 | `src/hooks/useBranchPanel.js`：`branches`、`activeBranchId`、`branchPanelOpen`、`updateBranch`、`loadBranchMessages`、`openBranchFromHighlight`、`handleCreateBranch`、`sendBranchMessage`、`retryBranchMessage`。需要的外部值（`model`、`user`、`branchList`、`loadBranchList`、`fetchHistory`、`messages`、`refreshAfterGeneration`）用參數傳入 | `hooks/useBranchPanel.js`、`App.jsx` | ⏳ |
+| R-6 | `src/hooks/useMainChat.js`：`messages`、`input`、`isLoading`、`branchList`、閱讀位置與捲動還原、`activeRootIdRef`、`streamAbortRef`、`loadBranchList`、`loadChat`、`resumeGeneration`、`startNewChat`、`handleSend`、`handleRetry`。`handleRetry` 關閉被幽靈化分支 tab 用 R-5 交出的 `setBranches`／`setActiveBranchId`。實作前主代理先確認兩個 Hook 的相依方向，必要時調整 R-5／R-6 的切法再交辦 | `hooks/useMainChat.js`、`App.jsx` | ⏳ |
+
+**R-6 之後**：使用者在瀏覽器跑一次清單（桌面 ≥ 768 與手機 < 768），清單在 R-6 完成時貼在訊息裡。E2E 沒有涵蓋的：手機版、選取文字建立分支、續讀（生成中切走再切回）、刪除與改名對話、樹狀圖、登入與 OpenRouter 連結。
