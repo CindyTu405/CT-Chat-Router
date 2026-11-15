@@ -199,9 +199,9 @@ npx playwright test --ui      <span class="cm"># 開圖形介面，看每一步�
     <div class="table-wrap">
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
-        <tr><td>E2E-1</td><td>安裝 Playwright、設定檔、假後端工具、第 1–2 條測試</td><td>未開始</td></tr>
-        <tr><td>E2E-2</td><td>第 3–6 條測試</td><td>未開始</td></tr>
-        <tr><td>E2E-3</td><td>CI 新增 <code>e2e</code> job</td><td>未開始</td></tr>
+        <tr><td>E2E-1</td><td>安裝 Playwright、設定檔、假後端工具、第 1–2 條測試</td><td>完成（ce3695f）。假後端工具在 <code>frontend/e2e/mockApi.js</code>：沒被測試定義的 API 請求會讓測試失敗</td></tr>
+        <tr><td>E2E-2</td><td>第 3–6 條測試</td><td>完成（98f0cae），2026-11-15 驗收：六條連跑三次都通過（約 10 秒）；故意弄壞三處保護，對應的測試都變紅，還原後通過；沒有改產品程式</td></tr>
+        <tr><td>E2E-3</td><td>CI 新增 <code>e2e</code> job</td><td>已寫好（603ad21），GitHub 上的執行結果待 push 後確認</td></tr>
       </table>
     </div>
   </section>
