@@ -1115,9 +1115,9 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 
 | 編號 | 任務 | 狀態 |
 |---|---|---|
-| E2E-1 | 安裝 Playwright、`playwright.config.js`、`e2e/mockApi.js`、`npm run test:e2e`、第 1–2 條測試 | ⏳ |
-| E2E-2 | 第 3–6 條測試 | ⏳ |
-| E2E-3 | `ci.yml` 新增 `e2e` job | ⏳ |
+| E2E-1 | 安裝 Playwright、`playwright.config.js`、`e2e/mockApi.js`、`npm run test:e2e`、第 1–2 條測試 | ✅ ce3695f |
+| E2E-2 | 第 3–6 條測試 | ✅ 98f0cae |
+| E2E-3 | `ci.yml` 新增 `e2e` job | 🔶 603ad21（GitHub 上的執行結果待 push 後確認） |
 
 **六條測試（各自獨立，互不依賴）**
 1. 首頁進入試用：`/auth/me` 回 401 → 看到首頁的「開始使用」→ 點擊 → 發出 `POST /auth/guest` → 進入聊天畫面（看得到訊息輸入框）。
@@ -1134,3 +1134,11 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 4. `git diff d271fb1 --stat -- frontend/src` → 沒有輸出（沒改產品程式）；若有加 `data-testid`，逐一列在回報裡。
 5. `cd frontend && npm run build` 成功。
 6. push 後 GitHub Actions 的 `backend`、`frontend`、`e2e` 三個 job 都通過。
+
+**E2E 驗收紀錄（2026-11-15，主代理重跑）**
+- `npm run test:e2e` 連跑三次都 `6 passed`（約 10 秒）；`npm run build` 成功；`git diff d271fb1 --stat -- frontend/src` 沒有輸出（沒改產品程式，也沒加 `data-testid`）。
+- 故意弄壞三次（每次驗完 `git checkout` 還原）：刪掉額度還原的 `setInput(userMessageContent);` → 第 3 條失敗；把 `handleSend` 裡六處 `activeRootIdRef.current` 與 `sendConvId` 的比較改成恆通過 → 第 6 條失敗；額度被擋時不撤掉樂觀訊息 → 第 3 條失敗。其餘 5 條每次都通過。
+- 規格外新增：`frontend/e2e/locators.js`（共用定位器）；`eslint.config.js` 多一段讓 `playwright.config.js` 與 `e2e/` 使用 Node 全域變數；`frontend/.gitignore` 加 Playwright 的輸出資料夾。
+- 與規格不同：第 5 條點的是內文高亮（`title="開啟分支：重點片語"`），不是底部入口，因為底部入口只給 `precise === false` 的分支。
+- 已知的脆弱點（拆 `App.jsx` 時一併處理，需要改 `src/`，尚未確認）：送出按鈕沒有文字也沒有 `aria-label`，測試靠「輸入框後面的第一個按鈕」找；主對話訊息區靠 class `div.overflow-y-auto.p-4` 找。建議分別加 `aria-label="送出"` 與 `data-testid="message-list"`。
+- 本機執行需要先 `cd frontend && npx playwright install chromium`（一次）。
