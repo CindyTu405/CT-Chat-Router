@@ -1038,3 +1038,58 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 - VM 的 `.env` 要新增 `CREDENTIAL_ENCRYPTION_KEY`（產生方式寫進教學文件）；遺失或更換會讓所有連結失效（使用者重新連結即可，對話不受影響）。
 - 現有登入用戶的每日額度會從 20 變 10。
 - 正式站在 V1-6 之前仍在 Cloudflare Access 後面。
+
+## CI 規格與驗收（2026-11-15 擬定，等使用者讀完教學說「開始」才動工）
+
+**來源**：2026-11-15 可維護性檢視的第 1 項。教學：`docs/20261115_(CI)github-actions-guide.html`。分支 `chore/ci`（從 `main` 09ccc3f）。
+
+**已確認（2026-11-15）**：從 `main` 開分支；前端第一版只跑 build（lint 見 BUGS B19）；修 baseline，CI 跑 `alembic upgrade head`。
+**待確認**：觸發條件（任何分支 push＋對 `main` 的 PR）；CI 資料庫名稱用 `g2_tmp`；第一版不設 branch protection。
+
+**後續項目（尚未確認細節，不動工）**：2 拆 `App.jsx`、3 前端瀏覽器自動測試、4 拆 `main.py`。各自先寫教學。
+
+| 編號 | 任務 | 狀態 |
+|---|---|---|
+| CI-1 | baseline migration（`e4d003f1bea8`）補上 `message`、`freemodelscache` 建表 | ⏳ |
+| CI-2 | `backend/dev/run_harnesses.sh`：依序跑 9 支 harness | ⏳ |
+| CI-3 | `.github/workflows/ci.yml`：`backend`、`frontend` 兩個 job | ⏳ |
+
+### CI-1 規格
+- 只改 `backend/alembic/versions/e4d003f1bea8_baseline.py` 的 `upgrade()`；`downgrade()` 維持 `pass`；不改其他 migration、不改 `models.py`。
+- 用 `sa.inspect(op.get_bind()).get_table_names()` 判斷，表不存在才建。
+- `message`（欄位依序）：`content` String NOT NULL、`role` String NOT NULL、`model_used` String NULL、`created_at` DateTime NOT NULL、`session_id` String NOT NULL、`parent_id` Uuid NULL、`title` String NULL、`has_branch` Boolean NOT NULL、`id` Uuid NOT NULL；外鍵 `parent_id → message.id` 命名 `message_parent_id_fkey`；主鍵命名 `message_pkey`。
+- `freemodelscache`：`id` Integer NOT NULL `autoincrement=False`、`models_json` String NOT NULL、`updated_at` DateTime NOT NULL；主鍵命名 `freemodelscache_pkey`。
+- 主代理 2026-11-15 試做過這個內容（已還原）：結構與 `chat_db` 完全相同。
+
+**驗收（先 `docker compose ps` 確認 `chat_db` running）**
+1. `docker compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --if-exists ci_tmp; createdb -U "$POSTGRES_USER" ci_tmp'` → `cd backend && POSTGRES_DB=ci_tmp uv run alembic upgrade head 2>&1 | tail -1` → 含 `f1a2b3c4d5e6 -> a7b8c9d0e1f2`。
+2. `POSTGRES_DB=ci_tmp uv run alembic current 2>&1 | tail -1` → `a7b8c9d0e1f2 (head)`。
+3. `diff <(docker compose exec -T db sh -c 'pg_dump -s -U "$POSTGRES_USER" ci_tmp' | grep -v '^--' | grep -v restrict) <(docker compose exec -T db sh -c 'pg_dump -s -U "$POSTGRES_USER" "$POSTGRES_DB"' | grep -v '^--' | grep -v restrict)` → 沒有輸出。
+4. `cd backend && uv run alembic current 2>&1 | tail -1`（指向 `chat_db`）→ 仍是 `a7b8c9d0e1f2 (head)`；`uv run alembic upgrade head` 不執行任何 migration。
+5. `POSTGRES_DB=ci_tmp SQL_ECHO=false uv run python dev/quota_harness.py 2>&1 | tail -1` → `ALL PASS`。
+6. 結束後 `dropdb ci_tmp`。
+
+### CI-2 規格
+- 新檔 `backend/dev/run_harnesses.sh`（可執行，`bash`，LF）。在 `backend/` 下執行。
+- 依序跑：`auth`、`quota`、`regenerate`、`branch_entries`、`model_options`、`pool`、`limits`、`guest`、`openrouter_connect`（`dev/<name>_harness.py`，`uv run python`，`SQL_ECHO=false`）。
+- 每支輸出寫到暫存檔；通過印 `PASS <name>`，失敗印 `FAIL <name>` 並印出該支輸出的最後 40 行（濾掉含 `sqlalchemy` 的行）。一支失敗不中斷，繼續跑完。
+- 最後印 `<n> passed, <m> failed`；有失敗就 `exit 1`。
+- 不設定資料庫：沿用呼叫者的 `DATABASE_URL` 或 `POSTGRES_DB`。不改任何 harness。
+
+**驗收**
+1. `cd backend && POSTGRES_DB=g2_tmp ./dev/run_harnesses.sh; echo "rc=$?"` → 9 行 `PASS`、`9 passed, 0 failed`、`rc=0`（`g2_tmp` 不存在就照 CI-1 驗收 1 的方式建一個並 `alembic upgrade head`）。
+2. `cd backend && POSTGRES_DB=ci_tmp ./dev/run_harnesses.sh; echo "rc=$?"` → `FAIL openrouter_connect`（防呆拒絕非 `g2_tmp`）、其餘 8 行 `PASS`、`rc=1`。
+
+### CI-3 規格
+- 新檔 `.github/workflows/ci.yml`，名稱 `CI`。觸發：`push`（所有分支）、`pull_request`（`branches: [main]`）。`permissions: contents: read`。同一分支新的 push 取消舊的執行（`concurrency`）。
+- job `backend`：`ubuntu-latest`；service `postgres` 用 `pgvector/pgvector:pg16`，`POSTGRES_USER=ci`、`POSTGRES_PASSWORD=ci`、`POSTGRES_DB=g2_tmp`，port 5432，`pg_isready` healthcheck；job env `DATABASE_URL=postgresql://ci:ci@localhost:5432/g2_tmp`、`SQL_ECHO=false`；steps：checkout → `astral-sh/setup-uv` → `uv sync --frozen`（`working-directory: backend`）→ `uv run alembic upgrade head` → `./dev/run_harnesses.sh`。`timeout-minutes: 15`。
+- job `frontend`：`ubuntu-latest`；`actions/setup-node` Node 20，npm 快取；`working-directory: frontend`；`npm ci` → `npm run build`。`timeout-minutes: 10`。
+- 不使用任何 GitHub secret；不呼叫真的模型。
+- 安全：第三方 action 釘在主要版本 tag；workflow 不接受 PR 來的輸入拼進 shell。
+
+**驗收**
+1. `python3 -c "import yaml,sys; d=yaml.safe_load(open('.github/workflows/ci.yml')); print(sorted(d['jobs']))"` → `['backend', 'frontend']`。
+2. `grep -c 'secrets\.' .github/workflows/ci.yml` → `0`。
+3. push `chore/ci` 後，GitHub Actions 頁面該次執行 `backend`、`frontend` 都是綠勾（本機沒有 `gh`，由使用者或主代理用瀏覽器看）。
+4. 若 `backend` 因缺少環境變數失敗（本機有 `.env`、CI 沒有；尚未驗證），在 workflow 的 job env 補假值，不改程式；另開一個 `fix: (CI-3)` commit。
+5. 測試分支上故意讓一支 harness 失敗並 push → `backend` 紅叉；還原後綠勾。測試分支用完刪除。
