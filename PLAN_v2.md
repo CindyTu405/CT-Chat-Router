@@ -1117,7 +1117,7 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 |---|---|---|
 | E2E-1 | 安裝 Playwright、`playwright.config.js`、`e2e/mockApi.js`、`npm run test:e2e`、第 1–2 條測試 | ✅ ce3695f |
 | E2E-2 | 第 3–6 條測試 | ✅ 98f0cae |
-| E2E-3 | `ci.yml` 新增 `e2e` job | 🔶 603ad21（GitHub 上的執行結果待 push 後確認） |
+| E2E-3 | `ci.yml` 新增 `e2e` job | ✅ 603ad21（2026-11-15 run 43728630882：`backend`、`frontend`、`e2e` 都通過；`e2e` 約 50 秒，含安裝瀏覽器） |
 
 **六條測試（各自獨立，互不依賴）**
 1. 首頁進入試用：`/auth/me` 回 401 → 看到首頁的「開始使用」→ 點擊 → 發出 `POST /auth/guest` → 進入聊天畫面（看得到訊息輸入框）。
