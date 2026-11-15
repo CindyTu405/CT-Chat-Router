@@ -1052,7 +1052,7 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 |---|---|---|
 | CI-1 | baseline migration（`e4d003f1bea8`）補上 `message`、`freemodelscache` 建表 | ✅ 744b773（主代理 2026-11-15 重跑驗收 1–5：空資料庫 upgrade 到 head、結構與 `chat_db` 相同、`chat_db` 不受影響） |
 | CI-2 | `backend/dev/run_harnesses.sh`：依序跑 9 支 harness | ✅ 21145ed（`g2_tmp`：`9 passed, 0 failed`、rc=0；`ci_tmp`：`FAIL openrouter_connect`、rc=1） |
-| CI-3 | `.github/workflows/ci.yml`：`backend`、`frontend` 兩個 job | 🔶 53c45d2（驗收 1、2 通過；3–5 要 push 後在 GitHub 上看） |
+| CI-3 | `.github/workflows/ci.yml`：`backend`、`frontend` 兩個 job | ✅ 53c45d2＋93b24bb＋cd6c462（2026-11-15 第三次執行 `backend`、`frontend` 都通過，run 43721022907；`backend` 約 1 分 45 秒、`frontend` 約 16 秒） |
 
 ### CI-1 規格
 - 只改 `backend/alembic/versions/e4d003f1bea8_baseline.py` 的 `upgrade()`；`downgrade()` 維持 `pass`；不改其他 migration、不改 `models.py`。
@@ -1093,3 +1093,11 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 3. push `chore/ci` 後，GitHub Actions 頁面該次執行 `backend`、`frontend` 都是綠勾（本機沒有 `gh`，由使用者或主代理用瀏覽器看）。
 4. 若 `backend` 因缺少環境變數失敗（本機有 `.env`、CI 沒有；尚未驗證），在 workflow 的 job env 補假值，不改程式；另開一個 `fix: (CI-3)` commit。
 5. 測試分支上故意讓一支 harness 失敗並 push → `backend` 紅叉；還原後綠勾。測試分支用完刪除。
+
+**CI 上線紀錄（2026-11-15）**
+- 第一次執行 `backend` 失敗：CI 沒有 `.env`，`openrouter_llm.py` 在 import 時建立 client，缺 `OPENROUTER_API_KEY` 直接報錯 → `93b24bb` 補假值（另補四個 OAuth client 假值）。
+- 第二次執行 `backend` 失敗：`quota_harness` 第 11 案直接呼叫 `gemini_chat_stream`，缺 `GOOGLE_API_KEY` → `cd6c462` 補假值。這次失敗同時證明驗收 5：一支 harness 失敗時 `backend` 會是紅叉，所以沒有另外做故意弄壞的測試。
+- 第三次執行兩個 job 都通過。workflow 裡的值全是假值，沒有使用 GitHub secret。
+- 查 CI 失敗的方法：公開 API 看得到每個 step 的結果（`https://api.github.com/repos/CindyTu405/CT-Chat-Router/actions/runs?branch=<分支>`），但 log 要登入。本機重現方式：`git worktree add` 一份乾淨 checkout（沒有 `.env`）＋`docker run` 一個 `pgvector/pgvector:pg16`（`ci/ci/g2_tmp`，另一個 port）＋設定與 workflow 相同的環境變數，再跑 `alembic upgrade head` 與 `./dev/run_harnesses.sh`。用完移除容器與 worktree。
+- 尚未做：合併回 `main`；branch protection（決定：CI 連續約十次穩定後再開）；lint 進 CI（BUGS B19）。
+- 已知提醒：GitHub 顯示 `actions/checkout@v4`、`astral-sh/setup-uv@v6` 以 Node 20 為目標的棄用警告，目前不影響執行。
