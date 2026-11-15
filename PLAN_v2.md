@@ -1184,11 +1184,11 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 - BUGS B19（前端 lint 3 個 error）未修；修完後把 `npm run lint` 加進 CI 的 `frontend` job。
 - implementer 的 commit 尾註有的是 Haiku、有的是 Fable（任務文字寫死造成），不影響內容。
 
-## R 規格與驗收：拆分 `App.jsx`（2026-11-15 擬定，等使用者讀完教學說「開始」才動工）
+## R 規格與驗收：拆分 `App.jsx`（2026-11-15 定稿，使用者已說「開始」）
 
 **來源**：可維護性檢視第 2 項。教學：`docs/20261115_(R)app-hooks-refactor-guide.html`。分支 `refactor/app-hooks`（從 `test/e2e` b896b2d）。
 **原則**：行為完全不變。一步一個 commit；搬移與改寫分開；拆的過程發現的 bug 照原樣搬、記進 `BUGS.md`，不在這一輪修。側欄（改名、刪除、排序）與樹狀圖視窗這一輪不拆。
-**待確認**：教學決策表 #1–#7。
+**已確認（2026-11-15）**：教學決策表 #1–#7 全部照提議。
 
 **每一步共同的驗收**（在 `frontend/` 下）
 - `npm run build` 成功；`npm run test:e2e` 全部通過（R-3 之前 6 條，之後 8 條），連跑兩次。
