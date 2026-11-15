@@ -227,9 +227,9 @@ jobs:
     <div class="table-wrap">
       <table>
         <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
-        <tr><td>CI-1</td><td>baseline migration 補上 <code>message</code>、<code>freemodelscache</code> 建表</td><td>未開始</td></tr>
-        <tr><td>CI-2</td><td><code>backend/dev/run_harnesses.sh</code></td><td>未開始</td></tr>
-        <tr><td>CI-3</td><td><code>.github/workflows/ci.yml</code>（backend、frontend 兩個 job）</td><td>未開始</td></tr>
+        <tr><td>CI-1</td><td>baseline migration 補上 <code>message</code>、<code>freemodelscache</code> 建表</td><td>完成（744b773），2026-11-15 驗收：空資料庫 <code>alembic upgrade head</code> 到最新版，結構與 <code>chat_db</code> 完全相同；<code>chat_db</code> 沒有重跑任何 migration</td></tr>
+        <tr><td>CI-2</td><td><code>backend/dev/run_harnesses.sh</code></td><td>完成（21145ed），2026-11-15 驗收：<code>g2_tmp</code> 上 <code>9 passed, 0 failed</code>、結束碼 0；換成別的資料庫名稱時 <code>FAIL openrouter_connect</code>、結束碼 1</td></tr>
+        <tr><td>CI-3</td><td><code>.github/workflows/ci.yml</code>（backend、frontend 兩個 job）</td><td>已寫好（53c45d2），設定檔可解析、沒有使用 secret；GitHub 上的實際執行結果待 push 後確認</td></tr>
       </table>
     </div>
   </section>
