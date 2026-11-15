@@ -1050,9 +1050,9 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 
 | 編號 | 任務 | 狀態 |
 |---|---|---|
-| CI-1 | baseline migration（`e4d003f1bea8`）補上 `message`、`freemodelscache` 建表 | ⏳ |
-| CI-2 | `backend/dev/run_harnesses.sh`：依序跑 9 支 harness | ⏳ |
-| CI-3 | `.github/workflows/ci.yml`：`backend`、`frontend` 兩個 job | ⏳ |
+| CI-1 | baseline migration（`e4d003f1bea8`）補上 `message`、`freemodelscache` 建表 | ✅ 744b773（主代理 2026-11-15 重跑驗收 1–5：空資料庫 upgrade 到 head、結構與 `chat_db` 相同、`chat_db` 不受影響） |
+| CI-2 | `backend/dev/run_harnesses.sh`：依序跑 9 支 harness | ✅ 21145ed（`g2_tmp`：`9 passed, 0 failed`、rc=0；`ci_tmp`：`FAIL openrouter_connect`、rc=1） |
+| CI-3 | `.github/workflows/ci.yml`：`backend`、`frontend` 兩個 job | 🔶 53c45d2（驗收 1、2 通過；3–5 要 push 後在 GitHub 上看） |
 
 ### CI-1 規格
 - 只改 `backend/alembic/versions/e4d003f1bea8_baseline.py` 的 `upgrade()`；`downgrade()` 維持 `pass`；不改其他 migration、不改 `models.py`。
