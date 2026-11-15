@@ -1102,7 +1102,7 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 - 尚未做：合併回 `main`；branch protection（決定：CI 連續約十次穩定後再開）；lint 進 CI（BUGS B19）。
 - 已知提醒：GitHub 顯示 `actions/checkout@v4`、`astral-sh/setup-uv@v6` 以 Node 20 為目標的棄用警告，目前不影響執行。
 
-## E2E 規格與驗收：前端自動測試（2026-11-15 擬定，等使用者讀完教學說「開始」才動工）
+## E2E 規格與驗收：前端自動測試（2026-11-15 定稿，使用者已說「開始」）
 
 **來源**：可維護性檢視第 3 項。2026-11-15 使用者同意提到拆 `App.jsx` 之前：`App.jsx` 的送出、重新生成、分支送出、分支重新生成是四份複製的串流迴圈，各有防呆（切換對話停止寫入、額度被擋還原畫面），重構前先用測試把現有行為固定下來。教學：`docs/20261115_(E2E)playwright-guide.html`。分支 `test/e2e`（從 `chore/ci` d271fb1，因為要改 `ci.yml`）。
 
