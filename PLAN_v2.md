@@ -1039,12 +1039,12 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 - 現有登入用戶的每日額度會從 20 變 10。
 - 正式站在 V1-6 之前仍在 Cloudflare Access 後面。
 
-## CI 規格與驗收（2026-11-15 擬定，等使用者讀完教學說「開始」才動工）
+## CI 規格與驗收（2026-11-15 定稿）
 
 **來源**：2026-11-15 可維護性檢視的第 1 項。教學：`docs/20261115_(CI)github-actions-guide.html`。分支 `chore/ci`（從 `main` 09ccc3f）。
 
 **已確認（2026-11-15）**：從 `main` 開分支；前端第一版只跑 build（lint 見 BUGS B19）；修 baseline，CI 跑 `alembic upgrade head`。
-**待確認**：觸發條件（任何分支 push＋對 `main` 的 PR）；CI 資料庫名稱用 `g2_tmp`；第一版不設 branch protection。
+**已確認（2026-11-15，使用者說「開始」）**：觸發條件（任何分支 push＋對 `main` 的 PR）；CI 資料庫名稱用 `g2_tmp`；第一版不設 branch protection，CI 連續約十次穩定後再開啟。
 
 **後續項目（尚未確認細節，不動工）**：2 拆 `App.jsx`、3 前端瀏覽器自動測試、4 拆 `main.py`。各自先寫教學。
 
