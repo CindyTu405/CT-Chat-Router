@@ -1199,12 +1199,21 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 
 | 編號 | 任務 | 檔案 | 狀態 |
 |---|---|---|---|
-| R-0 | `ChatInput` 送出按鈕加 `aria-label="送出"`；`MessageList` 捲動容器加 `data-testid="message-list"`；`e2e/locators.js` 改用 `getByRole('button', { name: '送出' })` 與 `getByTestId('message-list')`（分支面板也用同一組件，主對話取 `.first()`、分支送出鈕改在面板內找） | `ChatInput.jsx`、`MessageList.jsx`、`e2e/locators.js` | ⏳ |
-| R-1 | `src/quotaErrors.js`：搬出 `QuotaError`、`throwIfQuotaError`、`MAX_MESSAGE_CHARS`、`MAX_TITLE_CHARS`、`MAX_ANCHOR_TEXT_CHARS`、`TOO_LONG_MSG`（App.jsx 12–64 行） | `quotaErrors.js`、`App.jsx` | ⏳ |
-| R-2 | `src/hooks/useModelOptions.js`：`model`、`presets`、`defaultModel`、`optionsLoading`、`allowCustom`、`freeModels`、`freeModelsLoading`、`isCustomModel` 與 146–185 行三個 effect；參數 `openrouterConnected`；回傳上述值與 `setModel`、`setIsCustomModel` | `hooks/useModelOptions.js`、`App.jsx` | ⏳ |
-| R-3 | 補 E2E 第 7 條「分支重新生成」（分支面板裡最後一則 AI 按重新生成 → `POST /messages/<id>/regenerate`，面板內內容被取代）與第 8 條「編輯最後一則 user」（主對話編輯後送出 → body 含 `content`；後端回 429 時 user 訊息還原成舊內容）。不改 `src/` | `e2e/*` | ⏳ |
-| R-4 | `src/readTextStream.js`：`readTextStream(response, { shouldStop, onText }) → { finished, text }`。讀之前與讀之後各檢查一次 `shouldStop`，停止時 `reader.cancel()`；每段解碼後以累積全文呼叫 `onText`。五處迴圈（`resumeGeneration`、`handleSend`、`handleRetry`、`sendBranchMessage`、`retryBranchMessage`）改用它；分支兩處不傳 `shouldStop`。迴圈外的 header 處理、錯誤處理、finally 不動 | `readTextStream.js`、`App.jsx` | ⏳ |
-| R-5 | `src/hooks/useBranchPanel.js`：`branches`、`activeBranchId`、`branchPanelOpen`、`updateBranch`、`loadBranchMessages`、`openBranchFromHighlight`、`handleCreateBranch`、`sendBranchMessage`、`retryBranchMessage`。需要的外部值（`model`、`user`、`branchList`、`loadBranchList`、`fetchHistory`、`messages`、`refreshAfterGeneration`）用參數傳入 | `hooks/useBranchPanel.js`、`App.jsx` | ⏳ |
-| R-6 | `src/hooks/useMainChat.js`：`messages`、`input`、`isLoading`、`branchList`、閱讀位置與捲動還原、`activeRootIdRef`、`streamAbortRef`、`loadBranchList`、`loadChat`、`resumeGeneration`、`startNewChat`、`handleSend`、`handleRetry`。`handleRetry` 關閉被幽靈化分支 tab 用 R-5 交出的 `setBranches`／`setActiveBranchId`。實作前主代理先確認兩個 Hook 的相依方向，必要時調整 R-5／R-6 的切法再交辦 | `hooks/useMainChat.js`、`App.jsx` | ⏳ |
+| R-0 | `ChatInput` 送出按鈕加 `aria-label="送出"`；`MessageList` 捲動容器加 `data-testid="message-list"`；`e2e/locators.js` 改用 `getByRole('button', { name: '送出' })` 與 `getByTestId('message-list')`（分支面板也用同一組件，主對話取 `.first()`、分支送出鈕改在面板內找） | `ChatInput.jsx`、`MessageList.jsx`、`e2e/locators.js` | ✅ e7c8e3b |
+| R-1 | `src/quotaErrors.js`：搬出 `QuotaError`、`throwIfQuotaError`、`MAX_MESSAGE_CHARS`、`MAX_TITLE_CHARS`、`MAX_ANCHOR_TEXT_CHARS`、`TOO_LONG_MSG`（App.jsx 12–64 行） | `quotaErrors.js`、`App.jsx` | ✅ 8d56694（App.jsx 1,139 → 1,087） |
+| R-2 | `src/hooks/useModelOptions.js`：`model`、`presets`、`defaultModel`、`optionsLoading`、`allowCustom`、`freeModels`、`freeModelsLoading`、`isCustomModel` 與 146–185 行三個 effect；參數 `openrouterConnected`；回傳上述值與 `setModel`、`setIsCustomModel` | `hooks/useModelOptions.js`、`App.jsx` | ✅ e63562c（→ 1,038；G2-6 effect 加了附理由的 lint 停用註解，見 B19） |
+| R-3 | 補 E2E 第 7 條「分支重新生成」（分支面板裡最後一則 AI 按重新生成 → `POST /messages/<id>/regenerate`，面板內內容被取代）與第 8 條「編輯最後一則 user」（主對話編輯後送出 → body 含 `content`；後端回 429 時 user 訊息還原成舊內容）。不改 `src/` | `e2e/*` | ✅ dd6e44f（E2E 6 → 8 條） |
+| R-4 | `src/readTextStream.js`：`readTextStream(response, { shouldStop, onText }) → { finished, text }`。讀之前與讀之後各檢查一次 `shouldStop`，停止時 `reader.cancel()`；每段解碼後以累積全文呼叫 `onText`。五處迴圈（`resumeGeneration`、`handleSend`、`handleRetry`、`sendBranchMessage`、`retryBranchMessage`）改用它；分支兩處不傳 `shouldStop`。迴圈外的 header 處理、錯誤處理、finally 不動 | `readTextStream.js`、`App.jsx` | ✅ 26c8943（→ 976；突變檢查：主對話兩層保護一起拿掉時第 6 條失敗） |
+| R-5 | `src/hooks/useBranchPanel.js`：`branches`、`activeBranchId`、`branchPanelOpen`、`updateBranch`、`loadBranchMessages`、`openBranchFromHighlight`、`handleCreateBranch`、`sendBranchMessage`、`retryBranchMessage`。需要的外部值（`model`、`user`、`branchList`、`loadBranchList`、`fetchHistory`、`messages`、`refreshAfterGeneration`）用參數傳入 | `hooks/useBranchPanel.js`、`App.jsx` | ✅ 82066fa＋323fe9f（→ 630；切法調整，見下方） |
+| R-6 | `src/hooks/useMainChat.js`：`messages`、`input`、`isLoading`、`branchList`、閱讀位置與捲動還原、`activeRootIdRef`、`streamAbortRef`、`loadBranchList`、`loadChat`、`resumeGeneration`、`startNewChat`、`handleSend`、`handleRetry`。`handleRetry` 關閉被幽靈化分支 tab 用 R-5 交出的 `setBranches`／`setActiveBranchId`。實作前主代理先確認兩個 Hook 的相依方向，必要時調整 R-5／R-6 的切法再交辦 | `hooks/useMainChat.js`、`App.jsx` | ✅ 80c671b（→ 266；側欄 effect 加了附理由的 lint 停用註解，見 B19） |
 
 **R-6 之後**：使用者在瀏覽器跑一次清單（桌面 ≥ 768 與手機 < 768），清單在 R-6 完成時貼在訊息裡。E2E 沒有涵蓋的：手機版、選取文字建立分支、續讀（生成中切走再切回）、刪除與改名對話、樹狀圖、登入與 OpenRouter 連結。
+
+**R 實作紀錄（2026-11-16，主代理逐步驗收）**
+- 結果：`App.jsx` 1,139 → 266 行。新檔：`quotaErrors.js`（54）、`readTextStream.js`（23）、`hooks/useModelOptions.js`（62）、`hooks/useBranchPanel.js`（368）、`hooks/useMainChat.js`（374）。
+- 每步：主代理重跑 `npm run build`、`npm run test:e2e`（連跑兩次以上）、lint；搬移步驟用「去縮排、排序後比對」確認只多了 import／export／Hook 呼叫等包裝行，其餘逐行相同。
+- 與規格不同：
+  - R-5 切法調整：`branchList`、`loadBranchList` 從 R-6 移到 `useBranchPanel`；`handleCreateBranch` 改由 App 傳入 `rootId`；新增 `closeBranches(ids)`、`resetBranches()` 取代主對話直接呼叫分支的 setter。原因：原切法兩個 Hook 互相依賴（分支要讀 `messages`，主對話要改分支狀態）。改後 `useBranchPanel` 不依賴主對話，`useMainChat` 透過參數呼叫它。
+  - 兩處 `react-hooks/set-state-in-effect`（R-2 的 G2-6 effect、R-6 的側欄 effect）：程式沒有改，是檔案變小後 lint 才分析到；加了附理由的 `eslint-disable-next-line`，記在 B19。
+- 測試的限制：主對話「切換對話停止寫入」有兩層保護（`shouldStop` 與寫入時再檢查）。只拿掉其中一層時 8 條都通過，因為假後端一次送完整段回覆；兩層都拿掉時第 6 條失敗。
+- 尚未做：使用者瀏覽器清單（桌面與手機）；`refactor/app-hooks` 未合併。
