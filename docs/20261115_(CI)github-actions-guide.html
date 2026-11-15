@@ -110,6 +110,7 @@
   <section class="card">
     <h2><span class="num">3</span>概念：migration 要能從零重建資料庫</h2>
     <p>Alembic 的 migration 是一條鏈：從第一支（baseline）依序執行到最新一支，就該得到目前的資料庫結構。</p>
+    <p><b>baseline 是什麼：</b>這條鏈的第一支，也就是起點。每個資料庫自己記著「我執行到第幾支」（<code>alembic_version</code> 表）。專案做到一半才導入 Alembic 時，通常會放一支 baseline 表示「從目前的狀態開始記錄」。</p>
     <p>這個專案的 baseline 是空的。導入 Alembic 時 <code>message</code>、<code>freemodelscache</code> 兩張表已經存在（當時由 <code>create_all</code> 建立），所以 baseline 只是標記「從這裡開始」，沒有寫建表。結果第二支之後的 migration 一遇到 <code>message</code> 就失敗：</p>
     <pre><code>$ createdb ci_tmp
 $ POSTGRES_DB=ci_tmp uv run alembic upgrade head
@@ -214,9 +215,9 @@ jobs:
         <tr><td>1</td><td>做在哪個分支</td><td>從 <code>main</code> 開 <code>chore/ci</code></td><td>2026-11-15 確認</td></tr>
         <tr><td>2</td><td>前端關卡要不要含 lint</td><td>第一版只跑 build；現有 3 個 lint error 記在 BUGS B19，修完再加進 CI</td><td>2026-11-15 確認</td></tr>
         <tr><td>3</td><td>CI 的資料庫怎麼建</td><td>修 baseline，CI 跑 <code>alembic upgrade head</code></td><td>2026-11-15 確認</td></tr>
-        <tr><td>4</td><td>什麼時候觸發</td><td>任何分支的 push，加上對 <code>main</code> 的 PR</td><td>提議，待確認</td></tr>
-        <tr><td>5</td><td>CI 的資料庫名稱</td><td>用 <code>g2_tmp</code>，harness 的防呆不改</td><td>提議，待確認</td></tr>
-        <tr><td>6</td><td>紅色要不要擋合併（branch protection）</td><td>第一版不設，先觀察 CI 穩不穩</td><td>提議，待確認</td></tr>
+        <tr><td>4</td><td>什麼時候觸發</td><td>任何分支的 push，加上對 <code>main</code> 的 PR。業界標準是每個 PR 與 <code>main</code> 的 push；這裡多跑分支 push，因為分支常做很久才開 PR</td><td>2026-11-15 確認</td></tr>
+        <tr><td>5</td><td>CI 的資料庫名稱</td><td>用 <code>g2_tmp</code>，harness 的防呆不改。原則是 CI 只用用完即丟的資料庫</td><td>2026-11-15 確認</td></tr>
+        <tr><td>6</td><td>紅色要不要擋合併（branch protection）</td><td>業界標準是要擋。第一版先不設，CI 連續約十次穩定後再到 GitHub 開啟，避免被偶發失敗卡住</td><td>2026-11-15 確認</td></tr>
       </table>
     </div>
   </section>
