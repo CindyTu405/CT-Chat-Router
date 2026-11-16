@@ -229,4 +229,6 @@
 - **影響**：所有已連結 OpenRouter 的使用者，只要選了 `gemini*` 的預設／preset 模型就無法使用。正式站若預設模型也是 `gemini*`，同樣會發生（未查正式站設定）
 - **暫時避開**：側欄「中斷連結」，或在自訂模型輸入 `google/gemini-2.5-flash-lite`
 - **修正方向（待使用者確認）**：(a) 已連結者走 OpenRouter 時，`gemini-` 開頭的 id 自動補成 `google/gemini-...`；(b) 已連結者選 `gemini*` 時改走直連 Gemini（會改用平台的 Google 金鑰與額度，與 G2 決策「連結者用自己的金鑰」衝突）；(c) 已連結者的模型選單只列 OpenRouter 的 id
-- **狀態**：未修
+- **決定（2026-11-16，使用者）**：正式站已確定不直連 Google，`gemini*` 只在本機用環境變數保留，方便快速測試。所以這個問題只會在「本機帳號連結了 OpenRouter 又選 gemini」時出現，不修程式。本機要測 gemini 時用未連結的帳號或訪客，或先中斷連結
+- **待確認**：VM 的 `.env` 有設定 `ALLOWED_MODELS`（`docker-compose.prod.yml` 沒設時的預設值是 `gemini*`）
+- **狀態**：不修（只影響本機的測試設定）
