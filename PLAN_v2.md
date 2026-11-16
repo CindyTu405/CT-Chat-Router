@@ -1216,4 +1216,5 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
   - R-5 切法調整：`branchList`、`loadBranchList` 從 R-6 移到 `useBranchPanel`；`handleCreateBranch` 改由 App 傳入 `rootId`；新增 `closeBranches(ids)`、`resetBranches()` 取代主對話直接呼叫分支的 setter。原因：原切法兩個 Hook 互相依賴（分支要讀 `messages`，主對話要改分支狀態）。改後 `useBranchPanel` 不依賴主對話，`useMainChat` 透過參數呼叫它。
   - 兩處 `react-hooks/set-state-in-effect`（R-2 的 G2-6 effect、R-6 的側欄 effect）：程式沒有改，是檔案變小後 lint 才分析到；加了附理由的 `eslint-disable-next-line`，記在 B19。
 - 測試的限制：主對話「切換對話停止寫入」有兩層保護（`shouldStop` 與寫入時再檢查）。只拿掉其中一層時 8 條都通過，因為假後端一次送完整段回覆；兩層都拿掉時第 6 條失敗。
-- 尚未做：使用者瀏覽器清單（桌面與手機）；`refactor/app-hooks` 未合併。
+- 瀏覽器驗收（2026-11-16）：使用者跑完清單（桌面與手機），通過。
+- 尚未做：`refactor/app-hooks`（疊在 `test/e2e`、`chore/ci` 之上）未合併。
