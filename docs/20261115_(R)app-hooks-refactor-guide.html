@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拆分 App.jsx：自訂 Hook 教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · R（重構）</span>
+    <h1>拆分 App.jsx：自訂 Hook</h1>
+    <p><code>App.jsx</code> 有 1,139 行，送訊息、串流、分支、額度、模型選單全在一個元件裡。這份教學說明怎麼用自訂 Hook 把它拆開，以及為什麼要一小步一小步做。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>現況與問題</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>數字</th><th>意思</th></tr>
+        <tr><td>1,139 行</td><td>一個檔案裡塞了六種不同的工作</td></tr>
+        <tr><td>約 30 個 <code>useState</code></td><td>任何一個改變都可能牽動其他地方</td></tr>
+        <tr><td>5 個幾乎一樣的「讀串流」迴圈</td><td>送訊息、重新生成、分支送訊息、分支重新生成、續讀。修一個 bug 要記得改五個地方</td></tr>
+      </table>
+    </div>
+    <p>症狀：之後每加一個前端功能（例如時間軸 T1、幽靈分支 E5），都要在這 1,139 行裡找位置，而且很難確定沒有影響到別的功能。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：自訂 Hook</h2>
+    <p>Hook 就是 <code>useState</code>、<code>useEffect</code> 這些以 <code>use</code> 開頭的函式。<b>自訂 Hook</b> 是你自己寫的、以 <code>use</code> 開頭、裡面再呼叫其他 Hook 的函式。它讓你把「一組相關的狀態加上操作它們的程式」搬到另一個檔案。</p>
+    <pre><code><span class="cm">// 示意，實際程式由 implementer 撰寫</span>
+<span class="cm">// 拆之前：全部寫在 App 裡</span>
+function App() {
+  const [presets, setPresets] = useState([]);
+  const [defaultModel, setDefaultModel] = useState(null);
+  useEffect(() =&gt; { apiFetch('/api/model-options').then(...) }, [openrouterConnected]);
+  ...
+}
+
+<span class="cm">// 拆之後：搬到 useModelOptions.js</span>
+export function useModelOptions(openrouterConnected) {
+  const [presets, setPresets] = useState([]);
+  const [defaultModel, setDefaultModel] = useState(null);
+  useEffect(() =&gt; { ... }, [openrouterConnected]);
+  return { presets, defaultModel, ... };       <span class="cm">// 把外面需要的東西交出去</span>
+}
+
+function App() {
+  const { presets, defaultModel, ... } = useModelOptions(openrouterConnected);
+  ...
+}</code></pre>
+    <div class="table-wrap">
+      <table>
+        <tr><th>常見誤解</th><th>實際情況</th></tr>
+        <tr><td>拆出去之後狀態就「共用」了</td><td>不會。每個呼叫 Hook 的元件各自有一份狀態，和寫在元件裡完全一樣</td></tr>
+        <tr><td>Hook 是一種元件</td><td>不是。它不畫畫面，只回傳資料與函式；畫面仍由 App 與子元件負責</td></tr>
+        <tr><td>拆了會變慢</td><td>不會。React 執行起來和原本寫在 App 裡是一樣的</td></tr>
+      </table>
+    </div>
+    <div class="warn"><b>Hook 的規則照舊：</b>只能在元件或其他 Hook 的最上層呼叫，不能放在 <code>if</code> 或迴圈裡。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：重構的紀律</h2>
+    <p><b>重構</b>是「改寫程式的結構，但使用者看到的行為完全不變」。業界做法有三條：</p>
+    <ol>
+      <li><b>先有測試。</b>上一步做的六條 E2E 測試就是為了這個：每拆一步就跑一次，馬上知道有沒有弄壞。</li>
+      <li><b>一次只做一件事。</b>一個 commit 只搬一塊，不順便修 bug、不順便改功能。出問題時只要退回一個 commit。</li>
+      <li><b>搬移和改寫分開。</b>「把程式原封不動搬到另一個檔案」風險很低；「把五份很像的程式合成一份」是改寫，風險高。兩種不放在同一步。</li>
+    </ol>
+    <div class="tip"><b>拆的時候發現 bug 怎麼辦？</b>記進 <code>BUGS.md</code>，照原樣搬過去，之後另開一步修。重構那一步只負責「行為不變」。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>要拆成哪幾塊</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>新檔案</th><th>內容</th><th>種類</th><th>風險</th></tr>
+        <tr><td><code>quotaErrors.js</code></td><td>額度錯誤的判斷與文字、輸入長度上限</td><td>搬移（純函式，沒有 React）</td><td>低</td></tr>
+        <tr><td><code>hooks/useModelOptions.js</code></td><td>模型清單、預設模型、自訂模型開關</td><td>搬移</td><td>低</td></tr>
+        <tr><td><code>readTextStream.js</code></td><td>五個讀串流迴圈合成一個函式</td><td><b>改寫</b></td><td>高</td></tr>
+        <tr><td><code>hooks/useBranchPanel.js</code></td><td>分支面板的狀態、開分支、分支送訊息與重新生成</td><td>搬移</td><td>中</td></tr>
+        <tr><td><code>hooks/useMainChat.js</code></td><td>主對話的訊息、送出、重新生成、載入、續讀</td><td>搬移</td><td>中高（和分支互相呼叫）</td></tr>
+      </table>
+    </div>
+    <p>側欄（改名、刪除、排序）與樹狀圖視窗比較單純，這一輪先留在 <code>App.jsx</code>。預估拆完 <code>App.jsx</code> 剩約 300–400 行，主要是把各個 Hook 接起來、交給子元件。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>最難的一步：合併五個讀串流迴圈</h2>
+    <p>五個迴圈的骨架一樣，差在三個地方：</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>差異</th><th>主對話（送出、重新生成、續讀）</th><th>分支（送出、重新生成）</th></tr>
+        <tr><td>切到別的對話時停止</td><td>有（讀之前、讀之後各檢查一次）</td><td>沒有（寫回指定的分支，不受切換影響）</td></tr>
+        <tr><td>文字寫到哪裡</td><td>最後一則，或指定 id 的那則</td><td>指定分支裡的最後一則或指定 id 的那則</td></tr>
+        <tr><td>需要知道「有沒有完整讀完」</td><td>重新生成需要（讀完才重抓分支高亮）</td><td>不需要</td></tr>
+      </table>
+    </div>
+    <p>所以共用函式只負責「讀」，差異由呼叫的人傳進來：</p>
+    <pre><code><span class="cm">// 示意，實際程式由 implementer 撰寫</span>
+const { finished } = await readTextStream(response, {
+  shouldStop: () =&gt; activeRootIdRef.current !== convId,   <span class="cm">// 分支不傳 → 永不停止</span>
+  onText: (text) =&gt; setMessages(prev =&gt; 寫進對的那一則),  <span class="cm">// 每收到一段就呼叫，text 是目前累積的全文</span>
+});</code></pre>
+    <div class="warn"><b>為什麼這步前要先補測試：</b>現有六條 E2E 涵蓋主對話送出、重新生成、分支送出、切換對話，但沒有涵蓋<b>分支重新生成</b>和<b>編輯最後一則訊息</b>。這兩條路徑也會改到，所以先各補一條測試。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>順便處理：讓測試更穩</h2>
+    <p>上一輪的測試有兩個定位方式比較脆弱：</p>
+    <ul>
+      <li>送出按鈕沒有文字也沒有 <code>aria-label</code>，測試只能找「輸入框後面的第一個按鈕」。</li>
+      <li>主對話訊息區靠 CSS class 找，哪天改樣式測試就壞。</li>
+    </ul>
+    <p>提議在第一步加 <code>aria-label="送出"</code>（螢幕閱讀器使用者也受益）與 <code>data-testid="message-list"</code>（對使用者沒有任何影響），再把測試改用它們。這是拆分前唯一會改到產品畫面元素的地方，畫面看起來不變。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>怎麼驗收</h2>
+    <ul>
+      <li>每一步：<code>npm run build</code> 成功、<code>npm run test:e2e</code> 全部通過、只改到該步列出的檔案。</li>
+      <li>每一步：<code>App.jsx</code> 行數比上一步少（補測試那步除外）。</li>
+      <li>全部做完後：你在瀏覽器照一份清單走一次（桌面與手機寬度），因為 E2E 沒有涵蓋手機版、選字建立分支、登入與 OpenRouter 連結。</li>
+    </ul>
+    <p class="muted">完整的可執行指令在 <code>PLAN_v2.md</code>「R 規格與驗收」。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>提議</th><th>狀態</th></tr>
+        <tr><td>1</td><td>做在哪個分支</td><td><code>refactor/app-hooks</code>，從 <code>test/e2e</code> 開出（要用到 E2E 測試）</td><td>2026-11-15 確認</td></tr>
+        <tr><td>2</td><td>拆成幾步、什麼順序</td><td>第 4 節的五塊，加上第 0 步（測試定位）與補測試，共七步，由低風險到高風險</td><td>2026-11-15 確認</td></tr>
+        <tr><td>3</td><td>要不要加 <code>aria-label</code>／<code>data-testid</code></td><td>要。業界標準是測試用穩定的屬性定位，不依賴樣式</td><td>2026-11-15 確認</td></tr>
+        <tr><td>4</td><td>合併讀串流前要不要先補測試</td><td>要，補兩條：分支重新生成、編輯最後一則 user 訊息</td><td>2026-11-15 確認</td></tr>
+        <tr><td>5</td><td>每一步都停下來等你在瀏覽器驗嗎</td><td>不用。每步由 E2E＋build 把關、主代理讀過改動；全部做完再請你跑一次瀏覽器清單。理由：重構不改畫面，每步的自動測試比人工重驗更快、更不會漏</td><td>2026-11-15 確認</td></tr>
+        <tr><td>6</td><td>拆的過程發現 bug</td><td>照原樣搬，記進 <code>BUGS.md</code>，之後另開一步修</td><td>2026-11-15 確認</td></tr>
+        <tr><td>7</td><td>側欄改名／刪除、樹狀圖要不要一起拆</td><td>這一輪不拆，留在 <code>App.jsx</code></td><td>2026-11-15 確認</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>R-0</td><td>送出按鈕 <code>aria-label</code>、訊息區 <code>data-testid</code>，測試改用它們</td><td>完成（e7c8e3b）</td></tr>
+        <tr><td>R-1</td><td><code>quotaErrors.js</code></td><td>完成（8d56694），App.jsx 1,139 → 1,087 行</td></tr>
+        <tr><td>R-2</td><td><code>hooks/useModelOptions.js</code></td><td>完成（e63562c），→ 1,038 行。搬過去後 lint 才報出一段既有程式的問題，照決策 #6 不改行為，加附理由的停用註解並記進 BUGS B19</td></tr>
+        <tr><td>R-3</td><td>補兩條 E2E：分支重新生成、編輯最後一則</td><td>完成（dd6e44f），E2E 從 6 條變 8 條</td></tr>
+        <tr><td>R-4</td><td><code>readTextStream.js</code>，五個迴圈改用它</td><td>完成（26c8943），→ 976 行。故意把主對話的兩層「切換就停止」保護一起拿掉，第 6 條會失敗；只拿掉一層時另一層仍擋得住，測試分不出來</td></tr>
+        <tr><td>R-5</td><td><code>hooks/useBranchPanel.js</code></td><td>完成（82066fa、323fe9f），→ 630 行。切法調整：分支清單也放進這個 Hook，建立分支由 App 傳入對話 id，避免兩個 Hook 互相依賴（見下方說明）</td></tr>
+        <tr><td>R-6</td><td><code>hooks/useMainChat.js</code></td><td>完成（80c671b），→ 266 行。同 R-2，側欄一段沒搬動的程式在檔案變小後被 lint 報出，處理方式相同</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">11</span>實作時的調整：避免兩個 Hook 互相依賴</h2>
+    <p>原本的切法是「分支 Hook 管分支面板，主對話 Hook 管訊息與分支清單」。實際交辦前檢查相依方向時發現它們互相需要對方：</p>
+    <ul>
+      <li>建立分支要知道目前對話的 id（在主對話的 <code>messages</code> 裡）。</li>
+      <li>主對話重新生成後，要關掉被幽靈化的分支 tab（在分支 Hook 的狀態裡）。</li>
+    </ul>
+    <p>兩個 Hook 在同一個元件裡依序呼叫，先呼叫的那個拿不到後呼叫的那個的值。解法是讓依賴只往一個方向：</p>
+    <pre><code><span class="cm">// 示意</span>
+const branch = useBranchPanel({ model, user, ... });               <span class="cm">// 不需要 messages</span>
+const chat = useMainChat({ ..., loadBranchList: branch.loadBranchList,
+                                closeBranches: branch.closeBranches });
+&lt;MessageList onCreateBranch={(...args) =&gt; branch.handleCreateBranch(chat.messages[0]?.id, ...args)} /&gt;</code></pre>
+    <p>需要對方資料的地方，改成「呼叫時由 App 傳進去」或「呼叫對方提供的函式」，而不是直接讀對方的狀態。這是拆 Hook 時常用的做法。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>練習</h2>
+    <ol>
+      <li>兩個元件都呼叫 <code>useModelOptions()</code>，它們看到的 <code>presets</code> 是同一份嗎？</li>
+      <li>為什麼「合併五個迴圈」要和「搬到 Hook」分成不同步驟？</li>
+      <li>分支的讀串流為什麼不需要「切到別的對話就停止」？</li>
+      <li>拆完之後 E2E 全過，還有哪些地方需要你在瀏覽器親自看？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-15</p>
+
+</div>
+</body>
+</html>

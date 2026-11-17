@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CI 與可從零建立的 migration 教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · CI</span>
+    <h1>CI：每次 push 自動跑測試</h1>
+    <p>9 支 harness 現在要記得手動跑。這份教學說明怎麼讓 GitHub 在每次 push 時替你跑，以及為什麼要先修 baseline migration。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>現況與問題</h2>
+    <ul>
+      <li>後端有 9 支 harness，前端有 <code>npm run build</code>，但都要人記得跑。忘了跑，壞掉的程式就直接進 <code>main</code>。</li>
+      <li>臨時資料庫要靠複製本機的 <code>chat_db</code> 才建得出來（<code>pg_dump -s chat_db | psql g2_tmp</code>）。換一台乾淨的機器就沒有東西可以複製。</li>
+    </ul>
+    <div class="warn"><b>第二點是 CI 的前提：</b>GitHub 的機器每次都是全新的，上面沒有 <code>chat_db</code>。資料庫必須能從零建出來。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：CI 與 GitHub Actions</h2>
+    <p>CI（持續整合）就是「每次程式有變動，由機器自動檢查一遍」。GitHub Actions 是 GitHub 內建的 CI：你在 repo 放一個設定檔，GitHub 就在事件發生時開一台臨時的 Linux 機器照著做。</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>名詞</th><th>意思</th><th>這個專案</th></tr>
+        <tr><td>workflow</td><td>一份設定檔，放在 <code>.github/workflows/</code></td><td><code>ci.yml</code></td></tr>
+        <tr><td>trigger（<code>on</code>）</td><td>什麼事件要啟動</td><td>任何分支的 push、對 <code>main</code> 的 PR</td></tr>
+        <tr><td>job</td><td>一台機器上的一組工作，job 之間互不影響、同時跑</td><td><code>backend</code>、<code>frontend</code></td></tr>
+        <tr><td>step</td><td>job 裡依序執行的一個指令</td><td>安裝、migration、跑 harness</td></tr>
+        <tr><td>service container</td><td>job 旁邊另外開的容器，例如資料庫</td><td>PostgreSQL（和本機同一個映像檔）</td></tr>
+      </table>
+    </div>
+    <p>判斷成功或失敗的方式很單純：任何一個 step 的指令結束碼不是 0，整個 job 就是紅色。9 支 harness 失敗時都會以結束碼 1 結束，所以不用改 harness 的判斷邏輯。</p>
+    <div class="tip"><b>紅色不會自動擋下合併。</b>要擋，得另外在 GitHub 設定 branch protection。第一版先不設，只讓你在 commit 旁邊看到綠勾或紅叉。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：migration 要能從零重建資料庫</h2>
+    <p>Alembic 的 migration 是一條鏈：從第一支（baseline）依序執行到最新一支，就該得到目前的資料庫結構。</p>
+    <p><b>baseline 是什麼：</b>這條鏈的第一支，也就是起點。每個資料庫自己記著「我執行到第幾支」（<code>alembic_version</code> 表）。專案做到一半才導入 Alembic 時，通常會放一支 baseline 表示「從目前的狀態開始記錄」。</p>
+    <p>這個專案的 baseline 是空的。導入 Alembic 時 <code>message</code>、<code>freemodelscache</code> 兩張表已經存在（當時由 <code>create_all</code> 建立），所以 baseline 只是標記「從這裡開始」，沒有寫建表。結果第二支之後的 migration 一遇到 <code>message</code> 就失敗：</p>
+    <pre><code>$ createdb ci_tmp
+$ POSTGRES_DB=ci_tmp uv run alembic upgrade head
+<span class="cm"># 建 branch 表時要參照 message(id)，但 message 不存在</span>
+sqlalchemy.exc.ProgrammingError: relation "message" does not exist</code></pre>
+    <p>影響不只 CI：哪天要在新機器重建環境（搬主機、災難復原、新的開發機），也只能靠舊資料庫的備份。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>修法一：baseline 補上建表</h2>
+    <p>在 baseline 補上那兩張表「導入 Alembic 當時」的樣子，並且只在表不存在時才建：</p>
+    <pre><code><span class="cm"># 示意，實際程式由 implementer 撰寫</span>
+def upgrade():
+    existing = 目前資料庫裡的表名
+    if 'message' not in existing:
+        op.create_table('message', ...)          <span class="cm"># 2026-10-20 當時的欄位，含 session_id</span>
+    if 'freemodelscache' not in existing:
+        op.create_table('freemodelscache', ...)</code></pre>
+    <div class="table-wrap">
+      <table>
+        <tr><th>疑問</th><th>回答</th></tr>
+        <tr><td>會不會動到正式站或本機的 <code>chat_db</code>？</td><td>不會。它們早就記錄「baseline 已執行」，Alembic 不會重跑已執行的 migration。</td></tr>
+        <tr><td>為什麼要寫「當時」的欄位，不是現在的？</td><td>後面的 migration 會再加欄位、刪 <code>session_id</code>。baseline 寫成現在的樣子，後面就會重複加欄位而失敗。</td></tr>
+        <tr><td>為什麼還要判斷表存不存在？</td><td>保險。萬一有資料庫是用 <code>create_all</code> 建好、還沒 stamp 就執行 upgrade，不會因為表已存在而失敗。</td></tr>
+        <tr><td>改已經執行過的 migration 可以嗎？</td><td>一般不該改。這裡可以，是因為它對已執行過的資料庫完全沒有作用，只影響「從零開始」這條以前走不通的路。</td></tr>
+      </table>
+    </div>
+    <div class="tip"><b>已試做確認：</b>在空資料庫 <code>alembic upgrade head</code> 跑到最新版，<code>pg_dump -s</code> 與 <code>chat_db</code> 比對完全相同（<code>freemodelscache.id</code> 要加 <code>autoincrement=False</code>，否則會多一個 sequence），<code>quota_harness</code> 在上面 <code>ALL PASS</code>。試做的修改已還原，沒有 commit。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>修法二：一支腳本跑完 9 支 harness</h2>
+    <p>新增 <code>backend/dev/run_harnesses.sh</code>，依序跑 9 支，每支印一行 <code>PASS</code> 或 <code>FAIL</code>，有任何一支失敗就以結束碼 1 結束。本機和 CI 都呼叫同一支，兩邊跑的東西才不會慢慢走樣。</p>
+    <pre><code><span class="cm"># 本機用法（示意）</span>
+cd backend && POSTGRES_DB=g2_tmp ./dev/run_harnesses.sh
+PASS auth
+PASS quota
+...
+PASS openrouter_connect
+9 passed, 0 failed</code></pre>
+    <p>資料庫名稱固定用 <code>g2_tmp</code>：<code>openrouter_connect_harness</code> 只肯在這個名稱上執行，<code>guest_harness</code> 拒絕 <code>chat_db</code>。這兩道防呆保留不動。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>修法三：workflow 設定檔</h2>
+    <pre><code><span class="cm"># .github/workflows/ci.yml（示意，實際檔案由 implementer 撰寫）</span>
+on:
+  push:                       <span class="cm"># 任何分支</span>
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16      <span class="cm"># 和 docker-compose 同一個映像檔</span>
+        env: { POSTGRES_USER: ci, POSTGRES_PASSWORD: ci, POSTGRES_DB: g2_tmp }
+        ports: ["5432:5432"]
+        options: 等資料庫 healthy 才開始
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/g2_tmp
+    steps:
+      - checkout
+      - 安裝 uv，uv sync --frozen
+      - uv run alembic upgrade head        <span class="cm"># 順便驗證 migration 鏈能從零跑完</span>
+      - ./dev/run_harnesses.sh
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - checkout
+      - 安裝 Node 20（和 frontend/Dockerfile 一致）
+      - npm ci
+      - npm run build</code></pre>
+    <ul>
+      <li><b>沒有任何真的金鑰。</b>harness 用假模型、假登入，CI 裡的資料庫帳密 <code>ci/ci</code> 只存在那台臨時機器上，跑完就銷毀。不需要在 GitHub 設定 secrets。</li>
+      <li><b>不會花模型的錢。</b>harness 從來不呼叫真的 Gemini 或 OpenRouter。</li>
+      <li><b>時間：</b>本機 9 支合計約 1.5 分鐘，加上安裝，預估每次 3 分鐘內。</li>
+    </ul>
+    <div class="tip"><b>實際結果（2026-11-15）：</b>下面這個疑慮成真了兩次，都靠在 workflow 補假的環境變數解決，沒有改程式。假值只是讓程式能啟動，harness 不會用它連到真的服務。</div>
+    <div class="warn"><b>還沒驗證的一點：</b>本機跑 harness 時會讀到 repo 根目錄的 <code>.env</code>，CI 上沒有這個檔。可能有模組在缺少某些環境變數（例如 OAuth 的 client id）時行為不同。第一次 CI 執行會告訴我們；若失敗，在 workflow 補上假的值即可，不動程式。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>怎麼驗收</h2>
+    <ul>
+      <li>空資料庫 <code>alembic upgrade head</code> 成功，<code>alembic current</code> 印出 <code>a7b8c9d0e1f2 (head)</code>。</li>
+      <li>該資料庫的 <code>pg_dump -s</code> 與 <code>chat_db</code> 比對沒有差異。</li>
+      <li><code>chat_db</code> 的 <code>alembic current</code> 不變，資料表不變。</li>
+      <li><code>./dev/run_harnesses.sh</code> 印出 9 行 <code>PASS</code>，結束碼 0。</li>
+      <li>push 之後，GitHub 的 Actions 頁面上 <code>backend</code>、<code>frontend</code> 兩個 job 都是綠勾。</li>
+      <li>故意弄壞一支 harness 的斷言再 push 到測試分支 → <code>backend</code> 變紅；還原後變綠。</li>
+    </ul>
+    <p class="muted">完整的可執行指令在 <code>PLAN_v2.md</code>「CI 規格與驗收」。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+        <tr><td>1</td><td>做在哪個分支</td><td>從 <code>main</code> 開 <code>chore/ci</code></td><td>2026-11-15 確認</td></tr>
+        <tr><td>2</td><td>前端關卡要不要含 lint</td><td>第一版只跑 build；現有 3 個 lint error 記在 BUGS B19，修完再加進 CI</td><td>2026-11-15 確認</td></tr>
+        <tr><td>3</td><td>CI 的資料庫怎麼建</td><td>修 baseline，CI 跑 <code>alembic upgrade head</code></td><td>2026-11-15 確認</td></tr>
+        <tr><td>4</td><td>什麼時候觸發</td><td>任何分支的 push，加上對 <code>main</code> 的 PR。業界標準是每個 PR 與 <code>main</code> 的 push；這裡多跑分支 push，因為分支常做很久才開 PR</td><td>2026-11-15 確認</td></tr>
+        <tr><td>5</td><td>CI 的資料庫名稱</td><td>用 <code>g2_tmp</code>，harness 的防呆不改。原則是 CI 只用用完即丟的資料庫</td><td>2026-11-15 確認</td></tr>
+        <tr><td>6</td><td>紅色要不要擋合併（branch protection）</td><td>業界標準是要擋。第一版先不設，CI 連續約十次穩定後再到 GitHub 開啟，避免被偶發失敗卡住</td><td>2026-11-15 確認</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>CI-1</td><td>baseline migration 補上 <code>message</code>、<code>freemodelscache</code> 建表</td><td>完成（744b773），2026-11-15 驗收：空資料庫 <code>alembic upgrade head</code> 到最新版，結構與 <code>chat_db</code> 完全相同；<code>chat_db</code> 沒有重跑任何 migration</td></tr>
+        <tr><td>CI-2</td><td><code>backend/dev/run_harnesses.sh</code></td><td>完成（21145ed），2026-11-15 驗收：<code>g2_tmp</code> 上 <code>9 passed, 0 failed</code>、結束碼 0；換成別的資料庫名稱時 <code>FAIL openrouter_connect</code>、結束碼 1</td></tr>
+        <tr><td>CI-3</td><td><code>.github/workflows/ci.yml</code>（backend、frontend 兩個 job）</td><td>完成（53c45d2、93b24bb、cd6c462）。前兩次執行 <code>backend</code> 失敗：CI 沒有 <code>.env</code>，缺 <code>OPENROUTER_API_KEY</code>（import 就報錯）與 <code>GOOGLE_API_KEY</code>（<code>quota_harness</code> 第 11 案），在 workflow 補假值後第三次兩個 job 都通過（2026-11-15）。第二次的失敗也證明一支 harness 失敗時 CI 會變紅</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>練習</h2>
+    <ol>
+      <li>baseline 改了之後，正式站下次執行 <code>alembic upgrade head</code> 會不會重建 <code>message</code> 表？為什麼？</li>
+      <li>baseline 的 <code>message</code> 為什麼要包含現在已經不存在的 <code>session_id</code> 欄位？</li>
+      <li>CI 的資料庫密碼直接寫在設定檔裡，為什麼沒有安全問題？如果是正式站的密碼呢？</li>
+      <li>CI 全綠，能不能保證畫面沒壞？它擋得住哪一類問題，擋不住哪一類？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-15</p>
+
+</div>
+</body>
+</html>

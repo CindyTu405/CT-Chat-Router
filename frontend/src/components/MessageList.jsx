@@ -597,6 +597,7 @@ function MessageList({
         onPointerOut={handleBranchPointerOut}
         onPointerLeave={clearBranchHover}
         className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6"
+        data-testid="message-list"
       >
         {messages.length === 0 ? (
           emptyState !== undefined ? (

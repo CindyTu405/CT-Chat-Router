@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>前端自動測試（Playwright）教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · E2E</span>
+    <h1>前端自動測試：讓機器替你點畫面</h1>
+    <p>現在每次改前端，都要你照清單在瀏覽器手動重驗。這份教學說明怎麼把最常重驗的幾項交給機器，以及為什麼要在拆 <code>App.jsx</code> 之前做。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>現況與問題</h2>
+    <ul>
+      <li>後端有 9 支 harness 和 CI 保護。前端只有 <code>npm run build</code>，它只能確認「程式碼編得過」，不能確認「按了送出之後畫面是對的」。</li>
+      <li><code>App.jsx</code> 有 1,139 行。送訊息、重新生成、分支送訊息、分支重新生成是四份很像的程式，各自帶著容易漏掉的保護：</li>
+    </ul>
+    <div class="table-wrap">
+      <table>
+        <tr><th>保護</th><th>沒有它會怎樣</th></tr>
+        <tr><td>回覆還沒到就切到別的對話 → 停止寫入</td><td>A 對話的回覆出現在 B 對話裡</td></tr>
+        <tr><td>額度用完被後端擋下 → 撤掉剛顯示的訊息，文字放回輸入框</td><td>畫面留著一則其實沒送出的訊息，使用者打的字不見了</td></tr>
+        <tr><td>第二則訊息要接在上一則 AI 回覆後面（<code>parent_id</code>）</td><td>對話串斷掉，重新整理後訊息順序錯亂</td></tr>
+      </table>
+    </div>
+    <div class="warn"><b>這些正是重構時最容易弄壞、手動測試最容易漏的地方。</b>所以順序改成：先有測試，再拆 <code>App.jsx</code>。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：測試分三層</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>層級</th><th>測什麼</th><th>這個專案</th></tr>
+        <tr><td>單元測試</td><td>單一函式：給輸入，檢查輸出</td><td>目前沒有</td></tr>
+        <tr><td>整合測試</td><td>幾個部分接在一起：真的伺服器加真的資料庫</td><td>後端 9 支 harness</td></tr>
+        <tr><td>端對端測試（E2E）</td><td>從使用者的角度：開瀏覽器、點按鈕、看畫面</td><td>這次要加的</td></tr>
+      </table>
+    </div>
+    <p>E2E 最接近真實使用，但最慢也最容易因為小改版而失敗，所以業界的做法是<b>只挑最重要的幾條路徑</b>，不追求全部涵蓋。這次寫六條。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>概念：Playwright</h2>
+    <p>Playwright 是微軟維護的瀏覽器自動化工具，目前業界最常用的 E2E 選擇之一。它會開一個真的 Chromium（沒有視窗，在背景跑），照腳本操作，再檢查畫面。</p>
+    <pre><code><span class="cm">// 示意，實際程式由 implementer 撰寫</span>
+test('送訊息', async ({ page }) =&gt; {
+  await page.goto('/');
+  await page.getByRole('textbox').fill('你好');        <span class="cm">// 在輸入框打字</span>
+  await page.getByRole('button', { name: '送出' }).click();
+  await expect(page.getByText('這是假的回覆')).toBeVisible();   <span class="cm">// 檢查畫面</span>
+});</code></pre>
+    <p>它會自動等待：元素還沒出現時會重試幾秒，不用自己寫「等 1 秒」。這是它比舊工具穩定的主要原因。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>概念：假的後端（mock）</h2>
+    <p>測試前端時不啟動真的後端。Playwright 可以攔截瀏覽器發出的請求，直接回一份寫好的假資料：</p>
+    <pre><code><span class="cm">// 示意</span>
+await page.route('**/__api/chat', route =&gt; route.fulfill({
+  status: 200,
+  headers: { 'X-Message-Id': 'ai-1', 'X-User-Message-Id': 'u-1' },
+  body: '這是假的回覆',
+}));</code></pre>
+    <div class="table-wrap">
+      <table>
+        <tr><th>為什麼這樣做</th><th>說明</th></tr>
+        <tr><td>快、穩定</td><td>不需要資料庫、不需要登入、不呼叫模型，每次結果都一樣</td></tr>
+        <tr><td>能製造難重現的狀況</td><td>想測「額度用完」，直接讓假後端回 429；想測「回覆很慢」，讓它晚 1.5 秒才回</td></tr>
+        <tr><td>能檢查前端送了什麼</td><td>攔到請求時可以看它的內容，例如 <code>parent_id</code> 對不對</td></tr>
+      </table>
+    </div>
+    <div class="warn"><b>代價：</b>假後端回什麼是我們自己寫的，所以測不到後端的錯，也測不到「前端和後端對格式的理解不一致」。後端的對錯仍由 harness 負責。另外假回應是一次送完，不是真的一段一段串流。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>要寫的六條測試</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>操作</th><th>檢查</th></tr>
+        <tr><td>1</td><td>未登入打開網站，按「開始使用」</td><td>進入聊天畫面</td></tr>
+        <tr><td>2</td><td>送兩則訊息</td><td>訊息與回覆出現、輸入框清空；第二則的 <code>parent_id</code> 是第一則回覆的 id</td></tr>
+        <tr><td>3</td><td>送訊息，後端回「額度用完」</td><td>提示文字正確；訊息被撤掉；文字回到輸入框</td></tr>
+        <tr><td>4</td><td>開啟既有對話，按重新生成</td><td>發出正確的請求；舊回覆被新回覆取代</td></tr>
+        <tr><td>5</td><td>點分支高亮，在分支面板送訊息</td><td>請求帶正確的 <code>branch_id</code> 與 <code>parent_id</code>；回覆出現在面板</td></tr>
+        <tr><td>6</td><td>送出後回覆還沒到就切到另一個對話</td><td>另一個對話裡沒有那則訊息和回覆</td></tr>
+      </table>
+    </div>
+    <p>第一版只測桌面寬度。手機版、選取文字建立分支、Google／GitHub 登入、OpenRouter 連結先不做，仍照原本的瀏覽器清單人工驗。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>怎麼確認測試本身是有用的</h2>
+    <p>一條永遠通過的測試沒有價值。驗收時會故意把保護拿掉，確認測試會變紅：</p>
+    <ul>
+      <li>刪掉「文字放回輸入框」那一行 → 第 3 條必須失敗。</li>
+      <li>拿掉「切換對話就不寫入」的判斷 → 第 6 條必須失敗。</li>
+    </ul>
+    <p>確認後還原。這個做法叫變異測試（mutation testing）的手動版：弄壞程式，看測試抓不抓得到。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>怎麼跑</h2>
+    <pre><code>cd frontend
+npm run test:e2e              <span class="cm"># 跑全部，約幾十秒</span>
+npx playwright test --ui      <span class="cm"># 開圖形介面，看每一步的畫面（除錯用）</span></code></pre>
+    <p>CI 會多一個 <code>e2e</code> job，每次 push 自動跑。失敗時會把當時的畫面截圖和操作紀錄存成附件，可以在 GitHub 的執行頁面下載來看。</p>
+    <div class="tip"><b>第一次在本機跑</b>需要下載 Playwright 的 Chromium（約 170 MB，只下載一次，放在使用者的快取資料夾，不進 repo）。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>決策表</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>問題</th><th>決定</th><th>狀態</th></tr>
+        <tr><td>1</td><td>先加測試還是先拆 <code>App.jsx</code></td><td>先加測試。業界標準是重構前先用測試固定現有行為</td><td>2026-11-15 確認</td></tr>
+        <tr><td>2</td><td>用什麼工具</td><td>Playwright。業界主流、內建自動等待與請求攔截、官方支援 GitHub Actions。另一個常見選擇 Cypress 功能相近，沒有明顯理由選它</td><td>2026-11-15 確認</td></tr>
+        <tr><td>3</td><td>後端用真的還是假的</td><td>假的（攔截請求）。真後端要資料庫、假登入、假模型，設定成本高，而且後端已有 harness</td><td>2026-11-15 確認</td></tr>
+        <tr><td>4</td><td>測幾條</td><td>六條，都是拆 <code>App.jsx</code> 會動到的路徑。之後每修一個前端 bug 再補一條</td><td>2026-11-15 確認</td></tr>
+        <tr><td>5</td><td>要不要為了測試改產品程式</td><td>原則上不改。真的找不到穩定的定位方式時，才加 <code>data-testid</code> 屬性（對使用者沒有影響）</td><td>2026-11-15 確認</td></tr>
+        <tr><td>6</td><td>做在哪個分支</td><td><code>test/e2e</code>，從 <code>chore/ci</code> 開出（要改 CI 設定檔）</td><td>2026-11-15 確認</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">9</span>實作紀錄</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>任務</th><th>內容</th><th>記錄</th></tr>
+        <tr><td>E2E-1</td><td>安裝 Playwright、設定檔、假後端工具、第 1–2 條測試</td><td>完成（ce3695f）。假後端工具在 <code>frontend/e2e/mockApi.js</code>：沒被測試定義的 API 請求會讓測試失敗</td></tr>
+        <tr><td>E2E-2</td><td>第 3–6 條測試</td><td>完成（98f0cae），2026-11-15 驗收：六條連跑三次都通過（約 10 秒）；故意弄壞三處保護，對應的測試都變紅，還原後通過；沒有改產品程式</td></tr>
+        <tr><td>E2E-3</td><td>CI 新增 <code>e2e</code> job</td><td>完成（603ad21），2026-11-15 第一次執行 <code>backend</code>、<code>frontend</code>、<code>e2e</code> 三個 job 都通過；<code>e2e</code> 約 50 秒</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">10</span>練習</h2>
+    <ol>
+      <li>六條測試全過，能不能保證後端的額度計算是對的？為什麼？</li>
+      <li>為什麼第 6 條要讓假後端「晚 1.5 秒才回」，而不是立刻回？</li>
+      <li>如果把按鈕文字從「送出」改成「傳送」，哪些測試可能會失敗？這算不算測試抓到 bug？</li>
+      <li>為什麼驗收時要故意把程式弄壞一次？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-15</p>
+
+</div>
+</body>
+</html>

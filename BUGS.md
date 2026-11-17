@@ -206,3 +206,29 @@
 - **線索**：使用者測了其他對話都正常，只有這則超長標題的對話會發生（2026-11-09），很可能和長標題有關
 - **待查**：是否和捲到最底、分支面板開啟時的版面變動（捲動或 resize 事件清掉選取狀態）有關；長標題是否相關；桌面與手機是否都會發生
 - **狀態**：未修（使用者：先記錄，不急）
+
+## B19：前端 `eslint` 有 3 個 error、1 個 warning
+
+- **發生於**：`frontend/src/components/BranchListOverlay.jsx:28`（`react-refresh/only-export-components`：元件檔同時匯出非元件）、`ModelSelector.jsx:93`、`:104`（`react-hooks/set-state-in-effect`：effect 裡同步呼叫 setState）、`UserMessageEditor.jsx:50`（warning：用不到的 `eslint-disable`）
+- **發現於**：規劃 CI 時執行 lint（2026-11-15）
+- **重現**：`cd frontend && npx eslint .` → `4 problems (3 errors, 1 warning)`
+- **預期**：`npx eslint .` 沒有 error
+- **影響**：不影響 build 與執行。但 lint 不乾淨就無法放進 CI 當關卡
+- **修正方向**：逐項修掉後，把 `npm run lint` 加進 CI 的 `frontend` job
+- **補充（2026-11-15，R-2）**：`App.jsx` 的 (G2-6)「不允許自訂模型就切回預設」effect 也是 `react-hooks/set-state-in-effect`。在 `App.jsx` 裡 lint 沒報（規則沒分析到那麼大的元件），搬到 `hooks/useModelOptions.js` 後才被報出來；R-2 只搬移、不改行為，所以加了附理由的 `eslint-disable-next-line`。修 B19 時一併處理（可改成在 `allowCustom` 變成 false 的那個地方直接切回，不經過 effect）
+- **補充（2026-11-16，R-6）**：`App.jsx` 側欄的 `useEffect(() => { fetchHistory(); }, [fetchHistory])` 也被報 `react-hooks/set-state-in-effect`。這段沒有搬動，是 `App.jsx` 從 630 行變成約 260 行後規則才分析到。`fetchHistory` 的 `setHistoryList` 在 `await` 之後，不是同步更新，屬於誤判；加了附理由的 `eslint-disable-next-line`。修 B19 時一併檢視
+- **狀態**：未修（CI 第一版只跑 build，使用者 2026-11-15 決定）
+
+## B20：連結 OpenRouter 後選 gemini 模型一律「⚠️ 生成中斷，請稍後再試」
+
+- **發生於**：`backend/main.py` 的 `run_generation`（約 265 行）：`api_key is not None`（已連結者）時，不分模型一律走 `openrouter_chat_stream(..., model, api_key=...)`，模型 id 原樣送出
+- **發現於**：使用者回報本機 `gemini-2.5-flash-lite` 一直失敗（2026-11-16）
+- **原因**：模型選單的預設模型是直連 Google 用的 id `gemini-2.5-flash-lite`。OpenRouter 的 id 要帶供應商前綴（`google/gemini-2.5-flash-lite`），不認得沒有前綴的名稱，回錯誤 → `UserKeyUpstreamError` → 固定提示「生成中斷」。2026-11-16 查 `https://openrouter.ai/api/v1/models`：`gemini-2.5-flash-lite` 不存在、`google/gemini-2.5-flash-lite` 存在。不是 Google 的問題
+- **證據**：本機 `chat_db` 的 `openrouter_credential` 有 1 列（清單 B 測試時連結的）；`docker compose logs api` 有「🌐 路由至 OpenRouter，使用模型: gemini-2.5-flash-lite」緊接「(G2-9) 使用者 OpenRouter 生成失敗」
+- **重現**：登入 → 連結 OpenRouter → 用預設模型 `gemini-2.5-flash-lite` 送一則訊息
+- **影響**：所有已連結 OpenRouter 的使用者，只要選了 `gemini*` 的預設／preset 模型就無法使用。正式站若預設模型也是 `gemini*`，同樣會發生（未查正式站設定）
+- **暫時避開**：側欄「中斷連結」，或在自訂模型輸入 `google/gemini-2.5-flash-lite`
+- **修正方向（待使用者確認）**：(a) 已連結者走 OpenRouter 時，`gemini-` 開頭的 id 自動補成 `google/gemini-...`；(b) 已連結者選 `gemini*` 時改走直連 Gemini（會改用平台的 Google 金鑰與額度，與 G2 決策「連結者用自己的金鑰」衝突）；(c) 已連結者的模型選單只列 OpenRouter 的 id
+- **決定（2026-11-16，使用者）**：正式站已確定不直連 Google，`gemini*` 只在本機用環境變數保留，方便快速測試。所以這個問題只會在「本機帳號連結了 OpenRouter 又選 gemini」時出現，不修程式。本機要測 gemini 時用未連結的帳號或訪客，或先中斷連結
+- **待確認**：VM 的 `.env` 有設定 `ALLOWED_MODELS`（`docker-compose.prod.yml` 沒設時的預設值是 `gemini*`）
+- **狀態**：不修（只影響本機的測試設定）

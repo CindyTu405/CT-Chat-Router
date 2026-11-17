@@ -64,6 +64,8 @@ function ChatInput({
         />
         <button 
           onClick={onSend}
+          aria-label="送出"
+          title="送出"
           disabled={isLoading || !input.trim() || noModel}
           className="absolute right-2 bottom-[15px] p-2.5 bg-[#51A8DD] hover:bg-[#3D9AD1] rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md shadow-[#51A8DD]/25"
         >

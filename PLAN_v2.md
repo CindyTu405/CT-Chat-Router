@@ -1038,3 +1038,183 @@ OpenRouter 授權流程已對照官方文件 `https://openrouter.ai/docs/use-cas
 - VM 的 `.env` 要新增 `CREDENTIAL_ENCRYPTION_KEY`（產生方式寫進教學文件）；遺失或更換會讓所有連結失效（使用者重新連結即可，對話不受影響）。
 - 現有登入用戶的每日額度會從 20 變 10。
 - 正式站在 V1-6 之前仍在 Cloudflare Access 後面。
+
+## CI 規格與驗收（2026-11-15 定稿）
+
+**來源**：2026-11-15 可維護性檢視的第 1 項。教學：`docs/20261115_(CI)github-actions-guide.html`。分支 `chore/ci`（從 `main` 09ccc3f）。
+
+**已確認（2026-11-15）**：從 `main` 開分支；前端第一版只跑 build（lint 見 BUGS B19）；修 baseline，CI 跑 `alembic upgrade head`。
+**已確認（2026-11-15，使用者說「開始」）**：觸發條件（任何分支 push＋對 `main` 的 PR）；CI 資料庫名稱用 `g2_tmp`；第一版不設 branch protection，CI 連續約十次穩定後再開啟。
+
+**後續項目**：順序於 2026-11-15 調整為「前端自動測試（E2E，見下一節）→ 拆 `App.jsx` → 拆 `main.py`」。拆 `App.jsx`、拆 `main.py` 尚未確認細節，不動工，各自先寫教學。
+
+| 編號 | 任務 | 狀態 |
+|---|---|---|
+| CI-1 | baseline migration（`e4d003f1bea8`）補上 `message`、`freemodelscache` 建表 | ✅ 744b773（主代理 2026-11-15 重跑驗收 1–5：空資料庫 upgrade 到 head、結構與 `chat_db` 相同、`chat_db` 不受影響） |
+| CI-2 | `backend/dev/run_harnesses.sh`：依序跑 9 支 harness | ✅ 21145ed（`g2_tmp`：`9 passed, 0 failed`、rc=0；`ci_tmp`：`FAIL openrouter_connect`、rc=1） |
+| CI-3 | `.github/workflows/ci.yml`：`backend`、`frontend` 兩個 job | ✅ 53c45d2＋93b24bb＋cd6c462（2026-11-15 第三次執行 `backend`、`frontend` 都通過，run 43721022907；`backend` 約 1 分 45 秒、`frontend` 約 16 秒） |
+
+### CI-1 規格
+- 只改 `backend/alembic/versions/e4d003f1bea8_baseline.py` 的 `upgrade()`；`downgrade()` 維持 `pass`；不改其他 migration、不改 `models.py`。
+- 用 `sa.inspect(op.get_bind()).get_table_names()` 判斷，表不存在才建。
+- `message`（欄位依序）：`content` String NOT NULL、`role` String NOT NULL、`model_used` String NULL、`created_at` DateTime NOT NULL、`session_id` String NOT NULL、`parent_id` Uuid NULL、`title` String NULL、`has_branch` Boolean NOT NULL、`id` Uuid NOT NULL；外鍵 `parent_id → message.id` 命名 `message_parent_id_fkey`；主鍵命名 `message_pkey`。
+- `freemodelscache`：`id` Integer NOT NULL `autoincrement=False`、`models_json` String NOT NULL、`updated_at` DateTime NOT NULL；主鍵命名 `freemodelscache_pkey`。
+- 主代理 2026-11-15 試做過這個內容（已還原）：結構與 `chat_db` 完全相同。
+
+**驗收（先 `docker compose ps` 確認 `chat_db` running）**
+1. `docker compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --if-exists ci_tmp; createdb -U "$POSTGRES_USER" ci_tmp'` → `cd backend && POSTGRES_DB=ci_tmp uv run alembic upgrade head 2>&1 | tail -1` → 含 `f1a2b3c4d5e6 -> a7b8c9d0e1f2`。
+2. `POSTGRES_DB=ci_tmp uv run alembic current 2>&1 | tail -1` → `a7b8c9d0e1f2 (head)`。
+3. `diff <(docker compose exec -T db sh -c 'pg_dump -s -U "$POSTGRES_USER" ci_tmp' | grep -v '^--' | grep -v restrict) <(docker compose exec -T db sh -c 'pg_dump -s -U "$POSTGRES_USER" "$POSTGRES_DB"' | grep -v '^--' | grep -v restrict)` → 沒有輸出。
+4. `cd backend && uv run alembic current 2>&1 | tail -1`（指向 `chat_db`）→ 仍是 `a7b8c9d0e1f2 (head)`；`uv run alembic upgrade head` 不執行任何 migration。
+5. `POSTGRES_DB=ci_tmp SQL_ECHO=false uv run python dev/quota_harness.py 2>&1 | tail -1` → `ALL PASS`。
+6. 結束後 `dropdb ci_tmp`。
+
+### CI-2 規格
+- 新檔 `backend/dev/run_harnesses.sh`（可執行，`bash`，LF）。在 `backend/` 下執行。
+- 依序跑：`auth`、`quota`、`regenerate`、`branch_entries`、`model_options`、`pool`、`limits`、`guest`、`openrouter_connect`（`dev/<name>_harness.py`，`uv run python`，`SQL_ECHO=false`）。
+- 每支輸出寫到暫存檔；通過印 `PASS <name>`，失敗印 `FAIL <name>` 並印出該支輸出的最後 40 行（濾掉含 `sqlalchemy` 的行）。一支失敗不中斷，繼續跑完。
+- 最後印 `<n> passed, <m> failed`；有失敗就 `exit 1`。
+- 不設定資料庫：沿用呼叫者的 `DATABASE_URL` 或 `POSTGRES_DB`。不改任何 harness。
+
+**驗收**
+1. `cd backend && POSTGRES_DB=g2_tmp ./dev/run_harnesses.sh; echo "rc=$?"` → 9 行 `PASS`、`9 passed, 0 failed`、`rc=0`（`g2_tmp` 不存在就照 CI-1 驗收 1 的方式建一個並 `alembic upgrade head`）。
+2. `cd backend && POSTGRES_DB=ci_tmp ./dev/run_harnesses.sh; echo "rc=$?"` → `FAIL openrouter_connect`（防呆拒絕非 `g2_tmp`）、其餘 8 行 `PASS`、`rc=1`。
+
+### CI-3 規格
+- 新檔 `.github/workflows/ci.yml`，名稱 `CI`。觸發：`push`（所有分支）、`pull_request`（`branches: [main]`）。`permissions: contents: read`。同一分支新的 push 取消舊的執行（`concurrency`）。
+- job `backend`：`ubuntu-latest`；service `postgres` 用 `pgvector/pgvector:pg16`，`POSTGRES_USER=ci`、`POSTGRES_PASSWORD=ci`、`POSTGRES_DB=g2_tmp`，port 5432，`pg_isready` healthcheck；job env `DATABASE_URL=postgresql://ci:ci@localhost:5432/g2_tmp`、`SQL_ECHO=false`；steps：checkout → `astral-sh/setup-uv` → `uv sync --frozen`（`working-directory: backend`）→ `uv run alembic upgrade head` → `./dev/run_harnesses.sh`。`timeout-minutes: 15`。
+- job `frontend`：`ubuntu-latest`；`actions/setup-node` Node 20，npm 快取；`working-directory: frontend`；`npm ci` → `npm run build`。`timeout-minutes: 10`。
+- 不使用任何 GitHub secret；不呼叫真的模型。
+- 安全：第三方 action 釘在主要版本 tag；workflow 不接受 PR 來的輸入拼進 shell。
+
+**驗收**
+1. `python3 -c "import yaml,sys; d=yaml.safe_load(open('.github/workflows/ci.yml')); print(sorted(d['jobs']))"` → `['backend', 'frontend']`。
+2. `grep -c 'secrets\.' .github/workflows/ci.yml` → `0`。
+3. push `chore/ci` 後，GitHub Actions 頁面該次執行 `backend`、`frontend` 都是綠勾（本機沒有 `gh`，由使用者或主代理用瀏覽器看）。
+4. 若 `backend` 因缺少環境變數失敗（本機有 `.env`、CI 沒有；尚未驗證），在 workflow 的 job env 補假值，不改程式；另開一個 `fix: (CI-3)` commit。
+5. 測試分支上故意讓一支 harness 失敗並 push → `backend` 紅叉；還原後綠勾。測試分支用完刪除。
+
+**CI 上線紀錄（2026-11-15）**
+- 第一次執行 `backend` 失敗：CI 沒有 `.env`，`openrouter_llm.py` 在 import 時建立 client，缺 `OPENROUTER_API_KEY` 直接報錯 → `93b24bb` 補假值（另補四個 OAuth client 假值）。
+- 第二次執行 `backend` 失敗：`quota_harness` 第 11 案直接呼叫 `gemini_chat_stream`，缺 `GOOGLE_API_KEY` → `cd6c462` 補假值。這次失敗同時證明驗收 5：一支 harness 失敗時 `backend` 會是紅叉，所以沒有另外做故意弄壞的測試。
+- 第三次執行兩個 job 都通過。workflow 裡的值全是假值，沒有使用 GitHub secret。
+- 查 CI 失敗的方法：公開 API 看得到每個 step 的結果（`https://api.github.com/repos/CindyTu405/CT-Chat-Router/actions/runs?branch=<分支>`），但 log 要登入。本機重現方式：`git worktree add` 一份乾淨 checkout（沒有 `.env`）＋`docker run` 一個 `pgvector/pgvector:pg16`（`ci/ci/g2_tmp`，另一個 port）＋設定與 workflow 相同的環境變數，再跑 `alembic upgrade head` 與 `./dev/run_harnesses.sh`。用完移除容器與 worktree。
+- 尚未做：合併回 `main`；branch protection（決定：CI 連續約十次穩定後再開）；lint 進 CI（BUGS B19）。
+- 已知提醒：GitHub 顯示 `actions/checkout@v4`、`astral-sh/setup-uv@v6` 以 Node 20 為目標的棄用警告，目前不影響執行。
+
+## E2E 規格與驗收：前端自動測試（2026-11-15 定稿，使用者已說「開始」）
+
+**來源**：可維護性檢視第 3 項。2026-11-15 使用者同意提到拆 `App.jsx` 之前：`App.jsx` 的送出、重新生成、分支送出、分支重新生成是四份複製的串流迴圈，各有防呆（切換對話停止寫入、額度被擋還原畫面），重構前先用測試把現有行為固定下來。教學：`docs/20261115_(E2E)playwright-guide.html`。分支 `test/e2e`（從 `chore/ci` d271fb1，因為要改 `ci.yml`）。
+
+**做法**
+- 工具：Playwright（`@playwright/test`，只裝 Chromium）。測試檔在 `frontend/e2e/`。
+- 不啟動後端、不需要資料庫：測試用 `page.route` 攔截前端發出的 API 請求並回假資料。Playwright 自己啟動 Vite 開發伺服器，設 `VITE_API_URL=http://localhost:5199/__api`（與頁面同源，避免 CORS；`__api` 之下全部攔截，沒被測試定義的路徑回 404 並讓測試失敗）。
+- 第一版只測桌面寬度（1280×800）。手機寬度、文字選取建立分支、OAuth 與 OpenRouter 連結不在這一版。
+- 原則上不改 `src/`。找不到穩定的選擇器時，implementer 停下來回報要加哪個 `data-testid`，由主代理決定。
+- 限制（寫進教學）：假回應是一次送完，不是逐段串流；測不到後端的錯。後端仍由 harness 負責。
+
+| 編號 | 任務 | 狀態 |
+|---|---|---|
+| E2E-1 | 安裝 Playwright、`playwright.config.js`、`e2e/mockApi.js`、`npm run test:e2e`、第 1–2 條測試 | ✅ ce3695f |
+| E2E-2 | 第 3–6 條測試 | ✅ 98f0cae |
+| E2E-3 | `ci.yml` 新增 `e2e` job | ✅ 603ad21（2026-11-15 run 43728630882：`backend`、`frontend`、`e2e` 都通過；`e2e` 約 50 秒，含安裝瀏覽器） |
+
+**六條測試（各自獨立，互不依賴）**
+1. 首頁進入試用：`/auth/me` 回 401 → 看到首頁的「開始使用」→ 點擊 → 發出 `POST /auth/guest` → 進入聊天畫面（看得到訊息輸入框）。
+2. 送訊息：以訪客身分進入 → 輸入「你好」送出 → 畫面出現 user 訊息「你好」與假回覆文字；輸入框清空；`POST /chat` 的 body 是 `{message:"你好", model:<model-options 的 default_model>, parent_id:null}`。再送第二則 → body 的 `parent_id` 等於第一次回應 header `X-Message-Id` 的值。
+3. 額度被擋：`POST /chat` 回 429 `{"detail":{"code":"daily_quota_exceeded"}}` → 跳出的對話框文字是「今日試用額度已用完。登入並連結 OpenRouter 就能繼續使用」；畫面上沒有剛送出的 user 訊息；輸入框的內容還原成剛才輸入的文字。
+4. 載入對話並重新生成：側欄有一個對話 → 點擊 → 顯示歷史的 user 與 AI 訊息 → 對最後一則 AI 按重新生成 → 發出 `POST /messages/<該則 id>/regenerate`，body 含 `model`；該則內容變成新的假回覆，舊內容消失。
+5. 分支送訊息：載入的對話帶一條尚無訊息的分支（`root_message_id` 為 null，`anchor_text` 是 AI 回覆裡的一段文字）→ 點擊高亮或底部入口 → 右側面板開啟，輸入框已帶入 `anchor_text` → 送出 → `POST /chat` 的 body `branch_id` 等於該分支 id、`parent_id` 等於 `anchor_message_id`；面板內出現假回覆。
+6. 回覆未到就切換對話：側欄有 A、B 兩個對話，開啟 A → 送出一則訊息，`POST /chat` 延遲 1.5 秒才回應 → 回應前點擊 B → 等回應送達後，B 的畫面上沒有那則送出的文字，也沒有假回覆文字。
+
+**驗收**
+1. `cd frontend && npm run test:e2e 2>&1 | tail -3` → 含 `6 passed`，結束碼 0。
+2. 連跑三次都 `6 passed`（確認不是偶爾才過）。
+3. 測試真的擋得住：暫時刪掉 `App.jsx` 額度還原那行 `setInput(userMessageContent);` → 第 3 條失敗；還原後通過。暫時把 `handleSend` 的 `activeRootIdRef.current = sendConvId;` 之後的三處 `!== sendConvId` 判斷拿掉其中寫入畫面的那一處 → 第 6 條失敗；還原。驗完 `git status` 乾淨。
+4. `git diff d271fb1 --stat -- frontend/src` → 沒有輸出（沒改產品程式）；若有加 `data-testid`，逐一列在回報裡。
+5. `cd frontend && npm run build` 成功。
+6. push 後 GitHub Actions 的 `backend`、`frontend`、`e2e` 三個 job 都通過。
+
+**E2E 驗收紀錄（2026-11-15，主代理重跑）**
+- `npm run test:e2e` 連跑三次都 `6 passed`（約 10 秒）；`npm run build` 成功；`git diff d271fb1 --stat -- frontend/src` 沒有輸出（沒改產品程式，也沒加 `data-testid`）。
+- 故意弄壞三次（每次驗完 `git checkout` 還原）：刪掉額度還原的 `setInput(userMessageContent);` → 第 3 條失敗；把 `handleSend` 裡六處 `activeRootIdRef.current` 與 `sendConvId` 的比較改成恆通過 → 第 6 條失敗；額度被擋時不撤掉樂觀訊息 → 第 3 條失敗。其餘 5 條每次都通過。
+- 規格外新增：`frontend/e2e/locators.js`（共用定位器）；`eslint.config.js` 多一段讓 `playwright.config.js` 與 `e2e/` 使用 Node 全域變數；`frontend/.gitignore` 加 Playwright 的輸出資料夾。
+- 與規格不同：第 5 條點的是內文高亮（`title="開啟分支：重點片語"`），不是底部入口，因為底部入口只給 `precise === false` 的分支。
+- 已知的脆弱點（拆 `App.jsx` 時一併處理，需要改 `src/`，尚未確認）：送出按鈕沒有文字也沒有 `aria-label`，測試靠「輸入框後面的第一個按鈕」找；主對話訊息區靠 class `div.overflow-y-auto.p-4` 找。建議分別加 `aria-label="送出"` 與 `data-testid="message-list"`。
+- 本機執行需要先 `cd frontend && npx playwright install chromium`（一次）。
+
+## 交接（2026-11-15，可維護性改進，下一個工作階段從這裡接手）
+
+**來源**：2026-11-15 可維護性檢視的四項建議。使用者第一次接觸 CI 與自動測試，決策時要用「業界怎麼做、為什麼、不這樣做會怎樣」說明並給明確建議，不要丟一串選項。
+
+**進度**
+| 項目 | 狀態 | 分支 |
+|---|---|---|
+| 1 CI（CI-1～CI-3） | ✅ 完成，已 push，未合併 | `chore/ci`（從 `main` 09ccc3f） |
+| 3 前端自動測試（E2E-1～E2E-3） | ✅ 完成，已 push，未合併 | `test/e2e`（疊在 `chore/ci` 上，b5232e6） |
+| 2 拆 `App.jsx` | ⏳ 下一項。教學與規格都還沒寫，細節未確認 | 建議從 `test/e2e` 開新分支 |
+| 4 拆 `main.py` | ⏳ 未開始，細節未確認 | — |
+
+**待使用者決定（都還沒問到答案）**
+- `chore/ci`、`test/e2e` 何時合併回 `main`。使用者 2026-11-15 對 `chore/ci` 說「先不合併」。合併前 `main` 沒有 CI 保護。兩個分支是疊起來的，合併 `test/e2e` 就包含 `chore/ci`。
+- 上一輪結尾問了「要接著寫拆 `App.jsx` 的教學嗎」，使用者尚未回答。
+- branch protection：決定是 CI 連續約十次穩定後再開（GitHub 網頁設定，不改程式）。目前綠的次數：`chore/ci` 1 次、`test/e2e` 1 次。
+
+**現在的檢查關卡（CLAUDE.md 的「Frontend-only edits ... no UI test suite」已過時，尚未更新，更新前先問使用者）**
+- 後端：`cd backend && POSTGRES_DB=g2_tmp ./dev/run_harnesses.sh` → `9 passed, 0 failed`。
+- 前端：`cd frontend && npm run build`、`npm run test:e2e` → `6 passed`（第一次要 `npx playwright install chromium`）。
+- CI 狀態不用登入就查得到（repo 是公開的，本機沒有 `gh`）：`curl -s 'https://api.github.com/repos/CindyTu405/CT-Chat-Router/actions/runs?branch=<分支>&per_page=1'`，再查 `/actions/runs/<id>/jobs`。log 需要登入；失敗時照「CI 上線紀錄」的方法在本機重現。
+- 空資料庫現在可以直接 `alembic upgrade head`（CI-1），不必再 `pg_dump -s chat_db` 加 `alembic stamp`。
+
+**拆 `App.jsx` 的分析（主代理讀完全檔後的草案，尚未與使用者討論，不是已確認的規格）**
+- `App.jsx` 1,139 行。四份很像的串流程式：`handleSend`（341–489）、`handleRetry`（495–605）、`sendBranchMessage`（742–854）、`retryBranchMessage`（859–939）。主對話兩份有 `activeRootIdRef`／`streamAbortRef` 的切換對話保護，分支兩份沒有（用 `updateBranch` 寫回指定分支）。
+- 建議由低風險到高風險，一步一個 commit，每步跑 `npm run test:e2e`＋`npm run build`：
+  1. `quotaErrors.js`：搬出 `QuotaError`、`throwIfQuotaError`、`MAX_*` 常數（純函式，不含 React）。
+  2. `useModelOptions`：`model`、`presets`、`defaultModel`、`optionsLoading`、`allowCustom`、`freeModels`、`freeModelsLoading`、`isCustomModel` 與三個 effect（146–185）；輸入只有 `openrouterConnected`。
+  3. 讀串流的共用函式（四個 `while (true)` 迴圈）：這步是改寫不是搬移，風險最高的一步之一，先確認 E2E 第 2、4、5、6 條涵蓋。
+  4. `useBranchPanel`：`branches`、`activeBranchId`、`branchPanelOpen`、`updateBranch`、`loadBranchMessages`、`openBranchFromHighlight`、`sendBranchMessage`、`retryBranchMessage`。
+  5. 主對話的送出／重新生成／載入／續讀（`messages`、`input`、`isLoading`、捲動還原）。與分支狀態互相呼叫（`handleRetry` 會 `setBranches`、`handleDeleteChat` 會清分支），最後做。
+- 順便處理（要改 `src/`，未確認）：送出按鈕加 `aria-label="送出"`、訊息區加 `data-testid="message-list"`，再把 `frontend/e2e/locators.js` 改用它們。
+- E2E 目前沒涵蓋、拆之前值得考慮補的：分支重新生成（`retryBranchMessage`）、編輯最後一則 user（F9）、續讀（`resumeGeneration`）、刪除與改名對話、手機寬度。
+- 照規則：新概念（custom hook）要先寫教學 `docs/YYYYMMDD_(<id>)...-guide.html`，獨立 `docs:` commit，使用者說「開始」才交給 implementer；程式一律由 implementer 寫。
+
+**這個工作階段留下的環境狀態**
+- 臨時資料庫 `ci_spike`、`ci_tmp` 已刪；`g2_tmp` 保留（harness 用）。臨時容器與臨時 worktree 已移除。本機前後端開發伺服器沒有啟動。
+- 工作目錄在 `test/e2e`；`.claude/settings.json` 有使用者自己的未 commit 修改（`model`），不要動。
+- BUGS B19（前端 lint 3 個 error）未修；修完後把 `npm run lint` 加進 CI 的 `frontend` job。
+- implementer 的 commit 尾註有的是 Haiku、有的是 Fable（任務文字寫死造成），不影響內容。
+
+## R 規格與驗收：拆分 `App.jsx`（2026-11-15 定稿，使用者已說「開始」）
+
+**來源**：可維護性檢視第 2 項。教學：`docs/20261115_(R)app-hooks-refactor-guide.html`。分支 `refactor/app-hooks`（從 `test/e2e` b896b2d）。
+**原則**：行為完全不變。一步一個 commit；搬移與改寫分開；拆的過程發現的 bug 照原樣搬、記進 `BUGS.md`，不在這一輪修。側欄（改名、刪除、排序）與樹狀圖視窗這一輪不拆。
+**已確認（2026-11-15）**：教學決策表 #1–#7 全部照提議。
+
+**每一步共同的驗收**（在 `frontend/` 下）
+- `npm run build` 成功；`npm run test:e2e` 全部通過（R-3 之前 6 條，之後 8 條），連跑兩次。
+- `npx eslint <這一步新增或修改的檔案>` 沒有 error（B19 既有的三個 error 不算）。
+- `git show --stat HEAD` 只列出該步的檔案。
+- `wc -l src/App.jsx` 比上一步少（R-0、R-3 除外）。
+- 主代理讀過 diff：搬移的步驟除了 import／export 與參數傳遞，程式內容逐行相同。
+
+| 編號 | 任務 | 檔案 | 狀態 |
+|---|---|---|---|
+| R-0 | `ChatInput` 送出按鈕加 `aria-label="送出"`；`MessageList` 捲動容器加 `data-testid="message-list"`；`e2e/locators.js` 改用 `getByRole('button', { name: '送出' })` 與 `getByTestId('message-list')`（分支面板也用同一組件，主對話取 `.first()`、分支送出鈕改在面板內找） | `ChatInput.jsx`、`MessageList.jsx`、`e2e/locators.js` | ✅ e7c8e3b |
+| R-1 | `src/quotaErrors.js`：搬出 `QuotaError`、`throwIfQuotaError`、`MAX_MESSAGE_CHARS`、`MAX_TITLE_CHARS`、`MAX_ANCHOR_TEXT_CHARS`、`TOO_LONG_MSG`（App.jsx 12–64 行） | `quotaErrors.js`、`App.jsx` | ✅ 8d56694（App.jsx 1,139 → 1,087） |
+| R-2 | `src/hooks/useModelOptions.js`：`model`、`presets`、`defaultModel`、`optionsLoading`、`allowCustom`、`freeModels`、`freeModelsLoading`、`isCustomModel` 與 146–185 行三個 effect；參數 `openrouterConnected`；回傳上述值與 `setModel`、`setIsCustomModel` | `hooks/useModelOptions.js`、`App.jsx` | ✅ e63562c（→ 1,038；G2-6 effect 加了附理由的 lint 停用註解，見 B19） |
+| R-3 | 補 E2E 第 7 條「分支重新生成」（分支面板裡最後一則 AI 按重新生成 → `POST /messages/<id>/regenerate`，面板內內容被取代）與第 8 條「編輯最後一則 user」（主對話編輯後送出 → body 含 `content`；後端回 429 時 user 訊息還原成舊內容）。不改 `src/` | `e2e/*` | ✅ dd6e44f（E2E 6 → 8 條） |
+| R-4 | `src/readTextStream.js`：`readTextStream(response, { shouldStop, onText }) → { finished, text }`。讀之前與讀之後各檢查一次 `shouldStop`，停止時 `reader.cancel()`；每段解碼後以累積全文呼叫 `onText`。五處迴圈（`resumeGeneration`、`handleSend`、`handleRetry`、`sendBranchMessage`、`retryBranchMessage`）改用它；分支兩處不傳 `shouldStop`。迴圈外的 header 處理、錯誤處理、finally 不動 | `readTextStream.js`、`App.jsx` | ✅ 26c8943（→ 976；突變檢查：主對話兩層保護一起拿掉時第 6 條失敗） |
+| R-5 | `src/hooks/useBranchPanel.js`：`branches`、`activeBranchId`、`branchPanelOpen`、`updateBranch`、`loadBranchMessages`、`openBranchFromHighlight`、`handleCreateBranch`、`sendBranchMessage`、`retryBranchMessage`。需要的外部值（`model`、`user`、`branchList`、`loadBranchList`、`fetchHistory`、`messages`、`refreshAfterGeneration`）用參數傳入 | `hooks/useBranchPanel.js`、`App.jsx` | ✅ 82066fa＋323fe9f（→ 630；切法調整，見下方） |
+| R-6 | `src/hooks/useMainChat.js`：`messages`、`input`、`isLoading`、`branchList`、閱讀位置與捲動還原、`activeRootIdRef`、`streamAbortRef`、`loadBranchList`、`loadChat`、`resumeGeneration`、`startNewChat`、`handleSend`、`handleRetry`。`handleRetry` 關閉被幽靈化分支 tab 用 R-5 交出的 `setBranches`／`setActiveBranchId`。實作前主代理先確認兩個 Hook 的相依方向，必要時調整 R-5／R-6 的切法再交辦 | `hooks/useMainChat.js`、`App.jsx` | ✅ 80c671b（→ 266；側欄 effect 加了附理由的 lint 停用註解，見 B19） |
+
+**R-6 之後**：使用者在瀏覽器跑一次清單（桌面 ≥ 768 與手機 < 768），清單在 R-6 完成時貼在訊息裡。E2E 沒有涵蓋的：手機版、選取文字建立分支、續讀（生成中切走再切回）、刪除與改名對話、樹狀圖、登入與 OpenRouter 連結。
+
+**R 實作紀錄（2026-11-16，主代理逐步驗收）**
+- 結果：`App.jsx` 1,139 → 266 行。新檔：`quotaErrors.js`（54）、`readTextStream.js`（23）、`hooks/useModelOptions.js`（62）、`hooks/useBranchPanel.js`（368）、`hooks/useMainChat.js`（374）。
+- 每步：主代理重跑 `npm run build`、`npm run test:e2e`（連跑兩次以上）、lint；搬移步驟用「去縮排、排序後比對」確認只多了 import／export／Hook 呼叫等包裝行，其餘逐行相同。
+- 與規格不同：
+  - R-5 切法調整：`branchList`、`loadBranchList` 從 R-6 移到 `useBranchPanel`；`handleCreateBranch` 改由 App 傳入 `rootId`；新增 `closeBranches(ids)`、`resetBranches()` 取代主對話直接呼叫分支的 setter。原因：原切法兩個 Hook 互相依賴（分支要讀 `messages`，主對話要改分支狀態）。改後 `useBranchPanel` 不依賴主對話，`useMainChat` 透過參數呼叫它。
+  - 兩處 `react-hooks/set-state-in-effect`（R-2 的 G2-6 effect、R-6 的側欄 effect）：程式沒有改，是檔案變小後 lint 才分析到；加了附理由的 `eslint-disable-next-line`，記在 B19。
+- 測試的限制：主對話「切換對話停止寫入」有兩層保護（`shouldStop` 與寫入時再檢查）。只拿掉其中一層時 8 條都通過，因為假後端一次送完整段回覆；兩層都拿掉時第 6 條失敗。
+- 瀏覽器驗收（2026-11-16）：使用者跑完清單（桌面與手機），通過。
+- 尚未做：`refactor/app-hooks`（疊在 `test/e2e`、`chore/ci` 之上）未合併。
