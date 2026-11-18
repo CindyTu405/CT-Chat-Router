@@ -862,8 +862,13 @@ H3／H4 驗收：教學第 6 節「驗收指令」。
 | L1-6 | 桌面改三欄：左側白底標語欄 34%、分支面板 28%；`BranchPanel` 加 `defaultWidthPercent`／`persistWidth`（未傳時行為不變） | `LandingPage.jsx`、`BranchPanel.jsx` | build／eslint 通過；`grep -n "DEFAULT_PANEL_PERCENT" frontend/src/components/BranchPanel.jsx` 無輸出；瀏覽器清單 |
 | L1-7 | 自動播放點完三個片語；「換一篇」重新播放 | `frontend/src/demo/useDemoAutoplay.js`、`LandingPage.jsx` | build／eslint 通過；瀏覽器清單 |
 | L1-8 | 分支面板開啟時由右往左滑入 | `frontend/src/index.css`、`BranchPanel.jsx` | build／eslint 通過；`grep -l "panel-slide-in" frontend/dist/assets/*.css` 有一個檔案；瀏覽器清單 |
+| L1-9 | 手機：標語區白底、下緣漸層淡出到格線；隱藏標語下方「開始使用」與「換一篇」左側說明文字（2026-11-18） | `LandingPage.jsx` | build／eslint 通過；`npx playwright test e2e/chat.spec.js` 2 passed；瀏覽器 375／1280 |
+| L1-10 | 「隱私權說明」從頂列移到底部說明列句子後面；桌面標語欄改往右漸層淡出、拿掉右側分隔線 | `LandingPage.jsx` | 同上 |
+| L1-11 | 底部說明列改成像輸入框的浮動圓角卡片（左右內縮、往上抬、陰影） | `LandingPage.jsx` | 同上 |
 
 **狀態（2026-11-14）**：L1-1 `5cd50e9`、L1-2 `f1bab28`、L1-3 `c41ca25`、L1-4 `5fa71f6`、L1-5 `6e66bd4`、L1-6 `4ccd82f`、L1-7 `23dbe12`、L1-8 `d19604b`，都在 `feat/landing-guest`，未 push、未合併。指令類驗收（build、eslint、grep）已通過；L1-5 到 L1-8 由使用者在瀏覽器看過後同意 commit。下方瀏覽器清單尚未逐項跑完（Claude 沒有做瀏覽器驗證；第 9 項正式介面回歸與手機版待確認）。第二段（S-U3 訪客模式＋BYOK）已確認的決定見文末「G2」一節。
+
+**狀態（2026-11-18）**：L1-9～L1-11 合在一個 commit `5e543a3`（同一檔案），在 `feat/landing-mobile`，使用者在瀏覽器看過後同意 commit；未 push、未合併。
 
 **瀏覽器驗收清單**（桌面 ≥ 768 與手機 < 768 各做一次）
 1. 未登入打開網站 → 看到首頁（標語、開始使用、一篇範例），不是登入頁。
