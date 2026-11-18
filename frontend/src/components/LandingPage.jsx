@@ -278,9 +278,9 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
         {/* (L1-9) 手機：白底＋底部漸層淡出，pb-6 給淡出留空間。(L1-10) 桌面：md:bg-linear-to-r 改成往右淡出、md:from-75% 白色維持到欄寬 75%，不再有右側分隔線 */}
         <section className="flex-shrink-0 px-4 pt-5 pb-6 text-center bg-linear-to-b from-white from-60% to-transparent md:w-[30%] lg:w-[34%] md:max-w-[600px] md:px-10 lg:px-14 md:py-0 md:flex md:flex-col md:justify-center md:items-start md:text-left md:bg-linear-to-r md:from-75%">
           <h1 className="text-xl md:text-4xl lg:text-5xl md:leading-[1.15] font-semibold tracking-tight text-gray-800">
-            追問細節，<br className="hidden md:block" />不打斷主線
+            追問細節，<br className="hidden md:block" />不打亂主線
           </h1>
-          <p className="mt-1 md:mt-5 text-sm md:text-base lg:text-lg md:leading-relaxed md:max-w-[20em] text-gray-500">選取 AI 回答裡的任何一段，開一條分支繼續問。</p>
+          <p className="mt-1 md:mt-5 text-sm md:text-base lg:text-lg md:leading-relaxed md:max-w-[20em] text-gray-500">選取 AI 回答裡的任何一段文字，開啟分支問額外問題，避免主要對話混亂。</p>
           {/* (L1-9) 手機隱藏標語區的開始按鈕（底部列仍有）；md:block 與原本在 flex 欄中的呈現一致 */}
           <button
             type="button"
@@ -296,7 +296,7 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
           {/* (L1-3) 示範列：位於標語區下方，透明疊在格線上 */}
           {/* (L1-9) 手機只顯示「換一篇」按鈕（靠右、隱藏左側說明文字）；md 以上維持左文字右按鈕 */}
           <div className="flex items-center justify-end md:justify-between gap-3 px-4 md:px-6 pt-2 pb-1 text-xs text-gray-500 flex-shrink-0">
-            <span className="hidden md:block min-w-0 truncate">示範對話 · {article.topic}{'\u3000'}點虛線文字，或選取任何一段，試試開分支</span>
+            <span className="hidden md:block min-w-0 truncate">範例 · {article.topic}{'\u3000'}點虛線文字，或選取以開啟分支</span>
             <button
               type="button"
               onClick={nextArticle}
@@ -324,7 +324,7 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
           <div className="flex items-center justify-between gap-3 mx-3 md:mx-6 mb-3 md:mb-5 mt-1 pl-4 pr-2 py-2 rounded-2xl border border-gray-200 bg-white shadow-sm text-sm text-gray-500 flex-shrink-0">
             {/* (L1-10) 隱私權說明接在句子後面，跟著句子換行，不擠壓「開始使用」按鈕 */}
             <span>
-              這是示範。按「開始使用」就能輸入自己的問題。
+              按「開始使用」即可自行輸入問題。
               <a
                 href="/privacy.html"
                 target="_blank"
