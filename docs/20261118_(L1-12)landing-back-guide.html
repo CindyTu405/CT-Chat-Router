@@ -193,9 +193,9 @@ useEffect(() => {
       <tr><td>誰能回首頁</td><td>只有訪客；登入的使用者沒有入口，<code>popstate</code> 也忽略</td><td>使用者，2026-11-18</td></tr>
       <tr><td>入口位置</td><td>側欄底部「隱私權說明」左邊，同樣的小字底線樣式</td><td>使用者，2026-11-18</td></tr>
       <tr><td>瀏覽器上一頁</td><td>要做，用 <code>pushState</code>／<code>popstate</code>，網址不變</td><td>使用者，2026-11-18</td></tr>
-      <tr><td>回首頁時 App</td><td>保持掛載、只隱藏，回來時對話還在</td><td>提案，待確認</td></tr>
-      <tr><td>回首頁後按「開始使用」</td><td>直接回聊天，不打 <code>/auth/guest</code></td><td>提案，待確認</td></tr>
-      <tr><td>在首頁那筆上重新整理</td><td>留在首頁（讀 <code>history.state</code>）</td><td>提案，待確認</td></tr>
+      <tr><td>回首頁時 App</td><td>保持掛載、只隱藏，回來時對話還在</td><td>使用者，2026-11-18</td></tr>
+      <tr><td>回首頁後按「開始使用」</td><td>直接回聊天，不打 <code>/auth/guest</code></td><td>使用者，2026-11-18</td></tr>
+      <tr><td>在首頁那筆上重新整理</td><td>留在首頁（讀 <code>history.state</code>）</td><td>使用者，2026-11-18</td></tr>
     </table>
     <div class="warn"><b>已知小狀況：</b>訪客登入（OAuth 整頁跳轉）後，歷史裡還留著舊的首頁／聊天紀錄。登入的使用者按上一頁移到這些紀錄時，<code>popstate</code> 被忽略，畫面不變，要多按幾次才會離開網站。影響小，這次不處理。</div>
   </section>
@@ -212,7 +212,12 @@ useEffect(() => {
 
   <section class="card">
     <h2><span class="num">7</span>實作紀錄</h2>
-    <p class="muted">尚未實作。實作後在這裡補 commit 與驗收結果。</p>
+    <table>
+      <tr><th>項目</th><th>結果</th></tr>
+      <tr><td>commit</td><td><code>3e404f6</code>（分支 <code>feat/landing-back</code>），改 <code>AuthGate.jsx</code>、<code>App.jsx</code>、<code>Sidebar.jsx</code>，寫法同第 4 節草稿</td></tr>
+      <tr><td>指令驗收</td><td><code>npm run build</code> 成功；三個檔案 eslint 無錯誤；<code>npx playwright test e2e/chat.spec.js</code> 2 passed</td></tr>
+      <tr><td>瀏覽器清單</td><td>1280 與 375 寬用暫時的 Playwright 腳本（假 API）跑完 7 項全過；使用者在瀏覽器看過後同意 commit。觸控未測。</td></tr>
+    </table>
   </section>
 
   <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-18</p>
