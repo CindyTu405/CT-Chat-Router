@@ -15,7 +15,8 @@ import { apiFetch } from './api';
 // (G2-6) onRequestLogin：訪客按側欄「登入」時呼叫（AuthGate 顯示登入頁覆蓋層）
 // (G2-6) 之後搬移對話與連結 OpenRouter 完成時用來重新讀取 /auth/me（目前尚未使用，見 AuthGate 的 onUserChanged）
 // (G2-10) onUserChanged：重新讀取 /auth/me（AuthGate 的 refreshUser，只更新 user，不會重新掛載 App）
-function App({ user, onRequestLogin, onUserChanged }) {
+// (L1-12) onGoHome：訪客按側欄「回首頁」時呼叫（AuthGate 傳入 history.back()）
+function App({ user, onRequestLogin, onUserChanged, onGoHome }) {
   // 清掉舊版的匿名 session id（已改用登入 cookie），只在掛載時執行一次
   useEffect(() => {
     try { localStorage.removeItem('chat_session_id'); } catch { /* 忽略 */ }
@@ -151,6 +152,7 @@ function App({ user, onRequestLogin, onUserChanged }) {
         user={user}
         onRequestLogin={onRequestLogin}
         onUserChanged={onUserChanged} // (G2-10)
+        onGoHome={onGoHome} // (L1-12)
         sidebarOpen={sidebarOpen}
         activeChatId={messages[0]?.id ?? null}
         historyList={historyList}

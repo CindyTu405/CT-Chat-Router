@@ -134,6 +134,8 @@ function AuthGate() {
   // (G2-10) OpenRouter 連結結果橫幅：只在掛載時讀一次網址（惰性初始化）
   const [openRouterNotice, setOpenRouterNotice] = useState(readOpenRouterNotice);
   const closeOpenRouterNotice = useCallback(() => setOpenRouterNotice(null), []);
+  // (L1-12) 訪客在聊天中回到首頁：首頁蓋在 App 上面，App 只隱藏不卸載（對話、捲動位置保留）
+  const [showLanding, setShowLanding] = useState(false);
 
   // (G2-10) 讀完立刻把 openrouter / openrouter_error 從網址移除（重新整理不會再出現；寫法同 LoginPage 的 auth_error）
   useEffect(() => {
@@ -165,6 +167,8 @@ function AuthGate() {
       setUser(null);
       // (G2-6) 失效後回首頁（不是登入頁）
       setView('landing');
+      // (L1-12) 失效後不再蓋著首頁旗標（user 為 null 時本來就不看它）
+      setShowLanding(false);
     };
     window.addEventListener('auth:unauthorized', onUnauthorized);
     refreshUser();
@@ -174,8 +178,41 @@ function AuthGate() {
     };
   }, [refreshUser]);
 
+  // (L1-12) 訪客進到聊天時，確保歷史裡是「首頁 → 聊天」兩筆，讓瀏覽器的上一頁能回首頁
+  // 網址不變（不傳 URL），只用 history.state 的 ctView 區分；重新整理時若已停在首頁那筆，就留在首頁
+  useEffect(() => {
+    if (!user?.is_guest) return;
+    const cur = window.history.state?.ctView;
+    if (cur === 'landing') {
+      setShowLanding(true);
+    } else if (cur !== 'app') {
+      window.history.replaceState({ ...(window.history.state || {}), ctView: 'landing' }, '');
+      window.history.pushState({ ctView: 'app' }, '');
+    }
+  }, [user?.is_guest]);
+
+  // (L1-12) 上一頁／下一頁：依移到的那一筆的 ctView 決定顯示首頁或聊天；登入的使用者忽略
+  useEffect(() => {
+    const onPop = (e) => {
+      if (!user?.is_guest) return;
+      setShowLanding(e.state?.ctView === 'landing');
+      // 順便關掉登入覆蓋層
+      setView('landing');
+    };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+    };
+  }, [user?.is_guest]);
+
   // (G2-6) 首頁「開始使用」：按下才發試用請求（首頁本身不發請求）；成功後重新讀取 /auth/me 進入聊天
   const startGuest = async () => {
+    // (L1-12) 已是訪客（從聊天回到首頁後再按）：直接回聊天，不打 /auth/guest，不扣試用名額
+    if (user?.is_guest) {
+      window.history.pushState({ ctView: 'app' }, '');
+      setShowLanding(false);
+      return;
+    }
     if (starting) return;
     setStarting(true);
     try {
@@ -231,10 +268,23 @@ function AuthGate() {
     );
   }
   // (G2-6) 訪客在聊天中按「登入」：登入頁以覆蓋層顯示，App 保持掛載（不遺失目前的對話）
+  // (L1-12) 訪客且在首頁那筆：首頁蓋在 App 上面；App 外面的 div 永遠存在，切換時 App 不會重新掛載
+  const showGuestLanding = user.is_guest && showLanding;
   return (
     <>
       {banner}
-      <App key={appKey} user={user} onRequestLogin={() => setView('login')} onUserChanged={refreshUser} />
+      <div className={showGuestLanding ? 'hidden' : undefined}>
+        <App
+          key={appKey}
+          user={user}
+          onRequestLogin={() => setView('login')}
+          onUserChanged={refreshUser}
+          onGoHome={() => window.history.back()}
+        />
+      </div>
+      {showGuestLanding && (
+        <LandingPage onStart={startGuest} onLogin={() => setView('login')} starting={starting} />
+      )}
       {user.is_guest && view === 'login' && (
         <div className="fixed inset-0 z-[100]">
           <LoginPage backLabel="← 返回" onBack={() => setView('landing')} />

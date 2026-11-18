@@ -865,10 +865,20 @@ H3／H4 驗收：教學第 6 節「驗收指令」。
 | L1-9 | 手機：標語區白底、下緣漸層淡出到格線；隱藏標語下方「開始使用」與「換一篇」左側說明文字（2026-11-18） | `LandingPage.jsx` | build／eslint 通過；`npx playwright test e2e/chat.spec.js` 2 passed；瀏覽器 375／1280 |
 | L1-10 | 「隱私權說明」從頂列移到底部說明列句子後面；桌面標語欄改往右漸層淡出、拿掉右側分隔線 | `LandingPage.jsx` | 同上 |
 | L1-11 | 底部說明列改成像輸入框的浮動圓角卡片（左右內縮、往上抬、陰影） | `LandingPage.jsx` | 同上 |
+| L1-12 | 訪客從聊天回首頁：側欄「隱私權說明」左邊加「回首頁」（只有訪客）；瀏覽器上一頁／下一頁在首頁與聊天之間切換（`pushState`／`popstate`，網址不變）；回首頁時 App 隱藏不卸載；已是訪客再按「開始使用」不打 `/auth/guest`。教學：`docs/20261118_(L1-12)landing-back-guide.html` | `AuthGate.jsx`、`App.jsx`、`Sidebar.jsx` | `cd frontend && npm run build` 成功；`npx eslint src/components/AuthGate.jsx src/components/Sidebar.jsx src/App.jsx` 無新增錯誤；`grep -n "pushState\|popstate" frontend/src/components/AuthGate.jsx` 有輸出；`grep -n "回首頁" frontend/src/components/Sidebar.jsx` 有輸出；`npx playwright test e2e/chat.spec.js` 通過；瀏覽器清單 L1-12 |
 
 **狀態（2026-11-14）**：L1-1 `5cd50e9`、L1-2 `f1bab28`、L1-3 `c41ca25`、L1-4 `5fa71f6`、L1-5 `6e66bd4`、L1-6 `4ccd82f`、L1-7 `23dbe12`、L1-8 `d19604b`，都在 `feat/landing-guest`，未 push、未合併。指令類驗收（build、eslint、grep）已通過；L1-5 到 L1-8 由使用者在瀏覽器看過後同意 commit。下方瀏覽器清單尚未逐項跑完（Claude 沒有做瀏覽器驗證；第 9 項正式介面回歸與手機版待確認）。第二段（S-U3 訪客模式＋BYOK）已確認的決定見文末「G2」一節。
 
 **狀態（2026-11-18）**：L1-9～L1-11 合在一個 commit `5e543a3`（同一檔案），在 `feat/landing-mobile`，使用者在瀏覽器看過後同意 commit；未 push、未合併。
+
+**L1-12 瀏覽器清單**（桌面 1280 與手機 375 各一次；狀態 2026-11-18：完成 `3e404f6`，在 `feat/landing-back`，7 項由 Playwright 暫時腳本在 1280／375 跑過、使用者看過後同意 commit；未 push）
+1. 未登入 → 首頁 → 按「開始使用」→ 進聊天；側欄底部「回首頁」在「隱私權說明」左邊。
+2. 按瀏覽器上一頁 → 回到首頁，網址仍是 `/`；按下一頁 → 回到聊天，原本開著的對話還在。
+3. 聊天中按「回首頁」→ 首頁；再按「開始使用」→ 回聊天，Network 面板沒有新的 `POST /auth/guest`。
+4. 訪客在聊天中重新整理 → 還是聊天；按上一頁 → 首頁；再按上一頁 → 離開網站（或回到前一個網站）。
+5. 在首頁（訪客、從聊天回來）重新整理 → 停在首頁。
+6. 登入的使用者：側欄沒有「回首頁」；登出照常回首頁。
+7. 訪客開登入覆蓋層後按上一頁 → 覆蓋層關閉、回首頁。
 
 **瀏覽器驗收清單**（桌面 ≥ 768 與手機 < 768 各做一次）
 1. 未登入打開網站 → 看到首頁（標語、開始使用、一篇範例），不是登入頁。

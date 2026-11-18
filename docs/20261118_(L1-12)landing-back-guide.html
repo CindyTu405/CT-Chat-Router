@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>上一頁回首頁教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · 前端教學 · L1-12</span>
+    <h1>沒有路由，也能按「上一頁」</h1>
+    <p>用 History API（<code>pushState</code>／<code>popstate</code>）讓訪客從聊天回到首頁。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>問題</h2>
+    <p>訪客按「開始使用」後，<code>POST /auth/guest</code> 寫入 cookie，<code>/auth/me</code> 開始回傳訪客資料。<code>AuthGate</code> 的規則是「有 user 就顯示 <code>&lt;App&gt;</code>」，首頁只在 <code>user === null</code> 時出現，所以：</p>
+    <ul>
+      <li>側欄沒有任何回首頁的入口（訪客也沒有登出）。</li>
+      <li>網址一直是 <code>/</code>，瀏覽器的歷史紀錄裡沒有「首頁」和「聊天」兩筆，按「上一頁」會直接離開網站。</li>
+      <li>重新整理還是聊天畫面（cookie 還在）。</li>
+    </ul>
+    <p>登入的使用者不受影響，也不需要回首頁（使用者決定，2026-11-18）。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>概念：瀏覽器的歷史堆疊</h2>
+    <p>每個分頁都有一串「歷史紀錄」（session history），「上一頁／下一頁」就是在這串紀錄裡移動。平常是換網址時瀏覽器自動加一筆。單頁應用（SPA）不換頁，所以要自己用 JavaScript 加：</p>
+    <table>
+      <tr><th>API</th><th>做什麼</th><th>會不會觸發 popstate</th></tr>
+      <tr><td><code>history.pushState(state, '', url)</code></td><td>在目前位置後面<b>新增</b>一筆紀錄並移過去（後面原本的「下一頁」紀錄會被丟掉）</td><td>不會</td></tr>
+      <tr><td><code>history.replaceState(state, '', url)</code></td><td><b>改寫</b>目前這一筆紀錄，不新增</td><td>不會</td></tr>
+      <tr><td><code>history.back()</code>／<code>forward()</code></td><td>等於按「上一頁」／「下一頁」</td><td>會（非同步）</td></tr>
+      <tr><td><code>history.state</code></td><td>讀目前這筆紀錄存的 state 物件（重新整理後還在）</td><td>—</td></tr>
+    </table>
+    <p><code>state</code> 是我們自己定的小物件，每筆紀錄各存一份。使用者按上一頁／下一頁時，瀏覽器觸發 <code>popstate</code> 事件，<code>event.state</code> 就是「移到的那一筆」的 state。我們看它決定畫面：</p>
+    <div class="flow">
+      <div class="box">紀錄 1<br><code>{ctView:'landing'}</code><br>首頁</div>
+      <div class="arrow">→</div>
+      <div class="box">紀錄 2<br><code>{ctView:'app'}</code><br>聊天</div>
+    </div>
+    <p class="muted">網址三個參數的第三個不傳（或傳目前網址），所以網址列一直是 <code>/</code>，只有 state 不同。不需要 react-router。</p>
+    <div class="warn"><b>重點：</b><code>pushState</code> 只是「記一筆」，不會改畫面；<code>popstate</code> 只是「通知你移到哪一筆」，畫面也要自己改。History API 和 React state 是兩件事，要自己對齊。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>為什麼這樣設計</h2>
+    <ul>
+      <li><b>不加路由套件</b>：整個 app 只有「首頁／聊天」這一個切換，引入 react-router 會牽動 <code>AuthGate</code>、OAuth 回呼網址和 nginx 設定，成本遠大於兩個 API 呼叫。</li>
+      <li><b>網址不變</b>：OAuth 回呼、<code>auth_error</code>、<code>openrouter</code> 參數都在 <code>/</code> 上處理，不改網址就不會影響它們。</li>
+      <li><b>App 不卸載，只隱藏</b>：回首頁時 <code>&lt;App&gt;</code> 留著（<code>hidden</code>），按「下一頁」或「開始使用」回來時，開著的對話、捲動位置、串流都還在。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>程式草稿</h2>
+    <p class="muted">以下是給 implementer 的方向，實際寫法以 commit 為準。</p>
+
+    <h3>① AuthGate：新增 <code>showLanding</code>，只對訪客生效</h3>
+    <pre><code><span class="cm">// frontend/src/components/AuthGate.jsx</span>
+const [showLanding, setShowLanding] = useState(false);
+
+<span class="cm">// 訪客進到聊天時，確保歷史裡是「首頁 → 聊天」兩筆</span>
+useEffect(() => {
+  if (!user?.is_guest) return;
+  const cur = history.state?.ctView;
+  if (cur === 'landing') {
+    setShowLanding(true);              <span class="cm">// 在首頁那筆上重新整理：留在首頁</span>
+  } else if (cur !== 'app') {
+    history.replaceState({ ctView: 'landing' }, '');  <span class="cm">// 第一次進來：目前這筆改成首頁</span>
+    history.pushState({ ctView: 'app' }, '');         <span class="cm">// 再疊一筆聊天</span>
+  }
+}, [user?.is_guest]);
+
+<span class="cm">// 上一頁／下一頁</span>
+useEffect(() => {
+  const onPop = (e) => {
+    if (!user?.is_guest) return;       <span class="cm">// 登入的使用者忽略</span>
+    setShowLanding(e.state?.ctView === 'landing');
+    setView('landing');                <span class="cm">// 順便關掉登入覆蓋層</span>
+  };
+  window.addEventListener('popstate', onPop);
+  return () => window.removeEventListener('popstate', onPop);
+}, [user?.is_guest]);</code></pre>
+
+    <h3>② 「開始使用」：已經是訪客就不再發試用請求</h3>
+    <pre><code>const startGuest = async () => {
+  if (user?.is_guest) {                <span class="cm">// 從聊天回到首頁後再按</span>
+    history.pushState({ ctView: 'app' }, '');
+    setShowLanding(false);
+    return;                            <span class="cm">// 不打 /auth/guest，不扣試用名額</span>
+  }
+  <span class="cm">// ……原本的 POST /auth/guest 流程</span>
+};</code></pre>
+    <p>第一次按「開始使用」時 user 還是 <code>null</code>，走原本流程；<code>refreshUser()</code> 拿到訪客後，①的 effect 會補上兩筆紀錄。</p>
+
+    <h3>③ 畫面：首頁蓋在 App 上面，App 只隱藏</h3>
+    <pre><code>&lt;div className={showLanding ? 'hidden' : undefined}&gt;
+  &lt;App ... onGoHome={() => history.back()} /&gt;
+&lt;/div&gt;
+{showLanding && &lt;LandingPage onStart={startGuest} onLogin={() => setView('login')} /&gt;}</code></pre>
+
+    <h3>④ 側欄「回首頁」：只給訪客，放在「隱私權說明」左邊</h3>
+    <pre><code><span class="cm">// frontend/src/components/Sidebar.jsx（帳號區底部那一列）</span>
+&lt;div className="flex gap-3 pl-7"&gt;
+  {user?.is_guest &amp;&amp; (
+    &lt;button type="button" onClick={onGoHome} className="text-xs text-gray-500 ... underline"&gt;回首頁&lt;/button&gt;
+  )}
+  &lt;a href="/privacy.html" ...&gt;隱私權說明&lt;/a&gt;
+&lt;/div&gt;</code></pre>
+    <p>按鈕呼叫 <code>history.back()</code> 而不是直接 <code>setShowLanding(true)</code>：這樣按完「回首頁」，瀏覽器的「下一頁」也能回到聊天，兩種操作走同一條路（<code>popstate</code>）。①保證了聊天那筆前面一定是首頁那筆。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>決策表</h2>
+    <table>
+      <tr><th>問題</th><th>決定</th><th>來源</th></tr>
+      <tr><td>誰能回首頁</td><td>只有訪客；登入的使用者沒有入口，<code>popstate</code> 也忽略</td><td>使用者，2026-11-18</td></tr>
+      <tr><td>入口位置</td><td>側欄底部「隱私權說明」左邊，同樣的小字底線樣式</td><td>使用者，2026-11-18</td></tr>
+      <tr><td>瀏覽器上一頁</td><td>要做，用 <code>pushState</code>／<code>popstate</code>，網址不變</td><td>使用者，2026-11-18</td></tr>
+      <tr><td>回首頁時 App</td><td>保持掛載、只隱藏，回來時對話還在</td><td>使用者，2026-11-18</td></tr>
+      <tr><td>回首頁後按「開始使用」</td><td>直接回聊天，不打 <code>/auth/guest</code></td><td>使用者，2026-11-18</td></tr>
+      <tr><td>在首頁那筆上重新整理</td><td>留在首頁（讀 <code>history.state</code>）</td><td>使用者，2026-11-18</td></tr>
+    </table>
+    <div class="warn"><b>已知小狀況：</b>訪客登入（OAuth 整頁跳轉）後，歷史裡還留著舊的首頁／聊天紀錄。登入的使用者按上一頁移到這些紀錄時，<code>popstate</code> 被忽略，畫面不變，要多按幾次才會離開網站。影響小，這次不處理。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>練習</h2>
+    <ol>
+      <li>在 DevTools Console 執行 <code>history.pushState({a:1}, '')</code>，再按瀏覽器上一頁。畫面有變嗎？網址有變嗎？</li>
+      <li>加上 <code>addEventListener('popstate', e =&gt; console.log(e.state))</code>，按上一頁、下一頁，看印出什麼。</li>
+      <li>為什麼①要先 <code>replaceState</code> 再 <code>pushState</code>，而不是只 <code>pushState</code> 一次？（提示：重新整理後直接進聊天的訪客，前面是什麼紀錄？）</li>
+      <li>如果「回首頁」直接寫 <code>setShowLanding(true)</code>，按完後瀏覽器的「下一頁」還能用嗎？</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>實作紀錄</h2>
+    <table>
+      <tr><th>項目</th><th>結果</th></tr>
+      <tr><td>commit</td><td><code>3e404f6</code>（分支 <code>feat/landing-back</code>），改 <code>AuthGate.jsx</code>、<code>App.jsx</code>、<code>Sidebar.jsx</code>，寫法同第 4 節草稿</td></tr>
+      <tr><td>指令驗收</td><td><code>npm run build</code> 成功；三個檔案 eslint 無錯誤；<code>npx playwright test e2e/chat.spec.js</code> 2 passed</td></tr>
+      <tr><td>瀏覽器清單</td><td>1280 與 375 寬用暫時的 Playwright 腳本（假 API）跑完 7 項全過；使用者在瀏覽器看過後同意 commit。觸控未測。</td></tr>
+    </table>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 2026-11-18</p>
+
+</div>
+</body>
+</html>
