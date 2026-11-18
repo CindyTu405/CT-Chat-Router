@@ -255,21 +255,13 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
 
   return (
     <div className="h-screen supports-[height:100dvh]:h-dvh flex flex-col bg-white text-gray-800 font-sans overflow-hidden">
-      {/* (L1-3) 頂列：logo、名稱、隱私權說明、登入 */}
+      {/* (L1-3) 頂列：logo、名稱、登入（(L1-10) 隱私權說明移到主對話底部說明列） */}
       <header className="flex items-center justify-between px-4 md:px-6 py-2.5 border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center gap-2">
           <img src="/favicon.svg" alt="" aria-hidden="true" className="w-7 h-7" />
           <span className="font-semibold text-gray-800">FluentBranch</span>
         </div>
         <div className="flex items-center gap-4">
-          <a
-            href="/privacy.html"
-            target="_blank"
-            rel="noopener"
-            className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2"
-          >
-            隱私權說明
-          </a>
           <button
             type="button"
             onClick={onLogin}
@@ -282,17 +274,19 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
 
       {/* (L1-3) 展示區：主對話＋右側分支面板；格線背景放在這一層 */}
       <div className="flex-1 min-h-0 flex flex-col md:flex-row bg-[#E8F1F5] bg-[linear-gradient(to_right,#d3e3eb_1px,transparent_1px),linear-gradient(to_bottom,#d3e3eb_1px,transparent_1px)] bg-[size:16px_16px]">
-        {/* (L1-6) 標語區：桌面（md 以上）是左側白底欄；手機維持在上方、透明疊在格線上。桌面三欄比例（視窗寬度）：標語 34%（md:w-[30%] lg:w-[34%]，上限 md:max-w-[600px]）／主對話吃剩下的／分支面板 28%（BranchPanel 的 defaultWidthPercent）。標語字級：md:text-4xl lg:text-5xl；欄內左右留白：md:px-10 lg:px-14。 */}
-        <section className="flex-shrink-0 px-4 pt-5 pb-2 text-center md:w-[30%] lg:w-[34%] md:max-w-[600px] md:px-10 lg:px-14 md:py-0 md:flex md:flex-col md:justify-center md:items-start md:text-left md:bg-white md:border-r md:border-gray-200">
+        {/* (L1-6) 標語區：桌面（md 以上）是左側白底欄（右緣漸層淡出到格線）；手機是上方白底、底緣漸層淡出到格線（bg-linear-to-b from-white from-60% to-transparent：from-60% 決定白色維持到區塊高度 60% 處，之後漸淡；調整 pb-6 可改淡出高度，改 from-60% 可改淡出起點）。桌面三欄比例（視窗寬度）：標語 34%（md:w-[30%] lg:w-[34%]，上限 md:max-w-[600px]）／主對話吃剩下的／分支面板 28%（BranchPanel 的 defaultWidthPercent）。標語字級：md:text-4xl lg:text-5xl；欄內左右留白：md:px-10 lg:px-14。 */}
+        {/* (L1-9) 手機：白底＋底部漸層淡出，pb-6 給淡出留空間。(L1-10) 桌面：md:bg-linear-to-r 改成往右淡出、md:from-75% 白色維持到欄寬 75%，不再有右側分隔線 */}
+        <section className="flex-shrink-0 px-4 pt-5 pb-6 text-center bg-linear-to-b from-white from-60% to-transparent md:w-[30%] lg:w-[34%] md:max-w-[600px] md:px-10 lg:px-14 md:py-0 md:flex md:flex-col md:justify-center md:items-start md:text-left md:bg-linear-to-r md:from-75%">
           <h1 className="text-xl md:text-4xl lg:text-5xl md:leading-[1.15] font-semibold tracking-tight text-gray-800">
             追問細節，<br className="hidden md:block" />不打斷主線
           </h1>
           <p className="mt-1 md:mt-5 text-sm md:text-base lg:text-lg md:leading-relaxed md:max-w-[20em] text-gray-500">選取 AI 回答裡的任何一段，開一條分支繼續問。</p>
+          {/* (L1-9) 手機隱藏標語區的開始按鈕（底部列仍有）；md:block 與原本在 flex 欄中的呈現一致 */}
           <button
             type="button"
             onClick={onStart}
             disabled={starting}
-            className="mt-3 md:mt-8 min-h-[44px] px-6 md:px-8 rounded-xl bg-[#51A8DD] hover:bg-[#3d97cf] text-white font-semibold shadow-sm cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-default"
+            className="hidden md:block mt-3 md:mt-8 min-h-[44px] px-6 md:px-8 rounded-xl bg-[#51A8DD] hover:bg-[#3d97cf] text-white font-semibold shadow-sm cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-default"
           >
             {starting ? '準備中…' : '開始使用'}
           </button>
@@ -300,8 +294,9 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
 
         <div className="flex-1 min-h-0 min-w-0 flex flex-col relative">
           {/* (L1-3) 示範列：位於標語區下方，透明疊在格線上 */}
-          <div className="flex items-center justify-between gap-3 px-4 md:px-6 pt-2 pb-1 text-xs text-gray-500 flex-shrink-0">
-            <span className="min-w-0 truncate">示範對話 · {article.topic}{'\u3000'}點虛線文字，或選取任何一段，試試開分支</span>
+          {/* (L1-9) 手機只顯示「換一篇」按鈕（靠右、隱藏左側說明文字）；md 以上維持左文字右按鈕 */}
+          <div className="flex items-center justify-end md:justify-between gap-3 px-4 md:px-6 pt-2 pb-1 text-xs text-gray-500 flex-shrink-0">
+            <span className="hidden md:block min-w-0 truncate">示範對話 · {article.topic}{'\u3000'}點虛線文字，或選取任何一段，試試開分支</span>
             <button
               type="button"
               onClick={nextArticle}
@@ -325,13 +320,25 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
           />
 
           {/* (L1-3) 主對話底部：取代原本輸入框的說明列 */}
-          <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-200 bg-white/80 text-sm text-gray-500 flex-shrink-0">
-            <span>這是示範。按「開始使用」就能輸入自己的問題。</span>
+          {/* (L1-11) 做成像輸入框的浮動圓角卡片：mx-* 左右內縮、mb-* 往上抬、rounded-2xl 圓角、shadow-sm 浮起感 */}
+          <div className="flex items-center justify-between gap-3 mx-3 md:mx-6 mb-3 md:mb-5 mt-1 pl-4 pr-2 py-2 rounded-2xl border border-gray-200 bg-white shadow-sm text-sm text-gray-500 flex-shrink-0">
+            {/* (L1-10) 隱私權說明接在句子後面，跟著句子換行，不擠壓「開始使用」按鈕 */}
+            <span>
+              這是示範。按「開始使用」就能輸入自己的問題。
+              <a
+                href="/privacy.html"
+                target="_blank"
+                rel="noopener"
+                className="ml-2 whitespace-nowrap text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2"
+              >
+                隱私權說明
+              </a>
+            </span>
             <button
               type="button"
               onClick={onStart}
               disabled={starting}
-              className="flex-shrink-0 min-h-[36px] px-4 rounded-lg bg-[#51A8DD] hover:bg-[#3d97cf] text-white text-sm font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-default"
+              className="flex-shrink-0 min-h-[36px] px-4 rounded-xl bg-[#51A8DD] hover:bg-[#3d97cf] text-white text-sm font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-default"
             >
               {starting ? '準備中…' : '開始使用'}
             </button>
