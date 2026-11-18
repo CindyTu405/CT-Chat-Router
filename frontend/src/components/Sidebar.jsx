@@ -293,6 +293,7 @@ function Sidebar({
   onCloseSidebar,
   onRequestLogin, // (G2-6) 訪客按「登入」時呼叫，由 AuthGate 顯示登入頁
   onUserChanged, // (G2-10) 連結／中斷 OpenRouter 後重新讀取 /auth/me
+  onGoHome, // (L1-12) 訪客按「回首頁」時呼叫（AuthGate 以 history.back() 回到首頁）
 }) {
   // P5a：時間軸分組跟著當前排序走（updated → last_activity，created → created_at）
   const timeGroups = useMemo(
@@ -538,14 +539,26 @@ function Sidebar({
         />
         </>
         )}
-        <a
-          href="/privacy.html"
-          target="_blank"
-          rel="noopener"
-          className="block pl-7 text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2"
-        >
-          隱私權說明
-        </a>
+        {/* (L1-12) 訪客才有「回首頁」，放在「隱私權說明」左邊；登入的使用者只有隱私權說明，外觀不變 */}
+        <div className="flex items-center gap-3 pl-7">
+          {user?.is_guest && (
+            <button
+              type="button"
+              onClick={onGoHome}
+              className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 cursor-pointer"
+            >
+              回首頁
+            </button>
+          )}
+          <a
+            href="/privacy.html"
+            target="_blank"
+            rel="noopener"
+            className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2"
+          >
+            隱私權說明
+          </a>
+        </div>
       </div>
     </aside>
   );
